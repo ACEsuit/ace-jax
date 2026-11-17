@@ -36,8 +36,8 @@ def _dense_logev(Phi, y, q, h, gamma, gidx, groups_n):
 
 
 def test_body_order_columns_layout():
-    from ace_jax.fit.ard import body_order_columns
-    from ace_jax.fit.inducing import GPConfig
+    from ace_jax.uq.ard import body_order_columns
+    from ace_jax.fit.gp.inducing import GPConfig
     meta = {"nnll": [[(1, 0)], [(1, 0), (1, 1)], [(1, 0), (1, 1), (2, 1)]]}
     g = GPConfig(r0=2.35, rcut=5.0, n_B=3, n_pair=2, NZ=2, C=1)
     col = body_order_columns(meta, g)
@@ -48,7 +48,7 @@ def test_body_order_columns_layout():
 def test_evidence_matches_dense_marginal_likelihood(tiny_linear_problem):
     """Differences of log p between two h equal those of the explicit Gaussian marginal likelihood
     N(y_w | 0, Phi_w Lambda^-1 Phi_w^T + diag(sigma_q^2)) (constants cancel)."""
-    from ace_jax.fit.ard import ARDEvidence, ard_statistics, body_order_columns
+    from ace_jax.uq.ard import ARDEvidence, ard_statistics, body_order_columns
     from ace_jax.fit.hypers import default_prior
     prob, ds = tiny_linear_problem
     theta = default_prior(2.35).mu
@@ -66,7 +66,7 @@ def test_evidence_matches_dense_marginal_likelihood(tiny_linear_problem):
 
 
 def test_gradient_matches_finite_differences(tiny_linear_problem):
-    from ace_jax.fit.ard import ARDEvidence, ard_statistics, body_order_columns
+    from ace_jax.uq.ard import ARDEvidence, ard_statistics, body_order_columns
     from ace_jax.fit.hypers import default_prior
     prob, ds = tiny_linear_problem
     theta = default_prior(2.35).mu
@@ -84,7 +84,7 @@ def test_gradient_matches_finite_differences(tiny_linear_problem):
 
 
 def test_joint_fit_beats_sequential_beats_start(tiny_linear_problem):
-    from ace_jax.fit.ard import ARDEvidence, ard_statistics, body_order_columns, fit_ard
+    from ace_jax.uq.ard import ARDEvidence, ard_statistics, body_order_columns, fit_ard
     from ace_jax.fit.hypers import default_prior
     prob, ds = tiny_linear_problem
     theta = default_prior(2.35).mu
@@ -108,12 +108,12 @@ def test_joint_fit_beats_sequential_beats_start(tiny_linear_problem):
 def test_posterior_variance_matches_blr_path_at_gamma_prior(tiny_linear_problem):
     """With a_k = log(1/sigma_c^2) for every group and sigma_q at theta, the ARD posterior is the
     existing BLR posterior: same mean, same row variances."""
-    from ace_jax.fit.ard import ARDEvidence, ard_posterior, ard_statistics, body_order_columns
+    from ace_jax.uq.ard import ARDEvidence, ard_posterior, ard_statistics, body_order_columns
     from ace_jax.fit.hypers import default_prior
-    from ace_jax.fit.objective import posterior
-    from ace_jax.fit.predict import _rows_mean_var
+    from ace_jax.fit.linear.objective import posterior
+    from ace_jax.fit.gp.predict import _rows_mean_var
     from ace_jax.fit.rows import linear_rows
-    from ace_jax.fit.stats import sufficient_statistics
+    from ace_jax.fit.linear.stats import sufficient_statistics
     prob, ds = tiny_linear_problem
     theta = default_prior(2.35).mu
     meta = {"nnll": [[None] * o for o in _orders(prob)], "n_B": prob.cfg.n_B, "n_pair": prob.cfg.n_pair,
@@ -131,7 +131,7 @@ def test_posterior_variance_matches_blr_path_at_gamma_prior(tiny_linear_problem)
 
 
 def test_posterior_save_load_float32(tiny_linear_problem, tmp_path):
-    from ace_jax.fit.ard import ARDEvidence, ARDPosterior, ard_posterior, ard_statistics, body_order_columns
+    from ace_jax.uq.ard import ARDEvidence, ARDPosterior, ard_posterior, ard_statistics, body_order_columns
     from ace_jax.fit.hypers import default_prior
     from ace_jax.fit.rows import linear_rows
     prob, ds = tiny_linear_problem
@@ -151,7 +151,7 @@ def test_posterior_save_load_float32(tiny_linear_problem, tmp_path):
 
 
 def test_laplace_reports_interior_psd(tiny_linear_problem):
-    from ace_jax.fit.ard import ARDEvidence, ard_statistics, body_order_columns, fit_ard, laplace_hypers
+    from ace_jax.uq.ard import ARDEvidence, ard_statistics, body_order_columns, fit_ard, laplace_hypers
     from ace_jax.fit.hypers import default_prior
     prob, ds = tiny_linear_problem
     theta = default_prior(2.35).mu
@@ -166,7 +166,7 @@ def test_laplace_reports_interior_psd(tiny_linear_problem):
 
 
 def test_fit_ard_info_reports_success_and_message(tiny_linear_problem):
-    from ace_jax.fit.ard import ARDEvidence, ard_statistics, body_order_columns, fit_ard
+    from ace_jax.uq.ard import ARDEvidence, ard_statistics, body_order_columns, fit_ard
     from ace_jax.fit.hypers import default_prior
     prob, ds = tiny_linear_problem
     theta = default_prior(2.35).mu
@@ -179,7 +179,7 @@ def test_fit_ard_info_reports_success_and_message(tiny_linear_problem):
 
 
 def test_ard_fit_warnings_flag_failure_and_bounds():
-    from ace_jax.fit.ard import _ard_fit_warnings
+    from ace_jax.uq.ard import _ard_fit_warnings
     ok = {"success": True, "message": "CONVERGENCE", "at_bound": [False, False]}
     assert _ard_fit_warnings("full", ok, ["a", "b"]) == []
     bad = {"success": False, "message": "ABNORMAL", "at_bound": [False, True]}
@@ -189,7 +189,7 @@ def test_ard_fit_warnings_flag_failure_and_bounds():
 
 @pytest.mark.parametrize("cond, warn", [(1e10, False), (1e15, True), (float("nan"), True), (float("inf"), True)])
 def test_ard_fit_warnings_flag_cond_above_max_or_non_finite(cond, warn):
-    from ace_jax.fit.ard import _ard_fit_warnings
+    from ace_jax.uq.ard import _ard_fit_warnings
     info = {"success": True, "message": "ok", "at_bound": [False], "cond_S": cond, "cond_max": 1e14}
     w = [s for s in _ard_fit_warnings("full", info, ["a"]) if "WARNING" in s]
     assert bool(w) == warn and all("cond(S)" in s for s in w)
@@ -198,9 +198,9 @@ def test_ard_fit_warnings_flag_cond_above_max_or_non_finite(cond, warn):
 def test_joint_statistics_are_linear_only_with_inducing_points(tiny_linear_problem):
     """Joint ARD statistics are the (L, L) linear Gram even for a hybrid problem with inducing
     points (M > 0): the residual columns never enter the ARD posterior."""
-    from ace_jax.fit.ard import ard_statistics
+    from ace_jax.uq.ard import ard_statistics
     from ace_jax.fit.hypers import default_prior
-    from ace_jax.fit.inducing import descriptor_scale, select_inducing, site_features
+    from ace_jax.fit.gp.inducing import descriptor_scale, select_inducing, site_features
     prob, ds = tiny_linear_problem
     theta = default_prior(2.35).mu
     with highest_precision():
@@ -218,7 +218,7 @@ def test_joint_statistics_are_linear_only_with_inducing_points(tiny_linear_probl
 
 def test_kappa_closed_form_minimises_nll():
     from scipy.optimize import minimize_scalar
-    from ace_jax.fit.ard import kappa_closed_form
+    from ace_jax.uq.ard import kappa_closed_form
     rng = np.random.default_rng(1)
     s2 = rng.uniform(0.01, 1.0, 500)
     e2 = (3.2 ** 2) * s2 / 3 * rng.chisquare(3, 500)          # true kappa 3.2
@@ -229,7 +229,7 @@ def test_kappa_closed_form_minimises_nll():
 
 
 def test_ard_stage_fits_kappa_and_refits_on_all_training_data(ard_map):
-    from ace_jax.fit.ard import predict_ard, run_ard_stage
+    from ace_jax.uq.ard import predict_ard, run_ard_stage
     cfg = _pipe_cfg().validate()
     d, b, theta = ard_map                                  # the shared MAP (stage options differ)
     with highest_precision():
@@ -256,7 +256,7 @@ def test_ard_stage_fits_kappa_and_refits_on_all_training_data(ard_map):
 
 
 def test_ard_stage_rejects_val_split_without_forces():
-    from ace_jax.fit.ard import run_ard_stage
+    from ace_jax.uq.ard import run_ard_stage
     from ace_jax.fit.pipeline import load_fit_data
     from conftest import FIXTURE_DIR
     from ace_jax.fit.pipeline.problem import build_problem
@@ -270,7 +270,7 @@ def test_ard_stage_rejects_val_split_without_forces():
 
 def test_ard_stage_logs_warning_on_failed_or_bounded_fit(monkeypatch):
     from conftest import FIXTURE_DIR
-    from ace_jax.fit import ard
+    from ace_jax.uq import ard
     from ace_jax.fit.hypers import default_prior
     from ace_jax.fit.pipeline import load_fit_data
     from ace_jax.fit.pipeline.problem import build_problem
@@ -301,7 +301,8 @@ def test_ard_stage_reuses_cached_full_statistics(monkeypatch, e0, solver):
     and the refit endpoints as e0='prefit' does.  solver 'qr' (issue #136): the cache is the QR objective's
     own QRStats (obj.lik.qr_stats), and the stage's passes are linear_qr_statistics calls."""
     from conftest import FIXTURE_DIR
-    from ace_jax.fit import ard, stats
+    from ace_jax.uq import ard
+    from ace_jax.fit.linear import stats
     from ace_jax.fit.pipeline import load_fit_data
     from ace_jax.fit.pipeline.mapfit import fit_map
     from ace_jax.fit.pipeline.objective import make_objective
@@ -389,7 +390,7 @@ def test_predict_ard_traces_the_chunked_rows_once(tiny_linear_problem, monkeypat
     fori_loop is retraced per batch with that batch's arrays baked in as constants: an XLA
     compile per batch (hours at the Cantor basis: ~200 prediction batches)."""
     from ace_jax.fit import rows
-    from ace_jax.fit.ard import ARDEvidence, ard_posterior, ard_statistics, body_order_columns, predict_ard
+    from ace_jax.uq.ard import ARDEvidence, ard_posterior, ard_statistics, body_order_columns, predict_ard
     from ace_jax.fit.hypers import default_prior
     prob, ds = tiny_linear_problem
     assert ds.n_batches >= 2
@@ -430,7 +431,7 @@ def test_a_repeated_ard_stage_compiles_nothing(ard_map, kw):
     identical run_ard_stage triggers no XLA compilation (each fresh jit closure compiled again, ~22
     programs and ~3,600 memory maps per stage, hitting vm.max_map_count after ~17 stages)."""
     import jax.monitoring
-    from ace_jax.fit.ard import run_ard_stage
+    from ace_jax.uq.ard import run_ard_stage
     cfg = _pipe_cfg(**kw).validate()
     d, b, theta = ard_map
     events = []
@@ -455,7 +456,7 @@ def test_ard_stage_kappa_is_refit_for_the_full_posterior(monkeypatch, ard_map):
     come from the subset model (honest), their s^2 from the full posterior (the one served).  The
     misspecification that kappa absorbs does not shrink on the refit while s^2 does, so a subset
     kappa would be ~sqrt(n_train / n_fit) too small (bench365: measured 1.105, predicted 1.118)."""
-    from ace_jax.fit import ard
+    from ace_jax.uq import ard
     calls = []
     orig = ard.kappa_closed_form
 
@@ -480,7 +481,7 @@ def test_ard_stage_kappa_is_refit_for_the_full_posterior(monkeypatch, ard_map):
 def test_sandwich_scores_sum_to_the_prior_force_at_the_mean(ard_setup):
     """Stationarity: sum_c g~_c = D^-1 Lambda c = lam_prior * x at the posterior mean, so the
     residuals, their whitening and the cluster sums are exactly the posterior's own."""
-    from ace_jax.fit.ard import sandwich_scores
+    from ace_jax.uq.ard import sandwich_scores
     with highest_precision():
         prob, ds, ev, h, post = ard_setup
         G = sandwich_scores(post, prob, ds, ev.sigmas(h))
@@ -494,7 +495,7 @@ def test_sandwich_scores_sum_to_the_prior_force_at_the_mean(ard_setup):
 def test_sandwich_variance_matches_dense_reference(ard_setup):
     """lam^2 ||Q^T phi~||^2 == lam^2 phi A^-1 M A^-1 phi^T with A and M built densely in the original
     coordinates (M = sum over configs of the outer product of the summed residual-weighted rows)."""
-    from ace_jax.fit.ard import sandwich_factor, sandwich_scores
+    from ace_jax.uq.ard import sandwich_factor, sandwich_scores
     with highest_precision():
         prob, ds, ev, h, post = ard_setup
         G = sandwich_scores(post, prob, ds, ev.sigmas(h))
@@ -513,7 +514,7 @@ def test_sandwich_variance_matches_dense_reference(ard_setup):
 
 
 def test_posterior_schema2_roundtrip_and_schema1_loads(ard_setup, tmp_path):
-    from ace_jax.fit.ard import ARDPosterior, sandwich_factor, sandwich_scores
+    from ace_jax.uq.ard import ARDPosterior, sandwich_factor, sandwich_scores
     from ace_jax.fit.rows import linear_rows
     with highest_precision():
         prob, ds, ev, h, post = ard_setup
@@ -540,7 +541,7 @@ def test_ard_stage_sandwich_variance_and_lam_rule(monkeypatch, ard_map):
     """The legacy ("mixed") ablation arm of #18: Q from the full refit's training residuals, the scalar
     lam by the kappa refit rule (held-out subset errors against the served posterior's own-cluster-out
     sandwich variance).  Schema 3 serves lam_rms[g], so F_var no longer scales with the scalar lam."""
-    from ace_jax.fit import ard
+    from ace_jax.uq import ard
     calls = []
     orig = ard.kappa_closed_form
     monkeypatch.setattr(ard, "kappa_closed_form", lambda e2, s2: calls.append((np.array(e2), np.array(s2))) or orig(e2, s2))
@@ -562,7 +563,7 @@ def test_ard_stage_sandwich_variance_and_lam_rule(monkeypatch, ard_map):
 
 
 def test_ard_stage_sandwich_in_sequential_mode(ard_map):
-    from ace_jax.fit import ard
+    from ace_jax.uq import ard
     theta_ls = lambda t: [float(getattr(t, f"log_sigma_{q}")) for q in "EFV"]
     cfg = _pipe_cfg(ard_variance="sandwich", ard_mode="sequential", _shape_variant="legacy").validate()
     d, b, theta = ard_map                                  # the shared MAP (stage options differ)
@@ -587,7 +588,7 @@ def test_sandwich_scores_columns_follow_config_order(ard_setup):
     """Column c of G~ is config c: the batched dataset (3 configs per batch) and one config per batch
     give the same score matrix column by column, so no cid permutation / cross-batch misassignment."""
     from ace_jax.eval import load
-    from ace_jax.fit.ard import sandwich_scores
+    from ace_jax.uq.ard import sandwich_scores
     from ace_jax.fit.data import build_dataset, load_configs
     from conftest import FIXTURE_DIR
     _, meta, z = load(FIXTURE_DIR / "si_fitted.npz")
@@ -611,7 +612,7 @@ def test_ard_stage_lam_leaves_out_each_held_out_atoms_own_cluster(monkeypatch, a
     new configuration has no such term, so keeping it biases lam low.  Brute force: per held-out
     config, zero its own column of Q (column idx[j] of the train order), recompute m^2 from that
     config's force rows alone, and lam = kappa_closed_form(e2, m2)."""
-    from ace_jax.fit import ard
+    from ace_jax.uq import ard
     from ace_jax.fit.data import build_dataset
     from ace_jax.fit.rows import linear_rows
     calls = []
@@ -650,7 +651,7 @@ def test_ard_stage_lam_leaves_out_each_held_out_atoms_own_cluster(monkeypatch, a
 def test_posterior_chol_and_sandwich_factor_stay_on_device(ard_setup):
     """chol (1.8 GB at L = 15k) and Q are float64 device arrays: var_rows / misspec_var_rows run once
     per batch and jnp.asarray of a numpy factor re-uploads it on every call."""
-    from ace_jax.fit.ard import sandwich_factor, sandwich_scores
+    from ace_jax.uq.ard import sandwich_factor, sandwich_scores
     with highest_precision():
         prob, ds, ev, h, post = ard_setup
         Q = sandwich_factor(post, sandwich_scores(post, prob, ds, ev.sigmas(h)))
@@ -659,16 +660,16 @@ def test_posterior_chol_and_sandwich_factor_stay_on_device(ard_setup):
 
 
 def _table(G=2):
-    from ace_jax.fit.conformal import GroupTable
+    from ace_jax.uq.conformal import GroupTable
     return GroupTable(alpha=0.1, n_min=20, lam_rms=np.array([2.0, 3.0]), q=np.array([5.0, 9.0]),
                       r=np.array([1.0, 1.2]), n_cfg=np.array([30, 30]), n_cfg_val=np.array([30, 30]),
                       n_cfg_cal=np.array([0, 0]), n_atoms=np.array([100, 100]), merged=[])
 
 
 def test_schema3_served_quantities(ard_setup, tmp_path):
-    from ace_jax.fit.ard import ARDPosterior
-    from ace_jax.fit.clusters import row_clusters
-    from ace_jax.fit.jackknife import press_scores, shape_factor
+    from ace_jax.uq.ard import ARDPosterior
+    from ace_jax.uq.clusters import row_clusters
+    from ace_jax.uq.jackknife import press_scores, shape_factor
     from ace_jax.fit.rows import linear_rows
     prob, ds, ev, h, post = ard_setup
     rc, K = row_clusters(ds, None, float("inf"))
@@ -695,7 +696,7 @@ def test_schema3_served_quantities(ard_setup, tmp_path):
 
 
 def test_schema2_serves_scalar(ard_setup, tmp_path):
-    from ace_jax.fit.ard import ARDPosterior, sandwich_factor, sandwich_scores
+    from ace_jax.uq.ard import ARDPosterior, sandwich_factor, sandwich_scores
     from ace_jax.fit.rows import linear_rows
     prob, ds, ev, h, post = ard_setup
     old = post._replace(Q=sandwich_factor(post, sandwich_scores(post, prob, ds, ev.sigmas(h))), lam=2.0)
@@ -715,7 +716,7 @@ def test_schema2_serves_scalar(ard_setup, tmp_path):
 
 def _stage(**kw):
     from conftest import FIXTURE_DIR
-    from ace_jax.fit import ard
+    from ace_jax.uq import ard
     from ace_jax.fit.pipeline import load_fit_data
     from ace_jax.fit.pipeline.mapfit import fit_map
     from ace_jax.fit.pipeline.objective import make_objective
@@ -733,7 +734,7 @@ def _stage(**kw):
 
 @pytest.mark.parametrize("shape", ["iso", "aniso"])
 def test_stage_default_press_shape_and_group_scales(shape):
-    from ace_jax.fit.conformal import chi3_ppf
+    from ace_jax.uq.conformal import chi3_ppf
     d, res, pred = _stage(ard_force_shape=shape)
     post, rep = res.posterior, res.report
     assert post.R is not None and post.group_table is not None and post.cal is not None
@@ -783,7 +784,7 @@ def test_stage_transfer_exponent_scales_the_none_run():
     N_fit2 = 10 evidence fit sits past ard_cond_max and its lam2 moves ~4% with the machine's roundoff.
     transfer_exponent's interior, clipped and degenerate cases are test_conformal's; "sqrt" is the
     factor > 1 scaling check."""
-    from ace_jax.fit.conformal import json_safe
+    from ace_jax.uq.conformal import json_safe
     import json
     runs = {m: _stage(ard_transfer=m, **_FINITE_Q)[1] for m in ("none", "exponent", "sqrt")}
     t0 = runs["none"].report["transfer"]
@@ -820,7 +821,7 @@ def test_stage_reports_and_warns_near_unit_leverage(monkeypatch):
     """A cluster with 1 - lambda_max(H_kk) < 1e-8 is counted in report["shape"]["n_lev_near1"] and
     logged: its PRESS score is accurate only to ~eps/(1 - lambda)."""
     from conftest import FIXTURE_DIR
-    from ace_jax.fit import ard, jackknife
+    from ace_jax.uq import ard, jackknife
     from ace_jax.fit.pipeline import load_fit_data
     from ace_jax.fit.pipeline.mapfit import fit_map
     from ace_jax.fit.pipeline.objective import make_objective
@@ -846,8 +847,8 @@ def test_stage_reports_and_warns_near_unit_leverage(monkeypatch):
 
 
 def test_stage_support_reference_and_roundtrip(tmp_path):
-    from ace_jax.fit.ard import ARDPosterior
-    from ace_jax.fit.support import support_check
+    from ace_jax.uq.ard import ARDPosterior
+    from ace_jax.uq.support import support_check
     d, res, _ = _stage(**_FINITE_Q)
     post = res.posterior
     zs = {int(z) for z in np.unique(np.asarray(d.ds_train.node_z)[np.asarray(d.ds_train.node_mask)])}
@@ -865,8 +866,8 @@ def test_stage_support_reference_and_roundtrip(tmp_path):
 
 
 def _p3(ard_setup, tab):
-    from ace_jax.fit.clusters import row_clusters
-    from ace_jax.fit.jackknife import press_scores, shape_factor
+    from ace_jax.uq.clusters import row_clusters
+    from ace_jax.uq.jackknife import press_scores, shape_factor
     from ace_jax.fit.rows import linear_rows
     prob, ds, ev, h, post = ard_setup
     rc, K = row_clusters(ds, None, float("inf"))
@@ -882,7 +883,7 @@ def test_infinite_q_served_as_inf_not_nan_and_json_roundtrip(ard_setup, tmp_path
     written with the bare JSON `Infinity` token still load."""
     import dataclasses
     import json
-    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.uq.ard import ARDPosterior
     from ace_jax.fit.pipeline.outputs import _write_ard
     tab = dataclasses.replace(_table(), q=np.array([5.0, np.inf]), r=np.array([1.0, np.inf]))
     p, Fr = _p3(ard_setup, tab)
@@ -930,7 +931,7 @@ def test_ard_stage_warns_when_coverage_unattainable():
     """I2(b): a T_val too small for the coverage (~6 configs x <= 8 groups at 0.99 needs 99) keeps q = inf
     and says so in the stage log."""
     from conftest import FIXTURE_DIR
-    from ace_jax.fit import ard
+    from ace_jax.uq import ard
     from ace_jax.fit.hypers import default_prior
     from ace_jax.fit.pipeline import load_fit_data
     from ace_jax.fit.pipeline.problem import build_problem
@@ -964,7 +965,7 @@ class _QuadEvidence:
 def test_newton_polish_converges_and_holds_bound_coordinates():
     """Projected Newton: a coordinate whose unconstrained optimum lies outside the box ends exactly on
     its bound, the others at the constrained optimum (to roundoff), in a few Newton steps."""
-    from ace_jax.fit.ard import newton_polish
+    from ace_jax.uq.ard import newton_polish
     rng = np.random.default_rng(0)
     B = rng.standard_normal((5, 5))
     A = B @ B.T + 0.1 * np.eye(5)
@@ -1001,7 +1002,7 @@ def test_newton_polish_tolerances_ignore_large_evidence_constants():
     """Large |F| (an additive constant -1e4, as the evidence's sum_q n_q log sigma_q terms): no
     tolerance scales with |F|, so 3000 starts 3e-3 from the box optimum (some on bounds) all converge
     to it, none stop early."""
-    from ace_jax.fit.ard import newton_polish
+    from ace_jax.uq.ard import newton_polish
     rng = np.random.default_rng(1)
     lo, hi = -np.ones(4), np.ones(4)
     for _ in range(3000):
@@ -1017,7 +1018,7 @@ def test_newton_polish_step_crossing_a_bound_is_resolved_on_it():
     """A free coordinate just inside its bound whose Newton step would cross it (strong coupling): the
     projected step pins it ON the bound and re-optimises the rest, reaching the constrained optimum in
     one step instead of a clipped, non-Newton direction."""
-    from ace_jax.fit.ard import newton_polish
+    from ace_jax.uq.ard import newton_polish
     A = np.array([[1.0, 0.95], [0.95, 1.0]])
     c = np.array([1.5, -0.5])                       # unconstrained optimum: x0 above hi = 1
     lo, hi = -np.ones(2), np.ones(2)
@@ -1042,7 +1043,7 @@ class _SaddleEvidence:
 def test_newton_polish_with_an_indefinite_free_hessian_still_descends():
     """Started where the free Hessian is indefinite (x0 = 0.1, F'' = -3.9), the modified Newton step
     descends (never uphill to the saddle at 0) and converges to the well at x0 = 1."""
-    from ace_jax.fit.ard import newton_polish
+    from ace_jax.uq.ard import newton_polish
     lo, hi = np.array([-2.0, -2.0]), np.array([2.0, 2.0])
     x, info = newton_polish(_SaddleEvidence(), np.array([0.1, 0.5]), lo, hi)
     assert info["converged"], info["message"]
@@ -1062,7 +1063,7 @@ def test_newton_polish_always_steps_from_a_resolvably_improvable_start():
     """Determinism hardening: from a start whose predicted decrease is resolvable, the polish takes at
     least one Newton step before testing the gradient criterion -- the (BLAS/layout-dependent) L-BFGS
     endpoint is never returned as it was."""
-    from ace_jax.fit.ard import newton_polish
+    from ace_jax.uq.ard import newton_polish
     A, c = np.diag([2.0, 1.0, 0.5]), np.array([0.3, -0.2, 0.1])
     ev = _NoisyGradQuad(A, c, off=-1e3)
     x0 = c + np.array([4e-3, -4e-3, 8e-3])          # |pg| <= 8e-3 < 10x the measured gradient noise
@@ -1096,7 +1097,7 @@ def test_newton_polish_stops_when_steps_gain_less_than_the_roundoff():
     """The gradient floor keeps the polish stepping while a gradient component is resolved, but a run of
     steps that each gain less than F's roundoff is a stall, not progress: stop after STALL_STEPS of them
     rather than run to maxiter (each step is a Hessian and a line search: tens of minutes at scale)."""
-    from ace_jax.fit.newton import STALL_STEPS, newton_polish
+    from ace_jax.fit.linear.newton import STALL_STEPS, newton_polish
     A, c = np.diag([1.0, 2.0]), np.array([0.1, -0.2])
     ev = _StallingQuad(A, c, off=-1e3)
     x0 = c + np.array([1e-3, 0.0])                  # |pg| 1e-3; the whole remaining gain is 5e-7 < amp
@@ -1112,7 +1113,7 @@ def stage_evidence():
     (better resolved than the 6-config tiny_linear_problem, whose sigma_E -> 4e-4 eV makes log p a
     residue of ~1e8 terms with a gradient resolved to only ~1e-4)."""
     from conftest import FIXTURE_DIR
-    from ace_jax.fit import ard
+    from ace_jax.uq import ard
     from ace_jax.fit.hypers import default_prior
     from ace_jax.fit.pipeline import load_fit_data
     from ace_jax.fit.pipeline.problem import build_problem
@@ -1132,7 +1133,7 @@ def test_fit_ard_converges_to_the_same_optimum_from_a_perturbed_start(stage_evid
     L-BFGS-B stopping point (L-BFGS-B alone stops ~3e-8 .. 3e-6 short of it here).  ard_cond_max 1e11
     keeps cond(S) where the gradient is resolved to ~1e-9; at the default 1e14 the endpoint is
     resolved only to the evidence's roundoff floor (~3e-8 on this problem, see fit_ard)."""
-    from ace_jax.fit.ard import _projected_gradient, fit_ard
+    from ace_jax.uq.ard import _projected_gradient, fit_ard
     ev, theta, _ = stage_evidence
     h0 = ev.h0(theta)
     with highest_precision():
@@ -1152,7 +1153,7 @@ def test_fit_ard_converges_to_the_same_optimum_from_a_perturbed_start(stage_evid
 def test_fit_ard_is_bitwise_deterministic(stage_evidence):
     """Two evidence fits of the same statistics give bit-identical h, posterior mean and Cholesky factor
     (no unseeded randomness, unordered iteration or run-dependent reduction anywhere in the fit)."""
-    from ace_jax.fit.ard import ard_posterior, fit_ard
+    from ace_jax.uq.ard import ard_posterior, fit_ard
     ev, theta, meta = stage_evidence
     with highest_precision():
         runs = []
@@ -1171,7 +1172,7 @@ def _qr_problem(n=80, L=12, decay=3.0, noise=1e-2, seed=0, wscale=1.0, rotate=Fa
     3 body-order groups of L/3 columns, true coefficients ~ wscale.  rotate: mix the scaled columns by a random
     orthogonal matrix, so the conditioning is not a column scaling (which a Cholesky resolves exactly).  Returns (per-quantity factors R_q, c_q,
     yy, n, Gram ARDStats, gamma, body)."""
-    from ace_jax.fit.ard import ARDStats
+    from ace_jax.uq.ard import ARDStats
     rng = np.random.default_rng(seed)
     w = wscale * rng.normal(size=L)
     U = np.linalg.qr(rng.normal(size=(L, L)))[0] if rotate else np.eye(L)
@@ -1188,8 +1189,8 @@ def _qr_problem(n=80, L=12, decay=3.0, noise=1e-2, seed=0, wscale=1.0, rotate=Fa
 
 
 def _qrs(Rs, cs, yy, nq, ls=None):
-    from ace_jax.fit.ard import ard_qr_stats
-    from ace_jax.fit.stats import QRStats
+    from ace_jax.uq.ard import ard_qr_stats
+    from ace_jax.fit.linear.stats import QRStats
     z = jnp.zeros(())
     qs = QRStats(*[jnp.asarray(r) for r in Rs], *[jnp.asarray(c) for c in cs], *[jnp.asarray(v) for v in yy],
                  *[jnp.asarray(v) for v in nq], z, z, z)
@@ -1200,7 +1201,7 @@ def _qrs(Rs, cs, yy, nq, ls=None):
 def test_qr_evidence_matches_cholesky_where_both_resolve(mode):
     """At a well-conditioned h the QR evidence equals the Cholesky one: value, gradient, Hessian, and the
     posterior (mean, factor C C^T = S)."""
-    from ace_jax.fit.ard import ARDEvidence, ARDStats, ard_posterior
+    from ace_jax.uq.ard import ARDEvidence, ARDStats, ard_posterior
     Rs, cs, yy, nq, st, gamma, body = _qr_problem(decay=1.0)
     ls = np.log([0.3, 0.05, 0.2])
     if mode == "sequential":
@@ -1229,7 +1230,7 @@ def test_qr_evidence_matches_cholesky_where_both_resolve(mode):
 def test_qr_evidence_resolves_where_the_cholesky_cannot():
     """At cond(S) ~ 1e22 the Cholesky evidence is lost (NaN, or wrong), the QR one agrees with an SVD reference:
     log p = 1/2 |z|^2 - sum log sigma_i([diag sqrt(lam); X]) + 1/2 sum log lam (sequential)."""
-    from ace_jax.fit.ard import ARDEvidence, ARDStats
+    from ace_jax.uq.ard import ARDEvidence, ARDStats
     Rs, cs, yy, nq, _, gamma, body = _qr_problem(decay=11.0, noise=1e-12, rotate=True)
     ls = np.zeros(3)
     evQ = ARDEvidence(_qrs(Rs, cs, yy, nq, ls), gamma, body)
@@ -1253,7 +1254,7 @@ def test_qr_evidence_resolves_where_the_cholesky_cannot():
 
 def test_qr_floor_is_decades_below_the_cholesky_floor():
     """The default floors: cond_max 1e14 (Cholesky) vs 1e22 (QR) -- 8 decades, ~18.4 nats."""
-    from ace_jax.fit.ard import ARDEvidence, ARDStats, default_cond_max
+    from ace_jax.uq.ard import ARDEvidence, ARDStats, default_cond_max
     Rs, cs, yy, nq, st, gamma, body = _qr_problem()
     ls = np.zeros(3)
     st = ARDStats((sum(st.G),), (sum(st.b),), np.zeros(3), np.zeros(3), ls)
@@ -1269,7 +1270,7 @@ def test_fit_ard_flags_a_degenerate_endpoint_and_the_qr_floor_clears_it():
     evidence keeps rising as the prior weakens.  With the Cholesky floor (cond_max 1e10, a_floor -17.3) every
     a_k ends on it with the gradient pointing below (degenerate, issue #136); the QR fit, from its floor at
     1e22 (-44.9), reaches an interior optimum (~-28) with more evidence."""
-    from ace_jax.fit.ard import ARDEvidence, ARDStats, fit_ard
+    from ace_jax.uq.ard import ARDEvidence, ARDStats, fit_ard
     Rs, cs, yy, nq, st, gamma, body = _qr_problem(n=100, decay=2.0, noise=1e-3, seed=1, wscale=1e6)
     ls = np.zeros(3)
     stC = ARDStats((sum(st.G),), (sum(st.b),), np.zeros(3), np.zeros(3), ls)
@@ -1284,7 +1285,7 @@ def test_fit_ard_flags_a_degenerate_endpoint_and_the_qr_floor_clears_it():
 
 def test_ard_fit_warnings_and_check_flag_a_degenerate_fit():
     from types import SimpleNamespace
-    from ace_jax.fit.ard import _ard_fit_warnings, _check_degenerate
+    from ace_jax.uq.ard import _ard_fit_warnings, _check_degenerate
     info = {"success": True, "message": "ok", "at_bound": [True, True], "cond_S": 1e14, "cond_max": 1e14,
             "degenerate": True, "a_floor": -6.05, "solver": "cholesky"}
     w = _ard_fit_warnings("full", info, ["a_2body", "a_3body"])

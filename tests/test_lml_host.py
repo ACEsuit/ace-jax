@@ -1,4 +1,4 @@
-"""The host evaluation of the linear arm's QR evidence (fit/lml_host.py): triangle-triangle tpqrt merges of
+"""The host evaluation of the linear arm's QR evidence (fit/linear/lml_host.py): triangle-triangle tpqrt merges of
 [diag(sqrt(lin)); R_q / sigma_q], one triangular inverse, and the gradient and exact Hessian in the four scales
 (sigma_c, sigma_E, sigma_F, sigma_V) written out, instead of a dense QR of the stacked (4L x L) matrix and
 autodiff through it.  It must be objective.log_marginal_likelihood_qr -- value, gradient, Hessian -- to
@@ -13,8 +13,8 @@ import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 
 from ace_jax.fit.hypers import Hypers, to_array  # noqa: E402
-from ace_jax.fit.objective import Problem, log_marginal_likelihood_qr  # noqa: E402
-from ace_jax.fit.stats import QRStats  # noqa: E402
+from ace_jax.fit.linear.objective import Problem, log_marginal_likelihood_qr  # noqa: E402
+from ace_jax.fit.linear.stats import QRStats  # noqa: E402
 
 
 def _theta(**kw):
@@ -58,7 +58,7 @@ THETAS = [_theta(), _theta(log_sigma_c=np.log(1e3), log_sigma_E=np.log(1e-4), lo
 @pytest.mark.parametrize("case", CASES, ids=["plain", "e0", "rho", "e0-rho"])
 @pytest.mark.parametrize("ti", range(len(THETAS)))
 def test_host_evidence_matches_dense_qr(case, ti):
-    from ace_jax.fit.lml_host import HostQREvidence
+    from ace_jax.fit.linear.lml_host import HostQREvidence
     qs, prob = _problem(**case)
     theta = THETAS[ti]
     a = to_array(theta)
@@ -79,7 +79,7 @@ def test_host_evidence_matches_dense_qr(case, ti):
 
 
 def test_host_evidence_vmaps_and_caches():
-    from ace_jax.fit.lml_host import HostQREvidence
+    from ace_jax.fit.linear.lml_host import HostQREvidence
     qs, prob = _problem()
     ev = HostQREvidence(qs, prob)
     A = jnp.stack([to_array(t) for t in THETAS])
@@ -94,9 +94,9 @@ def test_host_evidence_vmaps_and_caches():
 def test_make_lml_takes_the_host_form_on_cpu(monkeypatch):
     """make_lml's QR branch uses the host evaluation on the CPU backend (objective.QR_EVAL 'auto'), and the
     dense form with QR_EVAL 'dense'."""
-    from ace_jax.fit import objective
+    from ace_jax.fit.linear import objective
     qs, prob = _problem()
-    monkeypatch.setattr("ace_jax.fit.stats.linear_qr_statistics", lambda *a, **k: qs)
+    monkeypatch.setattr("ace_jax.fit.linear.stats.linear_qr_statistics", lambda *a, **k: qs)
     f = objective.make_lml(prob, None)
     assert f.qr_stats is qs and getattr(f, "host_evidence", None) is not None
     a = to_array(THETAS[0])
@@ -112,13 +112,13 @@ def test_host_evidence_on_si_fixture_at_the_stiff_point():
     from conftest import FIXTURE_DIR  # noqa: F401
     from ace_jax.eval import highest_precision, load
     from ace_jax.fit.data import build_dataset, load_configs
-    from ace_jax.fit.lml_host import HostQREvidence
-    from ace_jax.fit.stats import linear_qr_statistics
+    from ace_jax.fit.linear.lml_host import HostQREvidence
+    from ace_jax.fit.linear.stats import linear_qr_statistics
     if not T.XYZ.exists():
         pytest.skip("missing GP fixtures")
     model, meta, z = load(FIXTURE_DIR / "si_fitted.npz")
     ds = build_dataset(load_configs(T.XYZ, "dft_energy", "dft_force", "dft_virial")[:12], meta, np.asarray(z["E0"]), 4)
-    from ace_jax.fit.inducing import GPConfig
+    from ace_jax.fit.gp.inducing import GPConfig
     cfg = GPConfig(r0=2.35, rcut=float(meta["rcut"]), n_B=meta["n_B"], n_pair=meta["n_pair"],
                    NZ=len(meta["elements"]), C=4)
     with highest_precision():
@@ -143,7 +143,7 @@ def test_host_evidence_on_si_fixture_at_the_stiff_point():
 def test_shared_noise_form_matches_the_tied_dense_qr(case):
     """shared=True (the factors merged once; only sigma_F read) under the noise tie is the tied dense form:
     value, gradient and Hessian over the full 10-vector."""
-    from ace_jax.fit.lml_host import HostQREvidence
+    from ace_jax.fit.linear.lml_host import HostQREvidence
     from ace_jax.fit.paramset import tie_noise
     qs, prob = _problem(**case)
     ev = HostQREvidence(qs, prob, shared=True)
@@ -163,13 +163,13 @@ def test_shared_noise_form_matches_the_tied_dense_qr(case):
 
 def test_make_objective_passes_the_noise_tie(monkeypatch):
     """The pipeline asks make_lml for the shared form exactly when it ties the noise."""
-    from ace_jax.fit import objective
+    from ace_jax.fit.linear import objective
     seen = []
     real = objective.make_lml
     monkeypatch.setattr("ace_jax.fit.pipeline.objective.make_lml",
                         lambda *a, **k: seen.append(k.get("shared_noise")) or real(*a, **k))
     qs, prob = _problem()
-    monkeypatch.setattr("ace_jax.fit.stats.linear_qr_statistics", lambda *a, **k: qs)
+    monkeypatch.setattr("ace_jax.fit.linear.stats.linear_qr_statistics", lambda *a, **k: qs)
     from ace_jax.fit.pipeline.objective import make_objective
     from ace_jax.fit.hypers import default_prior
     prob = prob._replace(prior=default_prior(2.35))

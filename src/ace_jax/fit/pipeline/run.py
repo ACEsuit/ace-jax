@@ -2,9 +2,9 @@ import time
 from typing import NamedTuple
 
 from ...eval import highest_precision
-from ..progress import emit, stage as progress_stage
+from ..linear.progress import emit, stage as progress_stage
 from .mapfit import fit_map
-from ..predict import theta_key
+from ..gp.predict import theta_key
 from .objective import make_objective, release
 from .predict import predict_splits
 from .problem import build_problem
@@ -62,7 +62,7 @@ def fit(cfg, data, log=print, on_stage=None):
         tm = {**b.timings, **mf.timings, **pr.timings, "total": time.time() - T0}
         return FitResult(cfg, data, b, mf.theta, mf, rg, pr, tm, None, radial, readout)
     with highest_precision():
-        from ..stats import mpi_shards, qr_checkpoint
+        from ..linear.stats import mpi_shards, qr_checkpoint
         comm = None
         if cfg.mpi:
             from mpi4py import MPI
@@ -77,7 +77,7 @@ def fit(cfg, data, log=print, on_stage=None):
         with progress_stage("map"):
             mf = fit_map(cfg, data, b, obj, log=log)
             if cfg.row_check:                      # recorded in map_convergence.json
-                from ..rowcheck import row_rounding_check
+                from .rowcheck import row_rounding_check
                 chk = row_rounding_check(cfg, data, b, obj, mf, log=log)
                 mf = mf._replace(convergence={**(mf.convergence or {}), "row_rounding_check": chk})
         c = mf.convergence or {}
@@ -89,7 +89,7 @@ def fit(cfg, data, log=print, on_stage=None):
         stage("rungs", rg)
         ard = None
         if cfg.uq in ("ard", "ard-gp"):
-            from ..ard import run_ard_stage
+            from ...uq.ard import run_ard_stage
             # joint mode refits on the objective's cached linear statistics (not a second pass);
             # drop everything else the objective holds -- the LML, its jitted objective and the
             # stats closure (ARD predicts from its own posterior) -- then free their buffers.

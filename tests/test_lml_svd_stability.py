@@ -1,4 +1,4 @@
-"""Accuracy of the SVD evidence (fit/lml_svd.py) against the QR form and an exact (60-digit, mpmath) reference
+"""Accuracy of the SVD evidence (fit/linear/lml_svd.py) against the QR form and an exact (60-digit, mpmath) reference
 on adversarial synthetic problems: R with prescribed singular spectra down to 1e-17 and exact rank deficiency,
 prior scales gamma over 8 decades (the smoothness prior's range), and hyperparameters from near interpolation
 (sigma at its floor, a nearly flat prior) to prior-dominated.  Errors are measured relative to the terms the
@@ -13,9 +13,9 @@ import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 
 from ace_jax.fit.hypers import Hypers  # noqa: E402
-from ace_jax.fit.lml_svd import log_marginal_likelihood_svd, svd_statistics  # noqa: E402
-from ace_jax.fit.objective import log_marginal_likelihood_qr  # noqa: E402
-from ace_jax.fit.stats import QRStats  # noqa: E402
+from ace_jax.fit.linear.lml_svd import log_marginal_likelihood_svd, svd_statistics  # noqa: E402
+from ace_jax.fit.linear.objective import log_marginal_likelihood_qr  # noqa: E402
+from ace_jax.fit.linear.stats import QRStats  # noqa: E402
 
 mp = pytest.importorskip("mpmath")
 L = 36
@@ -97,7 +97,7 @@ def test_default_driver_is_accurate_or_caught_by_the_qr_check(spec, decades):
     it is not as accurate as the QR form, either the error is within SVD_CHECK_TOL (what the QR check at the MAP,
     mapfit._svd_guard, accepts by design: e.g. 1e-13 of y'y / sigma^2 on the rank-deficient spectrum) or its
     disagreement with the QR form exceeds SVD_CHECK_TOL, so the check rejects it and the MAP finishes on QR."""
-    from ace_jax.fit.lml_svd import SVD_DRIVER
+    from ace_jax.fit.linear.lml_svd import SVD_DRIVER
     from ace_jax.fit.pipeline.mapfit import SVD_CHECK_TOL
     assert SVD_DRIVER == "gesdd"
     qs, prob, R, c, gamma, yy = _problem(SPECTRA[spec], decades)

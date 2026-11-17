@@ -8,7 +8,7 @@ import numpy as np
 from ..data import build_dataset
 from ..metrics import summarise
 from ..report import format_rmse_table, rmse_by_type
-from ..predict import POPS_MEAN, PopsRidgePath, predict_fixed, predict_mixture, predict_readout, select_pops_ridge
+from ..gp.predict import POPS_MEAN, PopsRidgePath, predict_fixed, predict_mixture, predict_readout, select_pops_ridge
 
 VOIGT = [(0, 0), (1, 1), (2, 2), (1, 2), (0, 2), (0, 1)]
 
@@ -102,7 +102,7 @@ def predict_splits(cfg, d, b, stats, theta, draws, log=print, ard=None, readout=
         for split, cfgs, ds, base in splits:
             t = time.time()
             if cfg.uq in ("ard", "ard-gp"):
-                from ..ard import predict_ard, rows_fn_for
+                from ...uq.ard import predict_ard, rows_fn_for
                 pred = predict_ard(ard.posterior, prob, ds,
                                    rows_fn=rows_fn_for(prob, theta) if cfg.uq == "ard-gp" else None)
             elif readout is not None:        # solver lstsq: the fixed readout, zero variance

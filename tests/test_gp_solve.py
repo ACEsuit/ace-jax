@@ -13,11 +13,11 @@ import jax.numpy as jnp
 from ace_jax.eval import highest_precision, load
 from ace_jax.fit.data import build_dataset, load_configs
 from ace_jax.fit.hypers import Hypers, default_prior
-from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
-from ace_jax.fit.kernels import KernelSpec
-from ace_jax.fit.objective import Problem, posterior, combine, prior_precision
-from ace_jax.fit.stats import sufficient_statistics
-from ace_jax.fit.solve import solve_qr, solve_qr_streaming, lsqr, stacked_design, streamed_operators
+from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features
+from ace_jax.fit.gp.kernels import KernelSpec
+from ace_jax.fit.linear.objective import Problem, posterior, combine, prior_precision
+from ace_jax.fit.linear.stats import sufficient_statistics
+from ace_jax.fit.linear.solve import solve_qr, solve_qr_streaming, lsqr, stacked_design, streamed_operators
 
 XYZ = FIXTURE_DIR / "si_tiny_train.xyz"
 DESIGN = FIXTURE_DIR / "si_tiny_design.npz"
@@ -211,7 +211,7 @@ STIFF = dict(log_sigma_c=np.log(1e4), log_sigma_E=np.log(1e-4), log_sigma_F=np.l
 def test_posterior_qr_matches_cholesky(m0):
     """posterior_qr's (mu, L) is the Cholesky posterior's where that one is well conditioned:
     the same mean, and L L^T = G + Lambda."""
-    from ace_jax.fit.solve import posterior_qr
+    from ace_jax.fit.linear.solve import posterior_qr
     prob, ds = m0
     theta = _theta()
     with highest_precision():
@@ -229,7 +229,7 @@ def test_stable_posterior_falls_back_to_qr(m0, monkeypatch):
     route: a finite mean that solves (G + Lambda) mu = b, and a factor of G + Lambda.  The
     Cholesky is made to fail outright: at STIFF it is NaN on some machines and finite but wrong
     on others, so relying on it would leave the fallback untested on the latter."""
-    import ace_jax.fit.predict as P
+    import ace_jax.fit.gp.predict as P
     prob, ds = m0
     theta = _theta(**STIFF)
     monkeypatch.setattr(P, "posterior", lambda th, st, pr, *a: (jnp.full(pr.cfg.len_basis, jnp.nan),
@@ -247,7 +247,7 @@ def test_stable_posterior_falls_back_to_qr(m0, monkeypatch):
 
 def test_stable_posterior_keeps_cholesky(m0):
     """A well-conditioned problem keeps the Cholesky posterior, bit for bit (the goldens)."""
-    from ace_jax.fit.predict import stable_posterior
+    from ace_jax.fit.gp.predict import stable_posterior
     prob, ds = m0
     theta = _theta()
     st = sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds)

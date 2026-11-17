@@ -144,7 +144,7 @@ def test_ard_stage_with_a_big_cell_is_pack_invariant():
     """The tiny fixture plus one 1000-atom Si cell: the schema-3 ARD stage (PRESS sandwich, groups,
     T_fit/T_val split, shell table, row clusters) gives the same posterior with pack auto as with
     pack off -- every Dataset-order -> config-list mapping survives packing."""
-    from ace_jax.fit import ard
+    from ace_jax.uq import ard
     from ace_jax.fit.hypers import default_prior
     from ace_jax.fit.pipeline import load_fit_data
     from ace_jax.fit.pipeline.problem import build_problem

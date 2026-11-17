@@ -15,9 +15,9 @@ from conftest import FIXTURE_DIR  # noqa: E402
 from ace_jax.eval import load  # noqa: E402
 from ace_jax.fit.data import build_dataset, load_configs  # noqa: E402
 from ace_jax.fit.hypers import Hypers, default_prior  # noqa: E402
-from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features  # noqa: E402
-from ace_jax.fit.kernels import KernelSpec  # noqa: E402
-from ace_jax.fit.objective import Problem, prior_precision  # noqa: E402
+from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features  # noqa: E402
+from ace_jax.fit.gp.kernels import KernelSpec  # noqa: E402
+from ace_jax.fit.linear.objective import Problem, prior_precision  # noqa: E402
 from ace_jax.fit.rows import linear_rows  # noqa: E402
 
 XYZ = FIXTURE_DIR / "si_tiny_train.xyz"
@@ -171,7 +171,7 @@ def test_an_isolated_atom_in_training_still_fixes_its_species_e0(tmp_path):
 
 def test_patch_radial_npz_accepts_a_readout_with_joint_e0_columns(tmp_path):
     from ace_jax.basis.export import patch_radial_npz
-    from ace_jax.fit.radial_model import to_analytic
+    from ace_jax.fit.radial.model import to_analytic
     src = FIXTURE_DIR / "si_fitted.npz"
     model, meta, z = load(src)
     m, _ = to_analytic(model, 8)
@@ -203,7 +203,7 @@ def test_run_config_records_the_fitted_e0(joint, tmp_path):
 
 def test_patch_radial_npz_warns_when_it_drops_an_e0_shift(tmp_path):
     from ace_jax.basis.export import patch_radial_npz
-    from ace_jax.fit.radial_model import to_analytic
+    from ace_jax.fit.radial.model import to_analytic
     src = FIXTURE_DIR / "si_fitted.npz"
     model, meta, z = load(src)
     m, _ = to_analytic(model, 8)
@@ -226,7 +226,7 @@ def test_ard_evidence_gives_the_e0_columns_their_fixed_prior(m0, mode):
     """Joint E0 under ARD: the E0 columns are in the design with BLR's fixed precision e0_prec, outside
     the body-order groups (no a_k).  Brute force: the dense evidence and posterior mean with
     Lambda = diag(gamma^2 exp(a_body(j)), e0_prec)."""
-    from ace_jax.fit.ard import (E0_GROUP, ARDEvidence, ard_gamma, ard_posterior, ard_statistics,
+    from ace_jax.uq.ard import (E0_GROUP, ARDEvidence, ard_gamma, ard_posterior, ard_statistics,
                                  body_order_columns)
     from ace_jax.fit.rows import linear_rows
     model, meta, z, configs, ds, cfg = m0
@@ -275,7 +275,7 @@ def test_ard_force_quantities_ignore_the_e0_columns(m0):
     ACECalculator builds them) give the same shape V, forces_std and force variance as the full rows,
     on the R (PRESS), Q (sandwich) and kappa (Cholesky) paths."""
     from ace_jax.eval import highest_precision
-    from ace_jax.fit.ard import ARDEvidence, ard_gamma, ard_posterior, ard_statistics, body_order_columns
+    from ace_jax.uq.ard import ARDEvidence, ard_gamma, ard_posterior, ard_statistics, body_order_columns
     from ace_jax.fit.rows import linear_rows
     model, meta, z, configs, ds, cfg = m0
     prob = _ard_e0_problem(m0)
@@ -289,7 +289,7 @@ def test_ard_force_quantities_ignore_the_e0_columns(m0):
         assert not np.any(F[..., L0:])
         rng = np.random.default_rng(0)
         G = rng.standard_normal((prob.cfg.len_basis, 5))
-        from ace_jax.fit.ard import sandwich_factor
+        from ace_jax.uq.ard import sandwich_factor
         for p in (post, post._replace(R=jnp.asarray(G)), post._replace(Q=sandwich_factor(post, G))):
             np.testing.assert_allclose(p.atom_shape(F[:, :, :L0]), p.atom_shape(F), rtol=1e-12, atol=1e-300)
             np.testing.assert_allclose(p.forces_std(F[:, :, :L0]), p.forces_std(F), rtol=1e-12, atol=1e-300)
@@ -309,7 +309,7 @@ def test_ard_posterior_without_e0_columns_loads_as_before(ard_setup, tmp_path):
     prob, ds, ev, h, post = ard_setup
     assert "e0_cols" not in post.meta and post.n_e0 == 0
     post.save(tmp_path / "p.npz")
-    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.uq.ard import ARDPosterior
     p2 = ARDPosterior.load(tmp_path / "p.npz")
     assert p2.n_e0 == 0
     b = jax.tree.map(lambda a: a[0], ds)

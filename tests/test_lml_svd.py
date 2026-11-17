@@ -1,4 +1,4 @@
-"""The SVD form of the linear arm's evidence (`aj fit --lml-solver svd`, fit/lml_svd.py): with shared noise and the
+"""The SVD form of the linear arm's evidence (`aj fit --lml-solver svd`, fit/linear/lml_svd.py): with shared noise and the
 smoothness prior gamma^2 / sigma_c^2, one SVD of R D^-1 (R the merged QR factor, D = diag(gamma)) makes every LML
 evaluation and its gradient O(L).  It must equal the QR form (objective.log_marginal_likelihood_qr) to roundoff."""
 import jax
@@ -14,10 +14,10 @@ from conftest import FIXTURE_DIR  # noqa: E402
 from ace_jax.eval import highest_precision, load  # noqa: E402
 from ace_jax.fit.data import build_dataset, load_configs  # noqa: E402
 from ace_jax.fit.hypers import Hypers, default_prior  # noqa: E402
-from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features  # noqa: E402
-from ace_jax.fit.kernels import KernelSpec  # noqa: E402
-from ace_jax.fit.objective import Problem, log_marginal_likelihood_qr  # noqa: E402
-from ace_jax.fit.stats import linear_qr_statistics  # noqa: E402
+from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features  # noqa: E402
+from ace_jax.fit.gp.kernels import KernelSpec  # noqa: E402
+from ace_jax.fit.linear.objective import Problem, log_marginal_likelihood_qr  # noqa: E402
+from ace_jax.fit.linear.stats import linear_qr_statistics  # noqa: E402
 
 XYZ = FIXTURE_DIR / "si_tiny_train.xyz"
 
@@ -50,7 +50,7 @@ POINTS = [(np.log(0.05), np.log(1.0)), (np.log(0.3), np.log(10.0)), (np.log(1e-4
 
 @pytest.mark.parametrize("ls,lc", POINTS)
 def test_svd_lml_matches_qr(m0, ls, lc):
-    from ace_jax.fit.lml_svd import log_marginal_likelihood_svd, svd_statistics
+    from ace_jax.fit.linear.lml_svd import log_marginal_likelihood_svd, svd_statistics
     prob, qs = m0
     sv = svd_statistics(qs, prob)
     th = _theta(ls, lc)
@@ -66,7 +66,7 @@ def test_svd_lml_matches_qr(m0, ls, lc):
 @pytest.mark.parametrize("ls,lc", POINTS[:2])
 def test_svd_lml_gradient_matches_qr(m0, ls, lc):
     """d/d(log_sigma, log_sigma_c) under the tie: the only two coordinates the linear arm's evidence reads."""
-    from ace_jax.fit.lml_svd import log_marginal_likelihood_svd, svd_statistics
+    from ace_jax.fit.linear.lml_svd import log_marginal_likelihood_svd, svd_statistics
     prob, qs = m0
     sv = svd_statistics(qs, prob)
 
@@ -80,7 +80,7 @@ def test_svd_lml_gradient_matches_qr(m0, ls, lc):
 
 
 def test_svd_form_refuses_what_it_cannot_represent(m0):
-    from ace_jax.fit.lml_svd import svd_applicable
+    from ace_jax.fit.linear.lml_svd import svd_applicable
     prob, qs = m0
     assert svd_applicable(prob, qs, tied=True)[0]
     assert not svd_applicable(prob, qs, tied=False)[0]                               # independent noises
@@ -118,7 +118,7 @@ def test_svd_map_is_checked_against_qr_and_falls_back(tmp_path, capsys, monkeypa
     import warnings
 
     from ace_jax.cli import main
-    from ace_jax.fit import lml_svd
+    from ace_jax.fit.linear import lml_svd
     real = lml_svd.svd_statistics
     monkeypatch.setattr(lml_svd, "svd_statistics", lambda qs, prob, **kw: real(qs, prob, **kw)._replace(
         s2=real(qs, prob, **kw).s2 * 1.5))
@@ -172,7 +172,7 @@ def test_svd_map_on_near_interpolating_mace_labels(tmp_path):
 def test_svd_past_scipy_lp64_limit_uses_numpy_ilp64(m0, monkeypatch):
     """Past SciPy's 32-bit LAPACK indexing (L > 46,340: scipy.linalg.svd refuses a full U) the SVD goes through
     NumPy's ILP64 LAPACK; forced here by a small limit, the statistics and the evidence are the SciPy path's."""
-    from ace_jax.fit import lml_svd
+    from ace_jax.fit.linear import lml_svd
     prob, qs = m0
     assert lml_svd._numpy_ilp64()
     ref = lml_svd.svd_statistics(qs, prob, driver="gesdd")

@@ -93,7 +93,7 @@ def _check(o0, o1, Q, perm, dev, rtol_cov=COV_RTOL):
 def fit_dir(request, fitted, aniso_fit, tmp_path_factory):
     """(model path, posterior path).  The tiny fixture fit has too few calibration configs for a finite conformal q
     (forces_q would be inf, making its check vacuous), so q is overwritten with finite values in a copy of the posterior."""
-    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.uq.ard import ARDPosterior
     d = fitted if request.param == "iso" else aniso_fit
     post = ARDPosterior.load(d / "posterior.npz")
     tab = dict(post.group_table)
@@ -108,7 +108,7 @@ def fit_dir(request, fitted, aniso_fit, tmp_path_factory):
 @pytest.mark.parametrize("proper", [True, False], ids=["rotation", "reflection"])
 def test_served_uncertainty_is_equivariant(fit_dir, lean, proper):
     from ace_jax import ACECalculator
-    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.uq.ard import ARDPosterior
     model, pp = fit_dir
     post = ARDPosterior.load(pp)
     assert post.support is not None          # the default fit carries a support reference: check it, don't skip it
@@ -129,7 +129,7 @@ def test_served_uncertainty_is_equivariant(fit_dir, lean, proper):
 
 def test_served_uncertainty_permutation_covariant(fit_dir):
     from ace_jax import ACECalculator
-    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.uq.ard import ARDPosterior
     model, pp = fit_dir
     post = ARDPosterior.load(pp)
     calc = ACECalculator(str(model), posterior=str(pp))
@@ -146,7 +146,7 @@ def test_served_uncertainty_permutation_covariant(fit_dir):
 def test_aniso_conformal_score_is_invariant(aniso_fit):
     """s = sqrt(e^T M^-1 e) with M = V + eps tr V/3 I is unchanged when the label error e rotates with the structure."""
     from ace_jax import ACECalculator
-    from ace_jax.fit.ard import ARDPosterior, conformal_scores
+    from ace_jax.uq.ard import ARDPosterior, conformal_scores
     post = ARDPosterior.load(aniso_fit / "posterior.npz")
     assert post.force_shape == "aniso"
     calc = ACECalculator(str(aniso_fit / "model.npz"), posterior=str(aniso_fit / "posterior.npz"))

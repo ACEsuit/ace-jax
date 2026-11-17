@@ -30,11 +30,11 @@ from ace_jax.basis.prior import prior_diagonal
 from ace_jax.eval import load
 from ace_jax.fit.data import build_dataset, load_configs
 from ace_jax.fit.hypers import default_prior
-from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
-from ace_jax.fit.kernels import KernelSpec
-from ace_jax.fit.objective import Problem
-from ace_jax.fit.radial_learn import fit_radial, save_result
-from ace_jax.fit.radial_model import rnl_degrees, to_analytic
+from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features
+from ace_jax.fit.gp.kernels import KernelSpec
+from ace_jax.fit.linear.objective import Problem
+from ace_jax.fit.radial.learn import fit_radial, save_result
+from ace_jax.fit.radial.model import rnl_degrees, to_analytic
 
 p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 p.add_argument("--model", required=True); p.add_argument("--data", required=True)
@@ -69,7 +69,7 @@ out = pathlib.Path(a.out); out.mkdir(parents=True, exist_ok=True)
 model, meta, z = load(a.model)
 model, relres = to_analytic(model, a.n_q)
 if a.init_radials:
-    from ace_jax.fit.radial_model import with_radial
+    from ace_jax.fit.radial.model import with_radial
     W_init = jnp.asarray(np.load(a.init_radials))
     if W_init.shape != model.rnl_Wnlq.shape:
         raise SystemExit(f"--init-radials shape {W_init.shape} != model radials {model.rnl_Wnlq.shape} at --n-q {a.n_q}")

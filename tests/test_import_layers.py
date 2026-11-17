@@ -24,11 +24,9 @@ LAYERS = [
       ("spec", "coupling", "prior", "export", "embedding", "radial_init", "radial_ace1")],
     *[(f"eval.{m}", FRAMEWORK, None) for m in
       ("harmonics", "radial", "splinify", "nlist", "aa_dag", "product", "io")],
-    *[(f"fit.{m}", LINEAR, None) for m in
-      ("stats", "solve", "objective", "lml_host", "lml_svd", "hostcache", "prior_root", "block_lbfgs",
-       "newton", "multistart", "varpro", "sharding", "progress")],
-    *[(f"fit.{m}", UQ, None) for m in
-      ("ard", "jackknife", "conformal", "pops", "support", "loo", "clusters")],
+    ("_moved", FRAMEWORK, None),
+    ("fit.linear", LINEAR, None), ("fit.linear.*", LINEAR, None),
+    ("uq", UQ, None), ("uq.*", UQ, None),
     ("operators", APP, "operators"), ("operators.*", APP, "operators"),
     ("ham", APP, "operators"), ("ham.*", APP, "operators"),
     ("", FRONT, None), ("cli", FRONT, None), ("runfile", FRONT, None),
@@ -42,16 +40,17 @@ ALLOWED = {
     ("eval.io", "eval.edge_model"): 3, ("eval.io", "eval.model"): 3, ("eval.io", "eval.pace_model"): 3,
     ("eval.splinify", "eval.model"): 3, ("eval.splinify", "eval.pace_model"): 3,
     # the linear fit knows the E/F/V rows, the kernel and the hyperparameter vector
-    ("fit.stats", "fit.rows"): 4, ("fit.stats", "fit.pops"): 4, ("fit.stats", "eval.api"): 4,
-    ("fit.objective", "fit.hypers"): 4, ("fit.objective", "fit.kernels"): 4, ("fit.objective", "fit.loo"): 4,
-    ("fit.hostcache", "fit.hypers"): 4, ("fit.hostcache", "fit.rows"): 4,
-    ("fit.solve", "fit.kernels"): 4, ("fit.solve", "fit.rows"): 4,
-    ("fit.prior_root", "fit.ard"): 4, ("fit.prior_root", "fit.kernels"): 4,
-    ("fit.block_lbfgs", "fit.radial_learn"): 4,
+    ("fit.linear.stats", "fit.rows"): 4, ("fit.linear.stats", "uq.pops"): 4, ("fit.linear.stats", "eval.api"): 4,
+    ("fit.linear.objective", "fit.hypers"): 4, ("fit.linear.objective", "fit.gp.kernels"): 4,
+    ("fit.linear.objective", "uq.loo"): 4,
+    ("fit.linear.hostcache", "fit.hypers"): 4, ("fit.linear.hostcache", "fit.rows"): 4,
+    ("fit.linear.solve", "fit.gp.kernels"): 4, ("fit.linear.solve", "fit.rows"): 4,
+    ("fit.linear.prior_root", "uq.ard"): 4, ("fit.linear.prior_root", "fit.gp.kernels"): 4,
+    ("fit.linear.block_lbfgs", "fit.radial.learn"): 4,
     # UQ is written against energies and forces
-    ("fit.ard", "fit.data"): 4, ("fit.ard", "fit.hypers"): 4, ("fit.ard", "fit.inducing"): 4,
-    ("fit.ard", "fit.predict"): 4, ("fit.ard", "fit.rows"): 4,
-    ("fit.jackknife", "fit.rows"): 4, ("fit.loo", "fit.rows"): 4,
+    ("uq.ard", "fit.data"): 4, ("uq.ard", "fit.hypers"): 4, ("uq.ard", "fit.gp.inducing"): 4,
+    ("uq.ard", "fit.gp.predict"): 4, ("uq.ard", "fit.rows"): 4,
+    ("uq.jackknife", "fit.rows"): 4, ("uq.loo", "fit.rows"): 4,
 }
 
 
@@ -65,7 +64,18 @@ def _modules(root):
     return out
 
 
-MODS = _modules(SRC)
+def _stub_target(path):
+    """The new dotted module of a moved-module stub (`__getattr__ = moved(__name__, "ace_jax.x")`), else None."""
+    for n in ast.parse(path.read_text()).body:
+        if (isinstance(n, ast.Assign) and isinstance(n.value, ast.Call) and getattr(n.value.func, "id", "") == "moved"
+                and [getattr(t, "id", "") for t in n.targets] == ["__getattr__"]):
+            return n.value.args[1].value[8:]
+    return None
+
+
+ALL = _modules(SRC)
+STUBS = {m: t for m, (p, _) in ALL.items() if (t := _stub_target(p))}
+MODS = {m: v for m, v in ALL.items() if m not in STUBS}      # the layering and the bench check see no stub
 
 
 def _resolve(name):
@@ -131,6 +141,36 @@ def test_no_upward_imports():
     assert not fixed, f"edges that no longer exist: remove them from ALLOWED: {fixed}"
 
 
+def test_stubs_point_at_modules_and_nothing_here_uses_them():
+    """A stub names a module that exists; `src`, `tests` and `bench` import the new path (so the stubs
+    can be deleted without a search)."""
+    assert STUBS and all(t in MODS for t in STUBS.values()), {m: t for m, t in STUBS.items() if t not in MODS}
+    users = []
+    for d in ("src", "tests", "bench", "docs/user"):
+        for p in sorted((ROOT / d).rglob("*.py")):
+            if p == pathlib.Path(__file__) or ".venv" in p.parts:
+                continue
+            users += [(p.relative_to(ROOT).as_posix(), n.lineno, s) for n in ast.walk(ast.parse(p.read_text()))
+                      if isinstance(n, ast.Import | ast.ImportFrom)
+                      for s in STUBS if f"ace_jax.{s}" in {getattr(n, "module", None), *(a.name for a in n.names)}
+                      or (isinstance(n, ast.ImportFrom) and n.module and any(f"{n.module}.{a.name}" == f"ace_jax.{s}" for a in n.names))]
+    assert not users, users
+
+
+def test_stub_warns_and_serves_public_names_only():
+    import importlib
+
+    import pytest
+    for old, new in sorted(STUBS.items()):
+        mod = importlib.import_module(f"ace_jax.{new}")
+        name = next(n for n in sorted(vars(mod)) if not n.startswith("_"))
+        with pytest.warns(DeprecationWarning, match=f"ace_jax.{old} moved to ace_jax.{new}"):
+            assert getattr(importlib.import_module(f"ace_jax.{old}"), name) is getattr(mod, name)
+    old = next(iter(STUBS))
+    with pytest.raises(AttributeError):
+        _ = importlib.import_module(f"ace_jax.{old}")._private
+
+
 # ---- bench: every ace_jax import names something that exists ------------------------------------
 
 def _defined(mod, seen=()):
@@ -178,7 +218,7 @@ def _has(mod, attr):
 
 
 def _module_of(dotted):
-    """'ace_jax.fit.stats' -> 'fit.stats' when that is a module, else None."""
+    """'ace_jax.fit.rows' -> 'fit.rows' when that is a module, else None."""
     if dotted != "ace_jax" and not dotted.startswith("ace_jax."):
         return None
     m = dotted[8:]

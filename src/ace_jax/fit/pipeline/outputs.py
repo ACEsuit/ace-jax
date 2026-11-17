@@ -42,7 +42,7 @@ def _write_stage(out, name, payload):
 def _write_ard(out, ard):
     """posterior.npz + ard.json of an ARDResult (the checkpoint and write_outputs alike)."""
     ard.posterior.save(out / "posterior.npz")
-    from ..conformal import json_safe
+    from ...uq.conformal import json_safe
     _dump(out / "ard.json", json_safe(ard.report))      # strict JSON: an infinite q is written "inf"
 
 

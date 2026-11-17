@@ -11,11 +11,11 @@ import jax.numpy as jnp
 from ace_jax.eval import highest_precision, load
 from ace_jax.fit.data import build_dataset, load_configs
 from ace_jax.fit.hypers import Hypers, default_prior, to_array
-from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
-from ace_jax.fit.kernels import KernelSpec
+from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features
+from ace_jax.fit.gp.kernels import KernelSpec
 from ace_jax.fit.metrics import coverage, crps_gaussian, sigma_ratio, spearman, summarise
-from ace_jax.fit.objective import Problem
-from ace_jax.fit.predict import predict_fixed, predict_mixture
+from ace_jax.fit.linear.objective import Problem
+from ace_jax.fit.gp.predict import predict_fixed, predict_mixture
 
 XYZ = FIXTURE_DIR / "si_tiny_train.xyz"
 pytestmark = pytest.mark.skipif(not XYZ.exists(), reason="missing si_tiny_train.xyz")
@@ -137,7 +137,7 @@ def test_force_virial_dtc_is_derivative_of_energy(fitted):
     position/strain derivative of E_var (self-consistent predictive).  Checked
     against finite differences of _dtc_D on the cosine-SE kernel."""
     from ace_jax.fit.data import flat_edges
-    from ace_jax.fit.predict import _dtc_D, _dtc_deriv_residual, _dtc_energy_residual
+    from ace_jax.fit.gp.predict import _dtc_D, _dtc_deriv_residual, _dtc_energy_residual
     from ace_jax.fit.rows import linear_rows
     prob, train, test, theta, configs, E0 = fitted
     batch = jax.tree.map(lambda a: a[0], train)
@@ -180,7 +180,7 @@ def test_deriv_dtc_memory_not_cubic(fitted):
     (3 Ncap velocities x Ncap^2 pairs x d) is waste -- it made an 8-config
     si_tiny predict need hundreds of GB.  Same configs, 3x the batch: the temp
     may grow like the energy DTC's own Ncap^2 Gram, not like Ncap^3."""
-    from ace_jax.fit.predict import _dtc_deriv_residual
+    from ace_jax.fit.gp.predict import _dtc_deriv_residual
     prob, train, test, theta, configs, E0 = fitted
     meta = load(FIXTURE_DIR / "si_fitted.npz")[1]
     f = jax.jit(lambda th, b: _dtc_deriv_residual(th, prob, b))
@@ -244,7 +244,7 @@ def test_pops_requires_linear_arm(fitted):
 def test_deriv_dtc_requires_cosine(fitted):
     """matern32 is not twice differentiable at coincidence (Ruling R30); the
     derivative-DTC must refuse it rather than emit untrustworthy force UQ."""
-    from ace_jax.fit.predict import _dtc_deriv_residual
+    from ace_jax.fit.gp.predict import _dtc_deriv_residual
     prob, train, test, theta, configs, E0 = fitted
     prob_m = prob._replace(spec=KernelSpec("matern32", True, prob.cfg.D))
     batch = jax.tree.map(lambda a: a[0], train)

@@ -21,7 +21,7 @@ from ace_jax.eval.edge_model import EdgeSiteModel
 from ace_jax.eval.model import _rnl_owner, highest_precision, lean, lean_keep_basis, prune_columns
 from ace_jax.eval.nlist import dense_from_sparse, sparse_graph
 from ace_jax.eval.splinify import to_spline
-from ace_jax.fit.radial_model import to_analytic
+from ace_jax.fit.radial.model import to_analytic
 from test_lean import _analytic_pair, _efv, _structure
 
 ROOT = pathlib.Path(__file__).parent.parent
@@ -191,11 +191,11 @@ def test_real_learned_radial_keeps_the_pattern():
 
     from ace_jax.fit.data import build_dataset, load_configs
     from ace_jax.fit.hypers import default_prior
-    from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
-    from ace_jax.fit.kernels import KernelSpec
-    from ace_jax.fit.objective import Problem
-    from ace_jax.fit.radial_learn import learn_radial
-    from ace_jax.fit.radial_model import with_radial
+    from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features
+    from ace_jax.fit.gp.kernels import KernelSpec
+    from ace_jax.fit.linear.objective import Problem
+    from ace_jax.fit.radial.learn import learn_radial
+    from ace_jax.fit.radial.model import with_radial
     spline, meta, z = load(str(SIGE))
     model, _ = to_analytic(spline, N_Q)
     configs = load_configs(XYZ, "dft_energy", "dft_force", "dft_virial")[:6]
@@ -797,7 +797,7 @@ def test_auto_never_splines_the_pair_radial():
 
 
 def test_learned_flag_is_set_by_with_radial_not_by_conversion():
-    from ace_jax.fit.radial_model import widen_radial, with_radial
+    from ace_jax.fit.radial.model import widen_radial, with_radial
     m, meta, _ = load(str(SIGE))
     a, _ = to_analytic(m, N_Q)
     assert not a.radial_learned                            # a projection of a table, not learned
@@ -812,8 +812,8 @@ def test_learned_flag_round_trips(tmp_path):
     meta_json and load reads it; old files default to False, and
     mark_radial_learned marks one."""
     from ace_jax.basis.export import mark_radial_learned, patch_radial_npz
-    from ace_jax.fit.radial_learn import save_result
-    from ace_jax.fit.radial_model import with_radial
+    from ace_jax.fit.radial.learn import save_result
+    from ace_jax.fit.radial.model import with_radial
     m, meta, _ = load(str(SIGE))
     assert not m.radial_learned and "radial_learned" not in meta          # an old file
     a, _ = to_analytic(m, N_Q)

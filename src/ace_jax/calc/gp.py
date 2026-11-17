@@ -13,9 +13,9 @@ from ase.calculators.calculator import Calculator, all_changes
 from ..eval import sparse_graph
 from ..fit.data import Config, build_dataset
 from ..fit.hypers import from_array
-from ..fit.objective import posterior
-from ..fit.predict import _e0_offset, _predict_fn
-from ..fit.stats import sufficient_statistics
+from ..fit.linear.objective import posterior
+from ..fit.gp.predict import _e0_offset, _predict_fn
+from ..fit.linear.stats import sufficient_statistics
 
 
 # Neighbour slots are padded to a quarter-octave bucket, round(2^(j/4)) (at least 8),
@@ -76,7 +76,7 @@ class GPCalculator(Calculator):
         self._predict = _predict_fn(fitted.prob, True, self.deriv_dtc and self.posterior is None)
 
     def _attach_posterior(self, fitted, path):
-        from ..fit.ard import ARDPosterior, rows_fn_for
+        from ..uq.ard import ARDPosterior, rows_fn_for
         post = ARDPosterior.load(path)
         if post.prior_root.M == 0:
             raise ValueError(f"posterior {path} is a linear --uq ard posterior: serve it with "

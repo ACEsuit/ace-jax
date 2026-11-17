@@ -16,9 +16,9 @@ def _meta(prob):
 
 @pytest.fixture
 def gp_ev(tiny_gp_problem):
-    from ace_jax.fit.ard import (ARDEvidence, ard_gamma, ard_statistics, body_order_columns,
+    from ace_jax.uq.ard import (ARDEvidence, ard_gamma, ard_statistics, body_order_columns,
                                  gp_body_columns)
-    from ace_jax.fit.prior_root import prior_root
+    from ace_jax.fit.linear.prior_root import prior_root
     prob, ds, theta = tiny_gp_problem
     M = prob.ind.XM.shape[0]
     with highest_precision():
@@ -64,8 +64,8 @@ def _obs_space_reference(prob, ds, theta):
     """(LML, posterior mean) of the hybrid model at theta from the observation-space covariance
     C~ = Psi Lambda^-1 Psi^T + I (Lambda = blkdiag(Gamma^2/sigma_c^2, K_MM)): independent of the
     weight-space code, and well-conditioned (the identity), unlike G + Lambda on this fixture."""
-    from ace_jax.fit.kernels import K_MM
-    from ace_jax.fit.stats import sufficient_statistics
+    from ace_jax.fit.gp.kernels import K_MM
+    from ace_jax.fit.linear.stats import sufficient_statistics
     sig = np.exp([float(getattr(theta, f"log_sigma_{q}")) for q in "EFV"])
     Psi, y, _ = _gp_dense_rows(prob, ds, theta, sig)
     ind = prob.ind
@@ -102,7 +102,7 @@ def test_evidence_at_h0_is_the_gp_lml(gp_ev):
 def test_posterior_mean_at_h0_is_the_gp_map_mean(gp_ev):
     """The linear coefficients to 1e-6; the inducing weights through what they predict (Psi mean): on their
     own they are only as determined as K_MM is conditioned (cond 7e8 here), in both the reference and S."""
-    from ace_jax.fit.ard import ard_posterior
+    from ace_jax.uq.ard import ard_posterior
     prob, ds, theta, ev = gp_ev
     L = prob.cfg.len_basis
     with highest_precision():
@@ -125,7 +125,7 @@ def test_gp_evidence_gradient_matches_finite_differences(gp_ev):
 
 
 def test_gp_posterior_save_load_roundtrip(gp_ev, tmp_path):
-    from ace_jax.fit.ard import ARDPosterior, ard_posterior
+    from ace_jax.uq.ard import ARDPosterior, ard_posterior
     prob, _, theta, ev = gp_ev
     post = ard_posterior(ev, ev.h0(theta), 1.0, _meta(prob), theta=theta)
     post.save(tmp_path / "p.npz", dtype=np.float64)
@@ -161,7 +161,7 @@ def _row_cluster_labels(ds, rc, sig):
 
 @pytest.fixture
 def gp_post(gp_ev):
-    from ace_jax.fit.ard import ard_posterior
+    from ace_jax.uq.ard import ard_posterior
     prob, ds, theta, ev = gp_ev
     h = ev.h0(theta)
     with highest_precision():
@@ -174,9 +174,9 @@ def test_gp_press_equals_exact_deletion(gp_post, ell):
     """c - c_(-k) = A^-1 g~_k for every cluster (whole configurations, and spatial blocks), h fixed, over
     the joint design: the spec's PRESS/DFBETA identity, compared through the fitted values Psi (c - c_(-k))
     (the inducing weights alone are only as determined as cond(K_MM) allows; see the mean test)."""
-    from ace_jax.fit.ard import rows_fn_for
-    from ace_jax.fit.clusters import row_clusters
-    from ace_jax.fit.jackknife import press_scores
+    from ace_jax.uq.ard import rows_fn_for
+    from ace_jax.uq.clusters import row_clusters
+    from ace_jax.uq.jackknife import press_scores
     prob, ds, theta, ev, h, post = gp_post
     sig = ev.sigmas(h)
     Psi, y, _ = _gp_dense_rows(prob, ds, theta, sig)
@@ -203,9 +203,9 @@ def test_gp_press_equals_exact_deletion(gp_post, ell):
 
 
 def test_gp_push_through_matches_exact(gp_post):
-    from ace_jax.fit.ard import rows_fn_for
-    from ace_jax.fit.clusters import row_clusters
-    from ace_jax.fit.jackknife import press_scores
+    from ace_jax.uq.ard import rows_fn_for
+    from ace_jax.uq.clusters import row_clusters
+    from ace_jax.uq.jackknife import press_scores
     prob, ds, theta, ev, h, post = gp_post
     rc, K = row_clusters(ds, None, float("inf"))
     f = rows_fn_for(prob, theta)
@@ -218,9 +218,9 @@ def test_gp_push_through_matches_exact(gp_post):
 def test_ard_gp_shape_is_rotation_equivariant(gp_post):
     """V(R x) = R V(x) R^T for the PRESS shape over the joint rows (Review Focus 5)."""
     from scipy.spatial.transform import Rotation
-    from ace_jax.fit.ard import rows_fn_for
-    from ace_jax.fit.clusters import row_clusters
-    from ace_jax.fit.jackknife import press_scores, shape_factor
+    from ace_jax.uq.ard import rows_fn_for
+    from ace_jax.uq.clusters import row_clusters
+    from ace_jax.uq.jackknife import press_scores, shape_factor
     prob, ds, theta, ev, h, post = gp_post
     rc, K = row_clusters(ds, None, float("inf"))
     f = rows_fn_for(prob, theta)
@@ -243,7 +243,7 @@ def _gp_pipe_cfg(**kw):
 
 def _gp_stage(**kw):
     from conftest import FIXTURE_DIR
-    from ace_jax.fit import ard
+    from ace_jax.uq import ard
     from ace_jax.fit.pipeline import load_fit_data
     from ace_jax.fit.pipeline.mapfit import fit_map
     from ace_jax.fit.pipeline.objective import make_objective
@@ -259,7 +259,7 @@ def _gp_stage(**kw):
 
 
 def test_stage_ard_gp_press_shape_and_group_scales(gp_fit_dir):
-    from ace_jax.fit import ard
+    from ace_jax.uq import ard
     _, d, fr = gp_fit_dir                          # the pipeline's ard-gp stage, not a second fit
     b, res = fr.built, fr.ard
     with highest_precision():
@@ -283,7 +283,7 @@ def test_ard_gp_with_no_inducing_columns_is_the_linear_stage(ard_map):
     sufficient_statistics, the PriorRoot path, rows_fn_for) on a problem with no inducing columns gives the
     --uq ard posterior.  The two stream the statistics through different code (sufficient_statistics against
     the bounded linear statistics), so equality is to summation-order roundoff, not bitwise."""
-    from ace_jax.fit import ard
+    from ace_jax.uq import ard
     from conftest import ard_pipe_cfg
     d, b, theta = ard_map
     kw = dict(ard_variance="sandwich", ard_val_frac=0.4, ard_n_min=50)
@@ -426,7 +426,7 @@ def test_gp_calculator_with_a_sandwich_posterior_skips_the_derivative_dtc(gp_fit
     """Review fix: with a posterior attached the mixture forces_std is replaced, so the calculator must not
     build the derivative-DTC (n, K, d, 3) arrays it would discard (the big-cell memory hog)."""
     from ace_jax.calc.gp import GPCalculator
-    from ace_jax.fit import predict
+    from ace_jax.fit.gp import predict
     out, _, _ = gp_fit_dir
     calls, orig = [], predict._dtc_deriv_residual
     monkeypatch.setattr(predict, "_dtc_deriv_residual", lambda *a, **k: calls.append(1) or orig(*a, **k))
@@ -440,8 +440,8 @@ def test_gp_calculator_with_a_sandwich_posterior_skips_the_derivative_dtc(gp_fit
 def test_evidence_with_near_duplicate_inducing_points(tiny_gp_problem):
     """Review Focus 2: two inducing points 1e-9 apart (K_MM singular up to its jitter).  The scaled-system
     evidence still matches the observation-space reference, to a tolerance set by cond(K_MM)."""
-    from ace_jax.fit.ard import ARDEvidence, ard_gamma, ard_statistics, body_order_columns, gp_body_columns
-    from ace_jax.fit.prior_root import prior_root
+    from ace_jax.uq.ard import ARDEvidence, ard_gamma, ard_statistics, body_order_columns, gp_body_columns
+    from ace_jax.fit.linear.prior_root import prior_root
     prob, ds, theta = tiny_gp_problem
     ind = prob.ind
     prob = prob._replace(ind=ind._replace(XM=ind.XM.at[1].set(ind.XM[0] + 1e-9), SM=ind.SM.at[1].set(ind.SM[0]),
@@ -461,7 +461,7 @@ def test_evidence_with_near_duplicate_inducing_points(tiny_gp_problem):
 def test_a_removed_dtc_posterior_is_refused(gp_fit_dir, tmp_path):
     """--ard-variance dtc failed its acceptance and was removed: an old dtc posterior file must not load and
     silently serve the kappa shape."""
-    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.uq.ard import ARDPosterior
     out, _, _ = gp_fit_dir
     z = dict(np.load(out / "posterior.npz"))
     z["variance"] = np.array("dtc")

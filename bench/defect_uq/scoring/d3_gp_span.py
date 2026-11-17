@@ -36,10 +36,10 @@ from jax.scipy.linalg import solve_triangular  # noqa: E402
 
 from ace_jax.fit.data import Config, build_dataset  # noqa: E402
 from ace_jax.fit.hypers import Hypers  # noqa: E402
-from ace_jax.fit.kernels import K_MM, k_rows  # noqa: E402
+from ace_jax.fit.gp.kernels import K_MM, k_rows  # noqa: E402
 from ace_jax.fit.pipeline import FitConfig, load_fit_data  # noqa: E402
 from ace_jax.fit.pipeline.problem import build_problem  # noqa: E402
-from ace_jax.fit.predict import _dtc_deriv_residual  # noqa: E402
+from ace_jax.fit.gp.predict import _dtc_deriv_residual  # noqa: E402
 from ace_jax.fit.rows import batch_rows_parts, residual_inputs  # noqa: E402
 
 RCUT = 6.25

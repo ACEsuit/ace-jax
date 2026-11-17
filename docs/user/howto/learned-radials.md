@@ -102,8 +102,8 @@ from ace_jax.basis.export import save_npz
 from ace_jax.basis.model import BasisSpec, build_basis
 from ace_jax.fit.pipeline import FitConfig, load_fit_data
 from ace_jax.fit.pipeline.problem import build_problem
-from ace_jax.fit.radial_learn import fit_radial, save_result
-from ace_jax.fit.radial_model import rnl_degrees, to_analytic
+from ace_jax.fit.radial.learn import fit_radial, save_result
+from ace_jax.fit.radial.model import rnl_degrees, to_analytic
 
 save_npz("basis.npz", build_basis(BasisSpec(order=3, max_degree=10, elements=("Si",))))
 

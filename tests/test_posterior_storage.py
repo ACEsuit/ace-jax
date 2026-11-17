@@ -13,7 +13,7 @@ def _with_R(post, r=5):
 
 
 def test_sandwich_posterior_is_saved_without_chol(ard_setup, tmp_path):
-    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.uq.ard import ARDPosterior
     *_, post = ard_setup
     post = _with_R(post)
     post.save(tmp_path / "p.npz")
@@ -26,7 +26,7 @@ def test_sandwich_posterior_is_saved_without_chol(ard_setup, tmp_path):
 
 
 def test_kappa_posterior_stores_chol_packed_and_restores_it(ard_setup, tmp_path):
-    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.uq.ard import ARDPosterior
     *_, post = ard_setup                                        # no R, no Q: the kappa shape
     post.save(tmp_path / "p.npz")
     z = np.load(tmp_path / "p.npz")
@@ -38,7 +38,7 @@ def test_kappa_posterior_stores_chol_packed_and_restores_it(ard_setup, tmp_path)
 
 def test_a_posterior_with_full_chol_still_loads(ard_setup, tmp_path):
     """Files written before the packed form (a dense `chol`) load unchanged."""
-    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.uq.ard import ARDPosterior
     *_, post = ard_setup
     post.save(tmp_path / "p.npz")
     z = dict(np.load(tmp_path / "p.npz"))
@@ -50,7 +50,7 @@ def test_a_posterior_with_full_chol_still_loads(ard_setup, tmp_path):
 
 
 def test_untempered_variance_needs_chol(ard_setup, tmp_path):
-    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.uq.ard import ARDPosterior
     *_, post = ard_setup
     _with_R(post).save(tmp_path / "p.npz")
     back = ARDPosterior.load(tmp_path / "p.npz")

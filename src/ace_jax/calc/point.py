@@ -180,7 +180,7 @@ class ACECalculator(Calculator):
 
         `shape_path` picks how a schema-3 jackknife shape V is evaluated: "rows" (default) builds the
         whole cell's force design rows (N, 3, L) and contracts them with R; "committee" evaluates the
-        forces of the r-output linear ACE with coefficients D^-1 R (`fit.jackknife.committee_shape`),
+        forces of the r-output linear ACE with coefficients D^-1 R (`uq.jackknife.committee_shape`),
         equal to roundoff, in memory O(N r) instead of O(N L) and without the edge Jacobian.
         `shape_tau` < 1 truncates R to the smallest rank holding that fraction of its sum sigma^2, and
         `shape_rank` (an int) caps the rank, on either path -- an approximation whose ranking and
@@ -274,8 +274,8 @@ class ACECalculator(Calculator):
         self.forces_std_every_call = bool(forces_std_every_call)
         if posterior is not None:
             from ..eval import load as _load_fit_model
-            from ..fit.ard import ARDPosterior
-            from ..fit.inducing import GPConfig
+            from ..uq.ard import ARDPosterior
+            from ..fit.gp.inducing import GPConfig
             if not isinstance(model_path, (str, bytes)) and not hasattr(model_path, "__fspath__"):
                 raise ValueError("posterior= needs the model FILE path (the design rows use the fit model)")
             post = ARDPosterior.load(posterior)
@@ -317,7 +317,7 @@ class ACECalculator(Calculator):
             if shape_path not in ("rows", "committee"):
                 raise ValueError(f"shape_path must be 'rows' or 'committee', got {shape_path!r}")
             if post.R is not None:
-                from ..fit.jackknife import truncate_shape_factor
+                from ..uq.jackknife import truncate_shape_factor
                 if not 0.0 < float(shape_tau) <= 1.0:
                     raise ValueError(f"shape_tau must be in (0, 1], got {shape_tau!r}")
                 R = truncate_shape_factor(post.R, float(shape_tau))
@@ -338,7 +338,7 @@ class ACECalculator(Calculator):
             self._fit_cfg = GPConfig(r0=1.0, rcut=float(meta["rcut"]), n_B=meta["n_B"],
                                      n_pair=meta["n_pair"], NZ=NZ, C=1)
             if shape_path == "committee":                   # C = D^-1 R per species block, on the device once
-                from ..fit.jackknife import committee_coefs
+                from ..uq.jackknife import committee_coefs
                 self._committee = committee_coefs(post.R, post.dinv, self._fit_cfg)
 
     @property
@@ -700,7 +700,7 @@ class ACECalculator(Calculator):
         Calibrated ARD std (lam x the shape, or kappa x the posterior std for --ard-variance kappa /
         schema 1) from node-chunked design rows of the full fit model."""
 
-        from ..fit.ard import _NEED3
+        from ..uq.ard import _NEED3
         from ..fit.rows import chunked_rows_fn
         post = self.posterior
         which = set(which)
@@ -728,7 +728,7 @@ class ACECalculator(Calculator):
                 and b.nbr.shape[1] > 0):
             import jax.numpy as jnp
 
-            from ..fit.jackknife import committee_forces
+            from ..uq.jackknife import committee_forces
             with highest_precision():
                 P = committee_forces(self._fit_model, self._fit_cfg, b, *self._committee)
                 V = np.asarray(jnp.einsum("nar,nbr->nab", P, P))[np.asarray(live)]
@@ -756,9 +756,9 @@ class ACECalculator(Calculator):
         return out
 
     def _support(self, ds, live, b):
-        """Covariate-shift support of each atom against the posterior's reference (fit/support.py), from
+        """Covariate-shift support of each atom against the posterior's reference (uq/support.py), from
         the same site_features descriptors the fit stage used (they depend on the model only)."""
-        from ..fit.support import support_check
+        from ..uq.support import support_check
         post = self.posterior
         alpha = float(np.asarray(post.group_table["alpha"]))
         # alpha is the miscoverage (group_table); support_check takes it as such: q = Q_{1-alpha}
@@ -777,7 +777,7 @@ class ACECalculator(Calculator):
 
     def _site_X(self, ds, b):
         """Live-atom site descriptors (the ones the support reference uses) of one-config dataset ds."""
-        from ..fit.inducing import site_features
+        from ..fit.gp.inducing import site_features
         live = np.asarray(b.node_mask)
         with highest_precision():
             return np.asarray(site_features(self._fit_model, self._fit_cfg, ds)[0])[0][live]

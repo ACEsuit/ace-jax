@@ -94,7 +94,7 @@ def grade(cl, F):
 
 
 def gamma_of(nov, ref, X, Z):
-    from ace_jax.fit.support import _proj, support_features
+    from ace_jax.uq.support import _proj, support_features
     F = support_features(X, ref.get("features"))
     out = np.full(len(Z), np.inf)
     for z in np.unique(Z):
@@ -111,7 +111,7 @@ def binned(gm):
 def quantiles(s, grp, cfg, G, alpha, n_min, fallback):
     """Per group the configuration-weighted pooled q (conformal.group_scales' rule); groups below
     effective_n_min configurations take fallback[k]."""
-    from ace_jax.fit.conformal import _pooled_q, config_weights, effective_n_min
+    from ace_jax.uq.conformal import _pooled_q, config_weights, effective_n_min
     w = config_weights(grp, cfg, G)
     q, ncfg = np.array(fallback, float), np.zeros(G, int)
     for k in range(G):
@@ -124,7 +124,7 @@ def quantiles(s, grp, cfg, G, alpha, n_min, fallback):
 
 def load_big(spec, post):
     """(s, g, gamma-input X, Z, family, cell) of the free atoms of one big_errors file + its descriptors."""
-    from ace_jax.fit.ard import conformal_scores
+    from ace_jax.uq.ard import conformal_scores
     err, desc = spec.split(":")
     e = np.load(err, allow_pickle=True)
     d = np.load(desc)
@@ -146,9 +146,9 @@ def main(argv=None):
     sys.path.insert(0, str(pathlib.Path(__file__).parent))
     from support_rebuild import load_ref
 
-    from ace_jax.fit.ard import ARDPosterior
-    from ace_jax.fit.conformal import effective_n_min
-    from ace_jax.fit.support import _proj, support_features
+    from ace_jax.uq.ard import ARDPosterior
+    from ace_jax.uq.conformal import effective_n_min
+    from ace_jax.uq.support import _proj, support_features
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--posterior", required=True)
     p.add_argument("--rebuild", required=True, help="support_rebuild.py build output (descriptors.npz, "

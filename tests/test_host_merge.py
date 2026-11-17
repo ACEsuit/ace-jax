@@ -4,7 +4,7 @@ rows).  The merged factor is a QR factor of the stacked system: same Gram R^T R 
 import numpy as np
 import pytest
 
-from ace_jax.fit.stats import _host_merge
+from ace_jax.fit.linear.stats import _host_merge
 
 
 def _tri(rng, n, scale=1.0):

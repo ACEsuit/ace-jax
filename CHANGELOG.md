@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Changed
+
+- **`ace_jax.fit` is split by role, and uncertainty quantification is `ace_jax.uq`.** No behaviour changes.
+  The old module names still import, with a `DeprecationWarning`, until 0.8; names with a leading
+  underscore do not. `ace_jax.fit.pipeline`, `ace_jax.fit.data`, `ace_jax.fit.xyz`, `ace_jax.fit.rows`
+  and `ace_jax.fit.paramset` do not move. `docs/dev/specs/2026-11-17-package-structure-design.md`.
+
+  | Before | Now |
+  |---|---|
+  | `fit.{stats, solve, objective, lml_host, lml_svd, hostcache, prior_root, block_lbfgs, newton, multistart, varpro, sharding, progress}` | `fit.linear.*` |
+  | `fit.{ard, jackknife, conformal, pops, support, loo, clusters}` | `uq.*` |
+  | `fit.{kernels, inducing, ladder, predict, feature, density}` | `fit.gp.*` |
+  | `fit.radial_learn`, `fit.radial_model`, `fit.embedding` | `fit.radial.learn`, `fit.radial.model`, `fit.radial.embedding` |
+  | `fit.rowcheck` | `fit.pipeline.rowcheck` |
+
 ## 0.6.0 (2026-11-13)
 
 **Highlights.** The C++ kernel for linear ACE on CPUs needs no compiler on Linux and on macOS (arm64): the

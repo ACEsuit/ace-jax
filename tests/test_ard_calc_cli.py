@@ -14,7 +14,7 @@ def test_cli_fit_ard_variance_default_sandwich_and_kappa_flag(fitted, tmp_path):
     """--ard-variance: default sandwich (the fixture fit, the PRESS shape factor R in posterior.npz); `kappa` once."""
     import json
     from ace_jax.cli import main
-    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.uq.ard import ARDPosterior
     assert json.load(open(fitted / "ard.json"))["variance"] == "sandwich"
     p = ARDPosterior.load(fitted / "posterior.npz")
     assert p.R is not None and p.Q is None and p.group_table is not None
@@ -47,7 +47,7 @@ def test_sandwich_posterior_carries_no_chol(fitted):
     """A sandwich posterior serves forces from R alone: its file has no L x L Cholesky factor, and the
     calculator holds none (the kappa posterior's device copy is checked in the --ard-variance kappa test)."""
     from ace_jax import ACECalculator
-    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.uq.ard import ARDPosterior
     assert ARDPosterior.load(fitted / "posterior.npz").chol is None
     calc = ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"))
     assert calc.posterior.chol is None
@@ -92,7 +92,7 @@ def test_model_swap_is_refused_with_a_posterior(fitted):
 
 def test_calculator_forces_std_matches_pipeline(fitted):
     from ace_jax import ACECalculator
-    from ace_jax.fit.ard import ARDPosterior, predict_ard
+    from ace_jax.uq.ard import ARDPosterior, predict_ard
     from ace_jax.fit.data import build_dataset, load_configs
     from ace_jax.fit.pipeline import FitConfig
     from ace_jax.fit.pipeline.problem import build_problem
@@ -123,7 +123,7 @@ def test_isolated_atom_has_zero_finite_std(fitted):
 
 def test_mismatched_posterior_is_refused(fitted, tmp_path):
     from ace_jax import ACECalculator
-    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.uq.ard import ARDPosterior
     p = ARDPosterior.load(fitted / "posterior.npz")
     bad = p._replace(mean=p.mean[:-1], dinv=p.dinv[:-1], R=p.R[:-1], body_col=p.body_col[:-1])
     bad.save(tmp_path / "bad.npz")
@@ -171,7 +171,7 @@ def test_forces_std_only_on_request_by_default(fitted):
 
 def test_posterior_with_other_elements_is_refused(fitted, tmp_path):
     from ace_jax import ACECalculator
-    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.uq.ard import ARDPosterior
     p = ARDPosterior.load(fitted / "posterior.npz")
     els = list(p.meta["elements"])
     for bad_els in ([14 if e != 14 else 6 for e in els], els[::-1] if len(els) > 1 else None):
@@ -232,7 +232,7 @@ def test_posterior_from_another_fit_is_refused(fitted, tmp_path):
 def test_calculator_served_quantities_and_lean_parity(fitted):
     from ase.io import read
     from ace_jax import ACECalculator
-    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.uq.ard import ARDPosterior
     tab = ARDPosterior.load(fitted / "posterior.npz").group_table
     at = max(read(XYZ, ":8"), key=len)
     out = {}
@@ -266,7 +266,7 @@ def test_calculator_forces_support(fitted):
     assert ok.shape == (len(at),) and ok.dtype == bool and all(v > 0 for v in sup["n_eff"].values())
     assert np.isfinite(sup["support_q"][ok]).all() and np.isinf(sup["support_q"][~ok]).all()
     # the level: the (1 - alpha) weighted quantile with alpha the posterior's miscoverage (0.1), not alpha itself
-    from ace_jax.fit.support import support_check
+    from ace_jax.uq.support import support_check
     post = calc.posterior
     alpha = float(np.asarray(post.group_table["alpha"]))
     assert alpha < 0.5
@@ -318,7 +318,7 @@ def calib_set(tmp_path_factory):
 
 def test_calibrate_per_group_replace(fitted, calib_set, tmp_path):
     from ace_jax.cli import main
-    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.uq.ard import ARDPosterior
     base = ARDPosterior.load(fitted / "posterior.npz")
     assert main(_calib_args(fitted, calib_set, ["--out", str(tmp_path / "d.npz")])) == 0
     new = ARDPosterior.load(tmp_path / "d.npz")
@@ -337,7 +337,7 @@ def test_calibrate_per_group_replace(fitted, calib_set, tmp_path):
 
 def test_calibrate_append_and_replace(fitted, calib_set, tmp_path):
     from ace_jax.cli import main
-    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.uq.ard import ARDPosterior
     assert main(_calib_args(fitted, calib_set, ["--append", "--out", str(tmp_path / "a.npz")])) == 0
     assert main(_calib_args(fitted, calib_set, ["--replace", "--out", str(tmp_path / "r.npz")])) == 0
     a, r = ARDPosterior.load(tmp_path / "a.npz"), ARDPosterior.load(tmp_path / "r.npz")
@@ -348,7 +348,7 @@ def test_calibrate_append_and_replace(fitted, calib_set, tmp_path):
 def test_calibrate_rebuilds_support(fitted, calib_set, tmp_path):
     """The support reference is rebuilt on the pooled atoms: the replace-mode reference is U only, append is T_val + U."""
     from ace_jax.cli import main
-    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.uq.ard import ARDPosterior
     base = ARDPosterior.load(fitted / "posterior.npz")
     assert base.support is not None
     assert main(_calib_args(fitted, calib_set, ["--append", "--out", str(tmp_path / "a.npz")])) == 0
@@ -433,7 +433,7 @@ def test_fit_flags_map_to_config():
 def test_calibrate_per_group_keeps_support_consistent(fitted, calib_set, tmp_path):
     """Stored (T_val) support points survive exactly when their conformal group is not replaced."""
     from ace_jax.cli import main
-    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.uq.ard import ARDPosterior
     base = ARDPosterior.load(fitted / "posterior.npz")
     assert main(_calib_args(fitted, calib_set, ["--out", str(tmp_path / "d.npz")])) == 0
     new = ARDPosterior.load(tmp_path / "d.npz")
@@ -452,7 +452,7 @@ def test_calibrate_per_group_keeps_support_consistent(fitted, calib_set, tmp_pat
 
 
 def test_keep_for_mode_two_groups():
-    from ace_jax.fit.support import fit_pca, build_support, recalibrate_support
+    from ace_jax.uq.support import fit_pca, build_support, recalibrate_support
     rng = np.random.default_rng(0)
     X = rng.normal(size=(120, 4))
     Z = np.zeros(120, int)
@@ -479,7 +479,7 @@ def test_keep_for_mode_two_groups():
 def test_aniso_fit_eval_and_calibrate(aniso_fit, calib_set):
     from ase.io import read
     from ace_jax.cli import main
-    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.uq.ard import ARDPosterior
     out = aniso_fit
     from conftest import small_si_xyz
     assert ARDPosterior.load(out / "posterior.npz").force_shape == "aniso"
@@ -528,7 +528,7 @@ def test_resolved_yaml_records_ard_flags_and_roundtrips(tmp_path):
 def test_calibrate_loads_legacy_int8_cal_arrays(fitted, calib_set, tmp_path):
     """Posteriors saved with int8 cal_src/cal_groups still load and recalibrate; the output src is int16."""
     from ace_jax.cli import main
-    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.uq.ard import ARDPosterior
     z = dict(np.load(fitted / "posterior.npz"))
     n = len(z["cal_src"])
     src = (np.arange(n) % 5).astype(np.int8)                              # max 4 -> U source id 5
@@ -556,7 +556,7 @@ def test_posterior_properties_share_one_rows_and_shape_pass(fitted, monkeypatch)
     from ase.io import read
     import ace_jax.fit.rows as rows_mod
     from ace_jax import ACECalculator
-    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.uq.ard import ARDPosterior
     n_rows, n_shape = [], []
     real_rows, real_shape = rows_mod.chunked_rows_fn, ARDPosterior.atom_shape
 
@@ -641,7 +641,7 @@ def test_cli_eval_and_calibrate_shape_path_committee(fitted, calib_set, tmp_path
     """--shape-path committee serves and recalibrates exactly what the design-row path does."""
     from ase.io import read, write
     from ace_jax.cli import main
-    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.uq.ard import ARDPosterior
     from ace_jax.fit.xyz import read_extxyz
     data = tmp_path / "d.xyz"
     write(data, read(XYZ, ":4"))

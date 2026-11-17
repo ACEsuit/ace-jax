@@ -12,11 +12,11 @@ import jax.numpy as jnp
 
 from ace_jax.eval import highest_precision
 from ace_jax.fit.hypers import Hypers
-from ace_jax.fit.objective import posterior
-from ace_jax.fit.pops import _fit_hypercube_cov
-from ace_jax.fit.predict import PopsRidgePath, predict_fixed, select_pops_ridge
+from ace_jax.fit.linear.objective import posterior
+from ace_jax.uq.pops import _fit_hypercube_cov
+from ace_jax.fit.gp.predict import PopsRidgePath, predict_fixed, select_pops_ridge
 from ace_jax.fit.rows import linear_rows
-from ace_jax.fit.stats import sufficient_statistics
+from ace_jax.fit.linear.stats import sufficient_statistics
 
 # sigma_q deliberately far from 1 and unequal: the loss weights must be 1/sigma_q
 THETA = Hypers(log_ell=0.0, log_A=0.0, log_alpha=0.0, log_r0=np.log(2.35), log_eps=0.0,
@@ -170,7 +170,7 @@ def test_select_pops_ridge_picks_argmin_of_its_own_score(tiny_linear_problem):
 # Streaming POPS: same predictive, O(L^2) memory -- the K x L corrections are
 # never materialised.  The in-memory members() path is the oracle.
 # ---------------------------------------------------------------------------
-from ace_jax.fit.pops import pops_envelope, pops_posterior, pops_var
+from ace_jax.uq.pops import pops_envelope, pops_posterior, pops_var
 
 
 def _test_rows(prob, ds):
@@ -231,7 +231,7 @@ def test_predict_reuses_a_prebuilt_path_and_its_posteriors(tiny_linear_problem, 
         ref = predict_fixed(THETA, prob, ds, ds, uq="pops", pops_ridge={"E": 1e-2, "F": 1e-4, "V": 1e-4})
         path = PopsRidgePath(THETA, prob, ds)
         calls = []                                            # one streamed moment pass per posterior built
-        import ace_jax.fit.stats as S                         # DeviceRows calls it there
+        import ace_jax.fit.linear.stats as S                         # DeviceRows calls it there
         real = S.pops_moment_sums
         monkeypatch.setattr(S, "pops_moment_sums", lambda *a, **k: calls.append(1) or real(*a, **k))
         monkeypatch.setattr(PopsRidgePath, "__init__",
@@ -248,7 +248,7 @@ def test_ridge_selection_compiles_the_predictor_once(tiny_linear_problem, monkey
     """The batch predictor takes the posteriors as ARGUMENTS: jitting a closure over
     them re-traced (and re-compiled, with the L x L posteriors embedded as constants
     -- 6 GB each at the production Cantor basis) once per grid ridge."""
-    import ace_jax.fit.predict as P
+    import ace_jax.fit.gp.predict as P
     prob, ds = tiny_linear_problem
     traces = []
     real = P._pops_paper_batch
@@ -261,7 +261,7 @@ def test_ridge_selection_compiles_the_predictor_once(tiny_linear_problem, monkey
 # --- host-cached rows: one ACE pass, every POPS pass streams the cache -------------
 
 def _host(prob, ds, block=7):
-    from ace_jax.fit.stats import HostRows
+    from ace_jax.fit.linear.stats import HostRows
     qs = PopsRidgePath(THETA, prob, ds).qs
     return HostRows(prob.model, prob.cfg, ds, qs, block=block)     # 7: many blocks + a padded tail
 
@@ -276,7 +276,7 @@ def test_host_rows_path_equals_device_path(tiny_linear_problem):
         # the Gram is summed row-wise vs per quantity: equal to the solve's conditioning
         assert np.allclose(host.c_star, dev.c_star, rtol=1e-7, atol=1e-12)
         # compared on what is predicted -- the variance / envelope at real rows
-        from ace_jax.fit.pops import pops_var
+        from ace_jax.uq.pops import pops_var
         from ace_jax.fit.rows import linear_rows
         lin = linear_rows(prob.model, prob.cfg, jax.tree.map(lambda a: a[0], ds))[0]
         for phi in (lin.E, lin.F.reshape(-1, lin.F.shape[-1])):
@@ -320,7 +320,7 @@ def test_blr_mean_is_accurate_not_the_eigh_formula():
     from ace_jax.fit.pipeline.mapfit import fit_map
     from ace_jax.fit.pipeline.objective import make_objective
     from ace_jax.fit.pipeline.problem import build_problem
-    from ace_jax.fit.solve import solve_qr
+    from ace_jax.fit.linear.solve import solve_qr
     cfg = FitConfig(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy", force_key="dft_force",
                     virial_key="dft_virial", ntrain=16, ntest=6, batch=4, r0=2.35, arm="linear",
                     opt="lbfgs", rungs=("map",), map_steps=5, e0="prefit",   # POPS: E0 fixed
@@ -343,7 +343,7 @@ def test_mean_falls_back_to_the_streamed_qr_when_the_cholesky_fails(tiny_linear_
     """A near-interpolating evidence fit (sigma_c on its bound, lam_blr ~ 1e-20 of max Lambda on silicon o3d12)
     makes the ridge system's Cholesky NaN; c* must then come from the streamed QR, not be NaN."""
     import jax.scipy.linalg as jsl
-    from ace_jax.fit.solve import solve_qr
+    from ace_jax.fit.linear.solve import solve_qr
     prob, ds = tiny_linear_problem
     with highest_precision():
         ref = np.asarray(PopsRidgePath(THETA, prob, ds).c_star_at("blr"))
@@ -359,7 +359,7 @@ def test_mean_falls_back_to_the_streamed_qr_when_the_cholesky_fails(tiny_linear_
 def test_ridge_selection_raises_instead_of_a_silent_grid_start(tiny_linear_problem, monkeypatch):
     """Every score non-finite used to return grid[0] (silicon o3d12: 1e-2 instead of the 1e-14 chosen when the
     mean was finite).  It must raise."""
-    import ace_jax.fit.predict as P
+    import ace_jax.fit.gp.predict as P
     prob, ds = tiny_linear_problem
     monkeypatch.setattr(P, "crps_gaussian", lambda y, m, s: np.full(np.shape(y), np.nan))
     with highest_precision(), pytest.raises(FloatingPointError, match="every score is non-finite"):
@@ -369,7 +369,7 @@ def test_ridge_selection_raises_instead_of_a_silent_grid_start(tiny_linear_probl
 def test_a_ridge_below_the_floor_warns(tiny_linear_problem):
     """The box is set by eigh roundoff below POPS_MIN_RIDGE; asking for it warns (once per ridge)."""
     import warnings
-    from ace_jax.fit.predict import POPS_MIN_RIDGE
+    from ace_jax.fit.gp.predict import POPS_MIN_RIDGE
     prob, ds = tiny_linear_problem
     path = PopsRidgePath(THETA, prob, ds)
     with warnings.catch_warnings():
@@ -384,7 +384,7 @@ def test_pipeline_pops_defaults_follow_the_reference_package():
     """POPSRegression's default leverage_percentile is 50 (rows at or above the median leverage define the box);
     the ridge grid stops at the numerical floor."""
     from ace_jax.fit.pipeline import FitConfig
-    from ace_jax.fit.predict import POPS_MIN_RIDGE
+    from ace_jax.fit.gp.predict import POPS_MIN_RIDGE
     cfg = FitConfig(model="unused.npz")
     assert cfg.pops_leverage_pct == 50.0
     assert min(cfg.pops_ridge_grid) >= POPS_MIN_RIDGE

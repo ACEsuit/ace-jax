@@ -92,7 +92,7 @@ def test_npz_roundtrip_keeps_the_basis(tmp_path, monkeypatch):
 def test_lean_matches_the_full_model(tmp_path, monkeypatch, learned):
     """lean keeps an sbessel radial analytic (to_spline tabulates polynomials in x only), learned
     or not, so lean and full agree to roundoff."""
-    from ace_jax.fit.radial_model import with_radial
+    from ace_jax.fit.radial.model import with_radial
     b = _build(tmp_path, monkeypatch); m, meta = b.model, b.meta
     if learned:
         rng = np.random.default_rng(2)
@@ -108,7 +108,7 @@ def test_lean_matches_the_full_model(tmp_path, monkeypatch, learned):
 def test_learner_helpers_take_the_sbessel_basis(tmp_path, monkeypatch):
     """The radial Gram is positive definite, the roughness matrix symmetric and PSD, and widening
     adds g_k columns without changing any radial."""
-    from ace_jax.fit.radial_model import _uniform_moment, roughness_matrix, widen_radial
+    from ace_jax.fit.radial.model import _uniform_moment, roughness_matrix, widen_radial
     m = _build(tmp_path, monkeypatch).model
     U = np.asarray(_uniform_moment(m, 401))[0, 0]
     assert np.linalg.eigvalsh(U).min() > 0

@@ -17,12 +17,12 @@ import jax.numpy as jnp
 from ace_jax.eval import highest_precision, load
 from ace_jax.fit.data import build_dataset, load_configs
 from ace_jax.fit.hypers import Hypers, default_prior, to_array
-from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
-from ace_jax.fit.kernels import KernelSpec
-from ace_jax.fit.objective import (Problem, combine, log_marginal_likelihood, log_marginal_likelihood_qr,
+from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features
+from ace_jax.fit.gp.kernels import KernelSpec
+from ace_jax.fit.linear.objective import (Problem, combine, log_marginal_likelihood, log_marginal_likelihood_qr,
                                    make_lml, posterior, posterior_from_qr, prior_precision)
-from ace_jax.fit.solve import posterior_qr
-from ace_jax.fit.stats import linear_qr_statistics, linear_statistics
+from ace_jax.fit.linear.solve import posterior_qr
+from ace_jax.fit.linear.stats import linear_qr_statistics, linear_statistics
 
 XYZ = FIXTURE_DIR / "si_tiny_train.xyz"
 pytestmark = pytest.mark.skipif(not XYZ.exists(), reason="missing GP fixtures")
@@ -94,7 +94,7 @@ def test_qr_lml_matches_cholesky_where_well_conditioned(m0):
 def _dense_reference(prob, ds, theta):
     """The LML from a dense QR of the full weighted design stacked with the prior square root:
     an independent route (solve.posterior_qr's factor) to the same quantity."""
-    from ace_jax.fit.solve import _qr_factor
+    from ace_jax.fit.linear.solve import _qr_factor
     R, d = _qr_factor(prob, ds, theta)
     st = linear_statistics(prob.model, prob.cfg, ds)
     _, _, yy, logtau, N = combine(theta, st)
@@ -223,7 +223,7 @@ from ase.io import read, write
 from ace_jax.basis.model import BasisSpec, build_basis
 from ace_jax.fit.pipeline import FitConfig, load_fit_data
 from ace_jax.fit.pipeline.problem import build_problem
-from ace_jax.fit.stats import linear_qr_statistics
+from ace_jax.fit.linear.stats import linear_qr_statistics
 data, work = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
 write(work / "train.xyz", read(data / "cantor_train.xyz", ":"))
 b = build_basis(BasisSpec(order=2, max_degree=4, elements=("Cr", "Mn", "Fe", "Co", "Ni"), rcut=5.5))
@@ -256,8 +256,8 @@ def test_qr_statistics_compile_once_across_models(m0):
     """Radial learning streams QR statistics at every evaluation, each with new radials: the
     compiled pass must be reused (a per-call jit of a closure over the model recompiled it every
     time).  Different radial weights, same shapes: one cache entry; the statistics still differ."""
-    from ace_jax.fit import stats
-    from ace_jax.fit.radial_model import to_analytic, with_radial
+    from ace_jax.fit.linear import stats
+    from ace_jax.fit.radial.model import to_analytic, with_radial
     prob, ds, _, _ = m0
     model, _ = to_analytic(prob.model, 12)
     f = stats._device_qr                       # the device path (the host path still jits per call)

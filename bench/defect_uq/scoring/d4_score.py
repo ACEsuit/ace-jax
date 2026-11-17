@@ -20,7 +20,7 @@ jax.config.update("jax_enable_x64", True)
 import numpy as np  # noqa: E402
 from scipy.stats import spearmanr  # noqa: E402
 
-from ace_jax.fit.ard import conformal_scores  # noqa: E402
+from ace_jax.uq.ard import conformal_scores  # noqa: E402
 from validate_shape import coverage_table, load_run  # noqa: E402
 
 LIMIT = int(os.environ.get("D4_LIMIT", "0"))    # smoke runs: ID configs (0 = the 300-config sample)

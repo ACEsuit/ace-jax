@@ -110,7 +110,7 @@ def main():
 
     from ace_jax.eval.io import load
     from ace_jax.eval.model import highest_precision, lean
-    from ace_jax.fit.radial_model import to_analytic
+    from ace_jax.fit.radial.model import to_analytic
     dt = getattr(jnp, a.dtype)
     has_to_spline = "spline_tol" in inspect.signature(lean).parameters
     lean_exact = (lambda m: lean(m, spline_tol=None)) if has_to_spline else lean
@@ -135,7 +135,7 @@ def main():
         cases[f"{name}:lean_exact"] = lean_exact(m)
         info = {"to_analytic_relres_max": float(rel.max())}
         if has_to_spline:
-            from ace_jax.fit.radial_model import to_spline
+            from ace_jax.fit.radial.model import to_spline
             t0 = time.perf_counter()
             ms, err = to_spline(m, tol=a.spline_tol)
             info.update(to_spline_s=time.perf_counter() - t0, to_spline_err=float(err),

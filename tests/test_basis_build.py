@@ -505,5 +505,5 @@ def test_model_without_basis_meta_still_fits_radial():
     save) takes the radial-model defaults instead of failing."""
     import inspect
 
-    from ace_jax.fit import radial_model as rm
+    from ace_jax.fit.radial import model as rm
     assert 'meta.get("basis", {})' in inspect.getsource(rm)

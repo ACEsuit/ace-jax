@@ -1,4 +1,4 @@
-"""fit.radial_model: analytic-radial helpers (swap / widen / convert, Gram, gauge, roughness)."""
+"""fit.radial.model: analytic-radial helpers (swap / widen / convert, Gram, gauge, roughness)."""
 import dataclasses
 
 import jax
@@ -12,7 +12,7 @@ import jax.numpy as jnp
 
 from ace_jax.eval import load
 from ace_jax.fit.data import build_dataset, flat_edges, load_configs
-from ace_jax.fit.inducing import GPConfig
+from ace_jax.fit.gp.inducing import GPConfig
 from ace_jax.fit.rows import linear_rows
 
 XYZ = FIXTURE_DIR / "si_tiny_train.xyz"
@@ -53,7 +53,7 @@ def si():
 
 
 def test_with_radial_identity_is_exact(si):
-    from ace_jax.fit.radial_model import with_radial
+    from ace_jax.fit.radial.model import with_radial
     model, _, ds, cfg = si
     b = _batch(ds)
     r0, _, _ = linear_rows(model, cfg, b)
@@ -64,7 +64,7 @@ def test_with_radial_identity_is_exact(si):
 
 
 def test_poly_env_reproduces_model_radial(si):
-    from ace_jax.fit.radial_model import poly_env
+    from ace_jax.fit.radial.model import poly_env
     model, _, ds, _ = si
     rij, zi, zj = _live_edges(ds)
     Rnl, _ = model.radial(rij, zi, zj)
@@ -74,7 +74,7 @@ def test_poly_env_reproduces_model_radial(si):
 
 
 def test_widen_radial_preserves_descriptors(si):
-    from ace_jax.fit.radial_model import widen_radial
+    from ace_jax.fit.radial.model import widen_radial
     model, _, ds, cfg = si
     wide = widen_radial(model, 30)
     assert wide.rnl_Wnlq.shape[-1] == 30 and wide.polys_A.shape == (30,)
@@ -89,14 +89,14 @@ def test_widen_radial_preserves_descriptors(si):
 
 
 def test_non_analytic_model_raises():
-    from ace_jax.fit.radial_model import with_radial
+    from ace_jax.fit.radial.model import with_radial
     model, *_ = _setup(SI_SPLINE)
     with pytest.raises(ValueError, match="to_analytic"):
         with_radial(model, model.rnl_Wnlq)
 
 
 def test_to_analytic_matches_spline_radials(si):
-    from ace_jax.fit.radial_model import to_analytic
+    from ace_jax.fit.radial.model import to_analytic
     _, _, ds, _ = si
     spline, *_ = _setup(SI_SPLINE)
     ana, rel = to_analytic(spline, 30)
@@ -125,7 +125,7 @@ def test_to_analytic_matches_spline_radials(si):
 
 def test_patch_radial_npz_roundtrip(tmp_path, si):
     from ace_jax.basis.export import patch_radial_npz
-    from ace_jax.fit.radial_model import to_analytic
+    from ace_jax.fit.radial.model import to_analytic
     spline, *_ = _setup(SI_SPLINE)
     ana, _ = to_analytic(spline, 30)
     patch_radial_npz(SI_SPLINE, tmp_path / "m.npz", ana)
@@ -139,7 +139,7 @@ def test_patch_radial_npz_roundtrip(tmp_path, si):
 
 
 def test_radial_gram_gives_unit_empirical_norm(si):
-    from ace_jax.fit.radial_model import normalise, poly_env, radial_gram, row_active
+    from ace_jax.fit.radial.model import normalise, poly_env, radial_gram, row_active
     model, _, ds, _ = si
     Q = radial_gram(model, ds, n_prior=0.0)
     W = normalise(model.rnl_Wnlq, Q, row_active(model.rnl_Wnlq))
@@ -149,7 +149,7 @@ def test_radial_gram_gives_unit_empirical_norm(si):
 
 
 def test_normalise_is_scale_invariant(si):
-    from ace_jax.fit.radial_model import normalise, radial_gram, row_active
+    from ace_jax.fit.radial.model import normalise, radial_gram, row_active
     model, _, ds, _ = si
     Q = radial_gram(model, ds)
     V = model.rnl_Wnlq
@@ -159,7 +159,7 @@ def test_normalise_is_scale_invariant(si):
 
 
 def test_normalise_zero_rows_stay_zero_and_finite(si):
-    from ace_jax.fit.radial_model import normalise, radial_gram, row_active
+    from ace_jax.fit.radial.model import normalise, radial_gram, row_active
     model, _, ds, _ = si
     Q = radial_gram(model, ds)
     V0 = model.rnl_Wnlq.at[0, 0, 3].set(0.0)            # a structurally-zero radial
@@ -172,7 +172,7 @@ def test_normalise_zero_rows_stay_zero_and_finite(si):
 
 
 def test_radial_gram_absent_pair_is_positive_definite():
-    from ace_jax.fit.radial_model import radial_gram, to_analytic
+    from ace_jax.fit.radial.model import radial_gram, to_analytic
     spline, _, ds, _ = _setup(SIGE_SPLINE)              # elements Si, Ge; data is all-Si
     model, _ = to_analytic(spline, 12)
     Q = radial_gram(model, ds)
@@ -181,7 +181,7 @@ def test_radial_gram_absent_pair_is_positive_definite():
 
 
 def test_roughness_matrix_properties(si):
-    from ace_jax.fit.radial_model import roughness_matrix
+    from ace_jax.fit.radial.model import roughness_matrix
     model, *_ = si
     D2 = np.asarray(roughness_matrix(model))
     np.testing.assert_allclose(D2, D2.T, atol=1e-10)
@@ -205,7 +205,7 @@ def test_roughness_matrix_properties(si):
 
 
 def test_roughness_is_weighted_quadratic_form(si):
-    from ace_jax.fit.radial_model import roughness, roughness_matrix
+    from ace_jax.fit.radial.model import roughness, roughness_matrix
     model, *_ = si
     W, D2 = model.rnl_Wnlq, roughness_matrix(model)
     wn = jnp.linspace(1.0, 0.1, W.shape[2])
@@ -214,13 +214,13 @@ def test_roughness_is_weighted_quadratic_form(si):
 
 
 def test_spectral_weights_p0_is_ones():
-    from ace_jax.fit.radial_model import spectral_weights
+    from ace_jax.fit.radial.model import spectral_weights
     sw = spectral_weights(10, 0.0)
     np.testing.assert_allclose(np.asarray(sw), np.ones(10))
 
 
 def test_spectral_penalty_zero_at_reference(si):
-    from ace_jax.fit.radial_model import spectral_penalty, spectral_weights
+    from ace_jax.fit.radial.model import spectral_penalty, spectral_weights
     model, *_ = si
     W = model.rnl_Wnlq
     sw = spectral_weights(W.shape[-1], 4.0)
@@ -228,7 +228,7 @@ def test_spectral_penalty_zero_at_reference(si):
 
 
 def test_spectral_penalty_matches_explicit_loop(si):
-    from ace_jax.fit.radial_model import spectral_penalty, spectral_weights
+    from ace_jax.fit.radial.model import spectral_penalty, spectral_weights
     model, *_ = si
     W = model.rnl_Wnlq
     W_ref = W + 0.1
@@ -241,7 +241,7 @@ def test_spectral_penalty_matches_explicit_loop(si):
 
 
 def test_gap_penalty_zero_at_reference(si):
-    from ace_jax.fit.radial_model import gap_penalty, uniform_gram
+    from ace_jax.fit.radial.model import gap_penalty, uniform_gram
     model, *_ = si
     U = uniform_gram(model, 2.0, 5.0, n=50)
     W = model.rnl_Wnlq
@@ -249,7 +249,7 @@ def test_gap_penalty_zero_at_reference(si):
 
 
 def test_gap_penalty_matches_uniform_grid_mean(si):
-    from ace_jax.fit.radial_model import gap_penalty, poly_env, uniform_gram
+    from ace_jax.fit.radial.model import gap_penalty, poly_env, uniform_gram
     model, *_ = si
     r_lo, r_hi, n = 2.0, 5.0, 400
     U = uniform_gram(model, r_lo, r_hi, n=n)
@@ -275,7 +275,7 @@ def test_gap_penalty_matches_uniform_grid_mean(si):
 
 
 def test_uniform_gram_symmetric_psd(si):
-    from ace_jax.fit.radial_model import uniform_gram
+    from ace_jax.fit.radial.model import uniform_gram
     model, *_ = si
     U = np.asarray(uniform_gram(model, 2.0, 5.0, n=200))
     NZ = U.shape[0]
@@ -288,7 +288,7 @@ def test_uniform_gram_symmetric_psd(si):
 
 
 def test_rnl_degrees(si):
-    from ace_jax.fit.radial_model import rnl_degrees
+    from ace_jax.fit.radial.model import rnl_degrees
     _, meta, _, _ = si
     d = rnl_degrees(meta)
     assert d.shape == (meta["n_rnl"],) and d.min() == 0

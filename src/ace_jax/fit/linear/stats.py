@@ -1,0 +1,1040 @@
+"""Sufficient statistics of the data, per observation type, streamed over
+batches.  Memory is one batch's rows plus the (Dt, Dt) accumulators; the scan's
+reverse pass recomputes each batch under jax.checkpoint, which is the two-pass
+gradient algorithm of the spec with no hand-written VJP."""
+import contextlib
+import hashlib
+import json
+import os
+import pathlib
+import time
+from typing import NamedTuple
+
+from functools import partial
+
+import jax
+import jax.numpy as jnp
+import numpy as np
+
+from ..rows import batch_rows
+
+
+class Stats(NamedTuple):
+    G_E: jnp.ndarray; G_F: jnp.ndarray; G_V: jnp.ndarray
+    b_E: jnp.ndarray; b_F: jnp.ndarray; b_V: jnp.ndarray
+    yy_E: jnp.ndarray; yy_F: jnp.ndarray; yy_V: jnp.ndarray
+    n_E: jnp.ndarray; n_F: jnp.ndarray; n_V: jnp.ndarray
+    logw_E: jnp.ndarray; logw_F: jnp.ndarray; logw_V: jnp.ndarray
+
+
+def _type_stats(Phi, y, w):
+    """Phi (n, Dt), y (n,), w (n,) structural weights (0 = absent)."""
+    Pw = Phi * w[:, None]
+    yw = y * w
+    live = w > 0
+    return (Pw.T @ Pw, Pw.T @ yw, yw @ yw, live.sum(),
+            jnp.sum(jnp.where(live, 2.0 * jnp.log(jnp.where(live, w, 1.0)), 0.0)))
+
+
+def batch_stats(theta, spec, model, ind, cfg, batch):
+    r = batch_rows(theta, spec, model, ind, cfg, batch)
+    Dt = r.E.shape[-1]
+    E = _type_stats(r.E, batch.y_E, batch.w_E)
+    F = _type_stats(r.F.reshape(-1, Dt), batch.y_F.reshape(-1), jnp.repeat(batch.w_F, 3))
+    V = _type_stats(r.V.reshape(-1, Dt), batch.y_V.reshape(-1), jnp.repeat(batch.w_V, 6))
+    return Stats(E[0], F[0], V[0], E[1], F[1], V[1], E[2], F[2], V[2],
+                 E[3], F[3], V[3], E[4], F[4], V[4])
+
+
+def sufficient_statistics(theta, spec, model, ind, cfg, ds):
+    Dt = cfg.len_basis + ind.XM.shape[0]
+    z2, z1, z0 = jnp.zeros((Dt, Dt)), jnp.zeros(Dt), jnp.zeros(())
+    zero = Stats(z2, z2, z2, z1, z1, z1, z0, z0, z0, z0, z0, z0, z0, z0, z0)
+    f = jax.checkpoint(lambda th, b: batch_stats(th, spec, model, ind, cfg, b))
+
+    def body(carry, batch):
+        return jax.tree.map(jnp.add, carry, f(theta, batch)), None
+
+    return jax.lax.scan(body, zero, ds)[0]
+
+
+# ---------------------------------------------------------------------------
+# theta-split statistics.  The linear block G_BB is theta-INDEPENDENT (the ACE
+# features do not move with the hyperparameters; sigma_c enters as the prior,
+# not the Gram), so it is streamed ONCE and cached, and only the M residual
+# columns k_theta(B, B_M) are recomputed per evaluation.  For the Cantor basis
+# (L = 6890, M = 500) this cuts the per-gradient Gram cost ~10x -- the expensive
+# 6890^2 block leaves the inner loop.  assemble(linear, residual(theta)) equals
+# sufficient_statistics(theta) to f64 roundoff (tests/test_gp_stats.py).
+
+class ResidualStats(NamedTuple):
+    GBM_E: jnp.ndarray; GBM_F: jnp.ndarray; GBM_V: jnp.ndarray   # (L, M)
+    GMM_E: jnp.ndarray; GMM_F: jnp.ndarray; GMM_V: jnp.ndarray   # (M, M)
+    bM_E: jnp.ndarray;  bM_F: jnp.ndarray;  bM_V: jnp.ndarray    # (M,)
+
+
+def _linear_type_stats(Phi_B, y, w):
+    """G_BB, b_B, yy, n, logw for one observation type from the linear rows."""
+    Pw = Phi_B * w[:, None]
+    yw = y * w
+    live = w > 0
+    return (Pw.T @ Pw, Pw.T @ yw, yw @ yw, live.sum(),
+            jnp.sum(jnp.where(live, 2.0 * jnp.log(jnp.where(live, w, 1.0)), 0.0)))
+
+
+def batch_linear_stats(model, cfg, batch):
+    from ..rows import linear_rows_bounded
+    return linear_stats_from_rows(linear_rows_bounded(model, cfg, batch), batch)
+
+
+def linear_stats_from_rows(r, batch):
+    """batch_linear_stats from already-built linear rows r."""
+    L = r.E.shape[-1]
+    E = _linear_type_stats(r.E, batch.y_E, batch.w_E)
+    F = _linear_type_stats(r.F.reshape(-1, L), batch.y_F.reshape(-1), jnp.repeat(batch.w_F, 3))
+    V = _linear_type_stats(r.V.reshape(-1, L), batch.y_V.reshape(-1), jnp.repeat(batch.w_V, 6))
+    return Stats(E[0], F[0], V[0], E[1], F[1], V[1], E[2], F[2], V[2],
+                 E[3], F[3], V[3], E[4], F[4], V[4])
+
+
+def linear_statistics(model, cfg, ds):
+    """theta-independent linear statistics: Stats with Dt = len_basis."""
+    L = cfg.len_basis
+    z2, z1, z0 = jnp.zeros((L, L)), jnp.zeros(L), jnp.zeros(())
+    zero = Stats(z2, z2, z2, z1, z1, z1, z0, z0, z0, z0, z0, z0, z0, z0, z0)
+    f = jax.checkpoint(lambda b: batch_linear_stats(model, cfg, b))
+    return jax.lax.scan(lambda c, b: (jax.tree.map(jnp.add, c, f(b)), None), zero, ds)[0]
+
+
+class QRStats(NamedTuple):
+    """The linear statistics in QR form: per quantity q, R_q (L, L) upper triangular and
+    c_q = Q_q^T (w y_q) from a QR of its weighted rows w Phi_q = Q_q R_q, so R_q^T R_q = G_q
+    and R_q^T c_q = b_q without ever forming G_q (whose condition number is kappa(Phi_q)^2).
+    yy, n and logw are as in Stats.  objective.log_marginal_likelihood_qr reads it; the Gram
+    form (G_q, b_q) is derived on demand for the consumers that need it (POPS, ARD).
+
+    rho_q (float32 rows, row_dtype="float32" on a device): the residual norm |w y_q - Phi_q x_q|
+    carried through the merges as the last diagonal of the (L+1) factor of [w Phi_q | w y_q], or
+    None.  With it the LML never forms y'y - v'v, which cancels in float32 when the fit nearly
+    interpolates (MACE labels: sigma_E 4.8x wrong; docs/dev/fp32-results.md, step 3)."""
+    R_E: jnp.ndarray; R_F: jnp.ndarray; R_V: jnp.ndarray
+    c_E: jnp.ndarray; c_F: jnp.ndarray; c_V: jnp.ndarray
+    yy_E: jnp.ndarray; yy_F: jnp.ndarray; yy_V: jnp.ndarray
+    n_E: jnp.ndarray; n_F: jnp.ndarray; n_V: jnp.ndarray
+    logw_E: jnp.ndarray; logw_F: jnp.ndarray; logw_V: jnp.ndarray
+    rho_E: object = None; rho_F: object = None; rho_V: object = None
+
+    G_E = property(lambda s: s.R_E.T @ s.R_E)
+    G_F = property(lambda s: s.R_F.T @ s.R_F)
+    G_V = property(lambda s: s.R_V.T @ s.R_V)
+    b_E = property(lambda s: s.R_E.T @ s.c_E)
+    b_F = property(lambda s: s.R_F.T @ s.c_F)
+    b_V = property(lambda s: s.R_V.T @ s.c_V)
+
+    def gram(self):
+        """The equivalent Stats (Gram form), for consumers that need G and b."""
+        return Stats(self.G_E, self.G_F, self.G_V, self.b_E, self.b_F, self.b_V,
+                     self.yy_E, self.yy_F, self.yy_V, self.n_E, self.n_F, self.n_V,
+                     self.logw_E, self.logw_F, self.logw_V)
+
+
+# Batched merges.  A merge QR-factors the stacked [R c ; Pw yw], (L + r) x (L + 1): ~(4/3) L^3
+# whatever r is, plus 2 r L^2 for the new rows (LAPACK geqrf does not exploit R's triangle).
+# One merge per batch made that L^3 the whole cost at a large basis: Si o4d20 (L = 5477) has
+# 788 packed 224-atom batches of E 117 / F 672 / V 702 rows, 3 merges each, 1.2e15 flops per
+# pass with the old explicit Q (5e13 now).  So each quantity's live rows (padding and absent
+# virials are zero rows, QR-neutral, and are dropped: E and V are ~2% live there) are buffered
+# across batches and merged once at least merge_target (QR_MERGE_ROWS_PER_L x L) have
+# accumulated, plus a final flush: per row, (4/3) L^3 / buffer + 2 L^2.  The target column
+# rides along as an extra column, so only geqrf's R is formed (its last column is
+# Q^T [c ; yw]): no Householder product, which used to double the flops.  That is the device
+# form (_qr_merge, device_qr_stream).  The host merges (_host_merge) use LAPACK tpqrt, which keeps
+# R triangular: 2 r L^2 alone, no L^3 term; buffering there still amortises tpqrt's panels.
+QR_MERGE_ROWS_PER_L = 1
+
+
+def merge_target(L, merge_rows=None):
+    """Live rows that trigger a merge: merge_rows, default QR_MERGE_ROWS_PER_L * L; 0 merges
+    every batch (that has live rows)."""
+    return int(QR_MERGE_ROWS_PER_L * L if merge_rows is None else merge_rows)
+
+
+def _live(Pw, yw):
+    return jnp.any(Pw != 0, axis=1) | (yw != 0)
+
+
+def _qr_merge(R, c, Pw, yw):
+    """Fold weighted rows into a triangular factor: the updating QR of [R ; Pw], with c
+    carried as an extra column so that only R is formed (no Q).  mode="raw" is geqrf, which JAX
+    cannot differentiate: these statistics are not differentiable (the CPU host path never was)."""
+    n = R.shape[1]
+    A = jnp.concatenate([jnp.concatenate([R, c[:, None]], 1), jnp.concatenate([Pw, yw[:, None]], 1)], 0)
+    Ra = jnp.triu(jnp.linalg.qr(A, mode="raw")[0].mT[:n])    # geqrf alone: no Householder product
+    return Ra[:, :n], Ra[:, n]
+
+
+TPQRT_NB = 256     # tpqrt's block size.  mnf148 (32 cores), L rows into L: L 8000 nb 64 / 128 / 256: 195 / 312 / 418
+#                    GFLOP/s; L 16000 nb 256 / 512 / 1024: 711 / 632 / 195 (geqrf of the stack: 134 at L 8000)
+
+
+def _host_merge(R, c, Pw, yw, upper=False):
+    """_qr_merge on the host: LAPACK tpqrt, the QR of [[R, c], [Pw, yw]] that keeps R triangular.  c is
+    the last column of an (n+1) x (n+1) triangle (zero last row) and only R and c are read back.  geqrf
+    of the stacked matrix, which this replaced, treats R as dense: (10/3) L^3 flops per L rows merged
+    against 2 L^3, and it ran 5x slower at L = 8000 (12.8 s against 2.5 s, 32 cores).  upper: Pw is
+    itself an upper-triangular (n x n) factor (merging two factors, e.g. MPI ranks'): tpqrt then also
+    skips its zeros, ~3x faster again."""
+    import scipy.linalg.lapack as la
+    n, m = R.shape[1], Pw.shape[0]
+    if m == 0:
+        return np.array(R, np.float64), np.array(c, np.float64)
+    A = np.zeros((n + 1, n + 1), order="F")
+    A[:n, :n], A[:n, n] = R, c
+    B = np.empty((m, n + 1), order="F")
+    B[:, :n], B[:, n] = Pw, yw
+    a, _, _, info = la.dtpqrt(min(m, n) if upper else 0, min(TPQRT_NB, n + 1), A, B, overwrite_a=1, overwrite_b=1)
+    if info != 0:
+        raise np.linalg.LinAlgError(f"dtpqrt info={info}")
+    return np.triu(a[:n, :n]), a[:n, n].copy()
+
+
+def _rank_family(key):
+    """The MPI-rank part of a checkpoint key ("-r3of8"), or "" for a serial key: saves clear stale files of their
+    own family only, so ranks sharing a directory keep each other's checkpoints."""
+    i = key.rfind("-r")
+    return key[i:] if i >= 0 and "of" in key[i:] else ""
+
+
+class QRCheckpoint:
+    """Where and how often `host_qr_stream` saves its state (`aj fit --checkpoint DIR`).  The state is
+    each factor's (R, c) after flushing its buffered rows, the next batch index and the caller's scalar
+    accumulators, in DIR/qrstats-KEY.npz (written to a temporary file, then renamed).  KEY fingerprints
+    the problem (`problem_key`), so a checkpoint of a different model, dataset or row dtype is never
+    loaded.  A complete pass is kept too: a fit killed after the statistics never repeats them.  Size
+    8 L^2 bytes per factor (E, F, V: ~9 GB at L = 2e4); a save costs one extra merge per factor."""
+
+    def __init__(self, directory, every=2700.0, log=print):
+        self.dir, self.every, self.log = pathlib.Path(directory), float(every), log
+
+    def path(self, key):
+        return self.dir / f"qrstats-{key}.npz"
+
+    def load(self, key, n_factors):
+        p = self.path(key)
+        if not p.exists():
+            return None
+        with np.load(p, allow_pickle=False) as z:
+            if str(z["key"]) != key or int(z["n_factors"]) != n_factors:
+                return None
+            acc = [(np.array(z[f"R{k}"]), np.array(z[f"c{k}"])) for k in range(n_factors)]
+            return acc, int(z["next"]), json.loads(str(z["extra"]))
+
+    def save(self, key, acc, nxt, extra):
+        self.dir.mkdir(parents=True, exist_ok=True)
+        fam = _rank_family(key)
+        for old in self.dir.glob("qrstats-*.npz"):         # one problem per directory: a stale one is GBs; only
+            if old != self.path(key) and _rank_family(old.name[8:-4]) == fam:    # this rank's, not other ranks'
+                old.unlink()
+        tmp = self.dir / f".qrstats-{key}.tmp.npz"
+        np.savez(tmp, key=key, next=nxt, n_factors=len(acc), extra=json.dumps(extra),
+                 **{f"{n}{k}": a for k, (R, c) in enumerate(acc) for n, a in (("R", R), ("c", c))})
+        os.replace(tmp, self.path(key))
+
+
+_QR_CHECKPOINT = None      # set by `qr_checkpoint` (the fit pipeline's objective stage); read by linear_qr_statistics
+
+
+@contextlib.contextmanager
+def qr_checkpoint(directory, every=2700.0, log=print):
+    """Checkpoint the host QR statistics pass(es) run inside the block to `directory` every `every`
+    seconds (QRCheckpoint); None: off.  Scoped, not global: radial learning and ARD, which recompute the
+    statistics for every candidate, run outside it."""
+    global _QR_CHECKPOINT
+    prev = _QR_CHECKPOINT
+    _QR_CHECKPOINT = QRCheckpoint(directory, every, log) if directory else None
+    try:
+        yield _QR_CHECKPOINT
+    finally:
+        _QR_CHECKPOINT = prev
+
+
+def problem_key(*trees):
+    """A short digest of every array leaf (dtype, shape, bytes) and scalar of `trees`."""
+    h = hashlib.blake2b(digest_size=12)
+    for leaf in jax.tree.leaves(trees):
+        a = np.asarray(leaf)
+        h.update(f"{a.dtype}{a.shape}".encode())
+        h.update(a.tobytes() if a.dtype != object else repr(leaf).encode())
+    return h.hexdigest()
+
+
+def shard_batches(n_batches, rank, size):
+    """The batches MPI rank `rank` of `size` streams (`aj fit --mpi`): every size-th, interleaved, so each
+    rank sees the dataset's whole range of configuration sizes."""
+    return range(rank, n_batches, size)
+
+
+def merge_factors(a, b):
+    """[(R, c), ...] of two disjoint row sets merged into the factors of their union: the stacked QR of
+    [R_a; R_b] against [c_a; c_b] (tall-skinny QR).  Exact, as the factors of one pass over both.  Both
+    are triangular, so tpqrt skips R_b's zeros too (_host_merge upper=True: ~3x the dense-rows merge)."""
+    return [_host_merge(np.asarray(Ra, np.float64), np.asarray(ca, np.float64), np.asarray(Rb, np.float64),
+                        np.asarray(cb, np.float64), upper=True) for (Ra, ca), (Rb, cb) in zip(a, b)]
+
+
+def tree_schedule(size):
+    """Rounds of (sender, receiver) pairs merging `size` ranks' factors onto rank 0 in ceil(log2 size)
+    rounds: in round k, rank r + 2^k sends to r for every r divisible by 2^(k+1)."""
+    rounds, step = [], 1
+    while step < size:
+        rounds.append([(r + step, r) for r in range(0, size, 2 * step) if r + step < size])
+        step *= 2
+    return rounds
+
+
+class MPIWorkerDone(Exception):
+    """Raised on MPI ranks other than 0 once their factors are merged: rank 0 runs the rest of the fit."""
+
+
+_MPI_COMM = None           # set by `mpi_shards` (aj fit --mpi): linear_qr_statistics shards its host pass over it
+_MPI_CHUNK = 1 << 27       # elements per Send/Recv: below MPI's 2^31 count for any L
+
+
+@contextlib.contextmanager
+def mpi_shards(comm):
+    """Shard the host QR statistics pass(es) run inside the block over the ranks of `comm` (mpi4py); None: off."""
+    global _MPI_COMM
+    prev = _MPI_COMM
+    _MPI_COMM = comm
+    try:
+        yield comm
+    finally:
+        _MPI_COMM = prev
+
+
+def _send_array(comm, a, dest, tag):
+    flat = np.ascontiguousarray(a).reshape(-1)
+    for k, i in enumerate(range(0, max(flat.size, 1), _MPI_CHUNK)):
+        comm.Send(flat[i:i + _MPI_CHUNK], dest=dest, tag=tag + k)
+
+
+def _recv_array(comm, shape, src, tag):
+    flat = np.empty(int(np.prod(shape)), np.float64)
+    for k, i in enumerate(range(0, max(flat.size, 1), _MPI_CHUNK)):
+        comm.Recv(flat[i:i + _MPI_CHUNK], source=src, tag=tag + k)
+    return flat.reshape(shape)
+
+
+def tree_reduce(acc, extra, comm):
+    """Merge every rank's factors `acc` ([(R, c), ...]) and sum its scalar dict `extra` onto rank 0 by
+    `tree_schedule`.  Returns (acc, extra) on rank 0 and None elsewhere.  A receiver merges factor by factor:
+    peak memory its own factors plus one received factor and its merge workspace (~(1 + 2/3 + 2/3) x its own
+    for three equal factors), not two full sets."""
+    acc = list(acc)
+    rank = comm.Get_rank()
+    for rnd in tree_schedule(comm.Get_size()):
+        for src, dst in rnd:
+            if rank == src:
+                comm.send(dict(extra), dest=dst, tag=1)
+                for k, (R, c) in enumerate(acc):
+                    _send_array(comm, R, dst, 1000 * (2 * k + 1)); _send_array(comm, c, dst, 1000 * (2 * k + 2))
+                return None
+            if rank == dst:                  # one factor at a time: peak own + one received + its merge workspace
+                ex = comm.recv(source=src, tag=1)
+                for k, (R, c) in enumerate(acc):
+                    other = (_recv_array(comm, R.shape, src, 1000 * (2 * k + 1)),
+                             _recv_array(comm, c.shape, src, 1000 * (2 * k + 2)))
+                    acc[k] = merge_factors([(R, c)], [other])[0]
+                    del other
+                extra = {k: extra.get(k, 0.0) + v for k, v in ex.items()}
+    return acc, extra
+
+
+def host_qr_stream(batch_rows_fn, ds, init, merge_rows=None, checkpoint=None, key=None, extra=None, batches=None,
+                   progress=None, progress_every=25):
+    """The updating QR of streamed rows, its merges on the host (SciPy, the calling thread).
+    batch_rows_fn(batch) -> [(Pw, yw), ...] (jitted by the caller), one pair per factor;
+    init = [(R0, c0), ...].  Returns [(R, c), ...] as jax arrays.  Each factor's live rows are
+    buffered and merged once merge_target(L, merge_rows) have accumulated, then flushed at the
+    end ('Batched merges' above); device_qr_stream merges at the same rows.
+
+    Why not a lax.scan of jnp.linalg.qr on the CPU: XLA:CPU calls LAPACK (scipy's OpenBLAS)
+    from its own worker threads, and OpenBLAS's multithreaded geqrf, called that way from
+    inside a compiled loop, returned NaN on finite input -- deterministically, with 4 or 8
+    OpenBLAS threads (a GitHub runner's default: 4 vCPUs) on a ~650-column basis, never with
+    1-2 threads nor on the same matrices called directly.  Merges run here never did (tutorial 3,
+    #61).  A device (GPU) backend keeps the scan: its QR is not OpenBLAS.
+
+    checkpoint (a QRCheckpoint) with key: resume from a saved state of the same problem and save every
+    checkpoint.every seconds (after flushing, so a resumed pass merges exactly as an uninterrupted one
+    with the same checkpoints); extra: the caller's dict of scalar accumulators, saved and restored with it.
+    batches: the batch indices to stream (default all; an MPI rank's `shard_batches`); the checkpoint
+    counts positions in it.  progress(done, total): called every progress_every batches and at the end."""
+    order = list(range(ds.n_batches)) if batches is None else list(batches)
+    acc = [(np.asarray(R, np.float64), np.asarray(c, np.float64)) for R, c in init]
+    buf, fill = [[] for _ in acc], [0] * len(acc)
+    start = 0
+    if checkpoint is not None:
+        st = checkpoint.load(key, len(acc))
+        if st is not None:
+            acc, start, ex = st
+            if extra is not None:
+                extra.clear(); extra.update(ex)
+            checkpoint.log(f"checkpoint: QR statistics complete ({checkpoint.path(key)})" if start >= len(order)
+                           else f"checkpoint: QR statistics resumed at batch {start} of {len(order)}")
+    t_save = time.time()
+    target = [max(merge_target(R.shape[1], merge_rows), 1) for R, _ in acc]
+
+    def flush(k):
+        if fill[k]:
+            acc[k] = _host_merge(*acc[k], np.concatenate([p for p, _ in buf[k]]),
+                                 np.concatenate([v for _, v in buf[k]]))
+        buf[k], fill[k] = [], 0
+    for pos in range(start, len(order)):
+        i = order[pos]
+        parts = batch_rows_fn(jax.tree.map(lambda a: a[i], ds))
+        for k, (Pw, yw) in enumerate(parts):
+            Pw, yw = np.asarray(Pw, np.float64), np.asarray(yw, np.float64)
+            keep = np.any(Pw != 0, axis=1) | (yw != 0)
+            if not keep.all():
+                Pw, yw = Pw[keep], yw[keep]
+            buf[k].append((Pw, yw)); fill[k] += len(yw)
+            if fill[k] >= target[k]:
+                flush(k)
+        if progress is not None and ((pos + 1) % progress_every == 0 or pos + 1 == len(order)):
+            progress(pos + 1, len(order))
+        if checkpoint is not None and pos + 1 < len(order) and time.time() - t_save >= checkpoint.every:
+            tf = time.time()
+            for k in range(len(acc)):
+                flush(k)
+            ts = time.time()
+            checkpoint.save(key, acc, pos + 1, extra or {})
+            checkpoint.log(f"checkpoint: saved batch {pos + 1} of {len(order)}: flush {ts - tf:.0f} s, "
+                           f"write {time.time() - ts:.0f} s")
+            t_save = time.time()
+    for k in range(len(acc)):
+        flush(k)
+    if checkpoint is not None and start < len(order):
+        checkpoint.save(key, acc, len(order), extra or {})
+    return [(jnp.asarray(R), jnp.asarray(c)) for R, c in acc]
+
+
+CPU_SCAN_MAX_L = 512     # above this, device_qr_stream on the CPU backend warns (#61, host_qr_stream)
+
+
+def device_qr_stream(rows_fn, ds, init, extra0, merge_rows=None):
+    """host_qr_stream as one lax.scan over the batches, for a device backend.  rows_fn(batch)
+    -> ([(Pw, yw), ...], extra); extra (a pytree like extra0) is summed.  Shapes are static, so
+    each factor carries a (target + r, L) row buffer and a fill count: a batch's r rows are
+    compacted live-first (a stable sort) and written at the fill, which then advances by the
+    live count only; a lax.cond merges the buffer (rows past the fill masked to zero) once the
+    fill reaches the target, so at most target + r rows are ever pending.  The same merge
+    points as host_qr_stream.  Returns ([(R, c), ...], extra).
+
+    Not for the CPU backend beyond small L: XLA:CPU's geqrf inside the scan can return NaN with
+    multithreaded OpenBLAS (#61; host_qr_stream says why), so callers route the CPU to the host
+    and this warns when L > CPU_SCAN_MAX_L there."""
+    if jax.default_backend() == "cpu" and max(jnp.shape(R)[1] for R, _ in init) > CPU_SCAN_MAX_L:
+        import warnings
+        warnings.warn("device_qr_stream on the CPU backend: XLA:CPU's geqrf in a scan can return NaN "
+                      "with multithreaded OpenBLAS at this basis size (#61); use host_qr_stream", stacklevel=2)
+    shapes = jax.eval_shape(rows_fn, jax.tree.map(lambda a: a[0], ds))[0]
+    init = [(jnp.asarray(R), jnp.asarray(c)) for R, c in init]
+    plan = [(max(merge_target(R.shape[1], merge_rows), 1), P.shape[0]) for (R, _), (P, _) in zip(init, shapes)]
+    bufs0 = [(jnp.zeros((t + r, R.shape[1]), R.dtype), jnp.zeros(t + r, R.dtype), jnp.zeros((), jnp.int32))
+             for (t, r), (R, _) in zip(plan, init)]
+
+    def merge(R, c, BP, By, n):
+        m = jnp.arange(BP.shape[0]) < n                         # rows past the fill: stale, masked
+        return _qr_merge(R, c, jnp.where(m[:, None], BP, 0.0), jnp.where(m, By, 0.0))
+
+    def body(carry, batch):
+        fac, bufs, extra = carry
+        parts, ex = rows_fn(batch)
+        fac2, bufs2 = [], []
+        for (t, _), (R, c), (BP, By, n), (Pw, yw) in zip(plan, fac, bufs, parts):
+            live = _live(Pw, yw)
+            o = jnp.argsort(~live, stable=True)                  # live rows first, in order
+            BP = jax.lax.dynamic_update_slice(BP, Pw[o].astype(BP.dtype), (n, jnp.zeros((), jnp.int32)))
+            By = jax.lax.dynamic_update_slice(By, yw[o].astype(By.dtype), (n,))
+            n = n + live.sum(dtype=jnp.int32)
+            R, c, n = jax.lax.cond(n >= t, lambda a: (*merge(*a), jnp.zeros((), jnp.int32)),
+                                   lambda a: (a[0], a[1], a[4]), (R, c, BP, By, n))
+            fac2.append((R, c)); bufs2.append((BP, By, n))
+        return (fac2, bufs2, jax.tree.map(jnp.add, extra, ex)), None
+
+    (fac, bufs, extra), _ = jax.lax.scan(body, (init, bufs0, extra0), ds)
+    out = [jax.lax.cond(n > 0, lambda a: merge(*a), lambda a: (a[0], a[1]), (R, c, BP, By, n))
+           for (R, c), (BP, By, n) in zip(fac, bufs)]                # the final flush
+    return out, extra
+
+
+def _qr_rows(model, cfg, batch):
+    """One batch's weighted linear rows per quantity, and their yy, n, logw increments."""
+    from ..rows import linear_rows_bounded
+    r = linear_rows_bounded(model, cfg, batch)
+    L = cfg.len_basis
+    out = []
+    for P, y, w in ((r.E, batch.y_E, batch.w_E),
+                    (r.F.reshape(-1, L), batch.y_F.reshape(-1), jnp.repeat(batch.w_F, 3)),
+                    (r.V.reshape(-1, L), batch.y_V.reshape(-1), jnp.repeat(batch.w_V, 6))):
+        yw, live = y * w, w > 0
+        out.append((P * w[:, None], yw, yw @ yw, live.sum(),
+                    jnp.sum(jnp.where(live, 2.0 * jnp.log(jnp.where(live, w, 1.0)), 0.0))))
+    return out
+
+
+# the host path's rows with the model as an argument: one compile per (model structure, cfg, shapes).  Opt-in
+# (linear_qr_statistics(cached_rows=True), the ARD stage) -- the default per-call closure is left as it is, since
+# the bit-exact pipeline goldens were recorded with it (linear_qr_statistics' docstring)
+_qr_rows_jit = jax.jit(_qr_rows, static_argnames=("cfg",))
+
+
+@partial(jax.jit, static_argnames=("cfg", "merge_rows"))
+def _device_qr(model, cfg, ds, merge_rows):
+    L = cfg.len_basis
+    zeros = [(np.zeros((L, L)), np.zeros(L))] * 3
+
+    def rows_fn(batch):
+        out = _qr_rows(model, cfg, batch)
+        return [(Pw, yw) for Pw, yw, *_ in out], [o[2:] for o in out]
+    z0 = jnp.zeros(())
+    return device_qr_stream(rows_fn, ds, zeros, [(z0, z0, z0)] * 3, merge_rows)
+
+
+@partial(jax.jit, static_argnames=("cfg", "merge_rows"))
+def _device_qr32(model, cfg, ds, merge_rows):
+    """_device_qr with float32 rows and float32 merges: each quantity's target rides as column L
+    of the rows, so the (L+1) factor carries the residual norm too (QRStats.rho_q).  Targets,
+    weights and the y'y / n / logw sums stay float64."""
+    L = cfg.len_basis
+    f32 = jnp.float32
+    zeros = [(np.zeros((L + 1, L + 1), np.float32), np.zeros(L + 1, np.float32))] * 3
+
+    def rows_fn(batch):
+        out = _qr_rows(model, cfg, batch)
+        return ([(jnp.concatenate([Pw, yw[:, None]], 1).astype(f32), jnp.zeros(yw.shape[0], f32))
+                 for Pw, yw, *_ in out], [o[2:] for o in out])
+    z0 = jnp.zeros(())
+    return device_qr_stream(rows_fn, ds, zeros, [(z0, z0, z0)] * 3, merge_rows)
+
+
+def float32_rows(model, ds):
+    """The model and dataset of float32 design rows: floating model leaves and rij in float32
+    (cast after any float64 preparation of the model); targets and weights stay as they are."""
+    from ...eval.api import with_dtype
+    return (with_dtype(model, jnp.float32),
+            None if ds is None else ds._replace(rij=jnp.asarray(ds.rij, jnp.float32)))
+
+
+def linear_qr_statistics(model, cfg, ds, merge_rows=None, host=None, row_dtype="float64", cached_rows=False):
+    """linear_statistics in QR form (QRStats): one streaming pass over the same linear rows,
+    folded into the per-quantity factors by batched updating QRs (QR_MERGE_ROWS_PER_L) -- on
+    the host on the CPU backend (host_qr_stream says why), as a lax.scan on a device
+    (device_qr_stream).  host: None picks by backend; merge_rows: see host_qr_stream (0 merges
+    every batch).  row_dtype="float32": float32 design rows (`float32_rows`); see the branch below.
+
+    On a device the pass is `_device_qr`, module-level with the model as an argument, so one
+    compile serves every call with the same shapes.  A jit of a fresh closure over the model,
+    built per call, recompiled the whole streaming scan every time: harmless for a fit's single
+    pass, but radial learning calls this at every evaluation with new radials, and on Si o4d16
+    the GPU spent its rounds compiling.  The host (CPU) path still jits its row function per
+    call: taking the model as an argument there moves the bit-exact pipeline goldens (roundoff,
+    amplified by the MAP: 3e-4 in run_linear_pops_auto's coefficients), so it is left for a
+    change that re-records them.  cached_rows=True takes the module-level `_qr_rows_jit` there instead
+    (the ARD stage, which runs several passes per fit and must not recompile on a repeat)."""
+    L = cfg.len_basis
+    zeros = [(np.zeros((L, L)), np.zeros(L))] * 3
+    if host is None:
+        host = jax.default_backend() == "cpu"
+    if row_dtype not in ("float64", "float32"):
+        raise ValueError(f"row_dtype must be 'float64' or 'float32', got {row_dtype!r}")
+    if row_dtype == "float32":
+        # float32 rows (the bulk of a fit's flops); on a device the merges run in float32 too and
+        # carry the residual (QRStats.rho_q).  On the host the merges stay float64 (_host_merge),
+        # where y'y - v'v does not cancel, so no rho
+        model, ds = float32_rows(model, ds)
+        if not host:
+            out, ex = _device_qr32(model, cfg, ds, merge_rows)
+            fac = [(jnp.asarray(Rt[:L, :L], jnp.float64), jnp.asarray(Rt[:L, L], jnp.float64),
+                    jnp.abs(jnp.asarray(Rt[L, L], jnp.float64))) for Rt, _ in out]
+            return QRStats(*(f[0] for f in fac), *(f[1] for f in fac),
+                           *(ex[i][k] for k in range(3) for i in range(3)), *(f[2] for f in fac))
+    if host:
+        rows = ((lambda b: _qr_rows_jit(model, cfg, b)) if cached_rows
+                else jax.jit(lambda b: _qr_rows(model, cfg, b)))
+        scal = {f"{k}_{q}": 0.0 for k in ("yy", "n", "logw") for q in "EFV"}
+
+        def parts(batch):
+            out = rows(batch)
+            for q, (_, _, yy, n, lw) in zip("EFV", out):
+                scal[f"yy_{q}"] += float(yy); scal[f"n_{q}"] += float(n); scal[f"logw_{q}"] += float(lw)
+            return [(Pw, yw) for Pw, yw, *_ in out]
+        ck, comm = _QR_CHECKPOINT, _MPI_COMM
+        rank, size = (0, 1) if comm is None else (comm.Get_rank(), comm.Get_size())
+        key = base = None if ck is None else problem_key(model, ds, row_dtype, L, merge_target(L, merge_rows))
+        if key is not None and size > 1:
+            key = f"{key}-r{rank}of{size}"           # each rank checkpoints its own shard
+        t0 = time.time()
+
+        def report(done, total):                 # per-rank throughput: stderr on every rank, progress.jsonl on 0
+            import sys
+            dt = time.time() - t0
+            print(f"qr stats rank {rank}/{size}: {done}/{total} batches, {dt:.0f} s "
+                  f"({3600.0 * done / max(dt, 1e-9):.1f} batches/h)", file=sys.stderr, flush=True)
+            from .progress import emit
+            emit("qr_batches", rank=rank, size=size, done=done, total=total, seconds=round(dt, 1))
+        acc = host_qr_stream(parts, ds, zeros, merge_rows, checkpoint=ck, key=key, extra=scal,
+                             batches=shard_batches(ds.n_batches, rank, size), progress=report)
+        if size > 1:
+            out = tree_reduce(acc, scal, comm)
+            if out is None:
+                raise MPIWorkerDone(rank)
+            acc, merged = out
+            scal.update(merged)
+            if ck is not None:          # the merged factors under the serial key: a later run on one process (the
+                t = time.time()         # MAP job of the two-job form, `--stats-only`) finds the statistics complete
+                ck.save(base, acc, ds.n_batches, scal)
+                ck.log(f"checkpoint: merged statistics of {size} ranks saved ({ck.path(base)}, {time.time() - t:.0f} s)")
+        (RE, cE), (RF, cF), (RV, cV) = [(jnp.asarray(R), jnp.asarray(c)) for R, c in acc]
+        return QRStats(RE, RF, RV, cE, cF, cV,
+                       *(jnp.asarray(scal[f"{k}_{q}"]) for k in ("yy", "n", "logw") for q in "EFV"))
+    ((RE, cE), (RF, cF), (RV, cV)), ex = _device_qr(model, cfg, ds, merge_rows)
+    return QRStats(RE, RF, RV, cE, cF, cV, *(ex[i][k] for k in range(3) for i in range(3)))
+
+
+def _residual_type_stats(Phi_B, Phi_M, y, w):
+    """G_BM, G_MM, b_M for one type; the cross block reuses the (theta-indep)
+    linear rows but is theta-dependent through Phi_M."""
+    Bw, Mw, yw = Phi_B * w[:, None], Phi_M * w[:, None], y * w
+    return Bw.T @ Mw, Mw.T @ Mw, Mw.T @ yw
+
+
+def batch_residual_stats(theta, spec, model, ind, cfg, batch):
+    r = batch_rows(theta, spec, model, ind, cfg, batch)
+    L, Dt = cfg.len_basis, r.E.shape[-1]
+    sl = lambda A: (A[..., :L], A[..., L:])
+    parts = []
+    for R, y, w, reps in ((r.E, batch.y_E, batch.w_E, 1),
+                          (r.F, batch.y_F, batch.w_F, 3),
+                          (r.V, batch.y_V, batch.w_V, 6)):
+        B, Mrows = sl(R.reshape(-1, Dt))
+        parts.append(_residual_type_stats(B, Mrows, y.reshape(-1), jnp.repeat(w, reps)))
+    return ResidualStats(parts[0][0], parts[1][0], parts[2][0],
+                         parts[0][1], parts[1][1], parts[2][1],
+                         parts[0][2], parts[1][2], parts[2][2])
+
+
+def residual_statistics(theta, spec, model, ind, cfg, ds):
+    L, M = cfg.len_basis, ind.XM.shape[0]
+    zBM, zMM, zM = jnp.zeros((L, M)), jnp.zeros((M, M)), jnp.zeros(M)
+    zero = ResidualStats(zBM, zBM, zBM, zMM, zMM, zMM, zM, zM, zM)
+    f = jax.checkpoint(lambda th, b: batch_residual_stats(th, spec, model, ind, cfg, b))
+    return jax.lax.scan(lambda c, b: (jax.tree.map(jnp.add, c, f(theta, b)), None), zero, ds)[0]
+
+
+def assemble_statistics(lin, res):
+    """Full Stats (Dt = L + M) from the cached linear part and a residual part."""
+    def blk(GBB, GBM, GMM):
+        return jnp.block([[GBB, GBM], [GBM.T, GMM]])
+    G_E = blk(lin.G_E, res.GBM_E, res.GMM_E)
+    G_F = blk(lin.G_F, res.GBM_F, res.GMM_F)
+    G_V = blk(lin.G_V, res.GBM_V, res.GMM_V)
+    cat = jnp.concatenate
+    return Stats(G_E, G_F, G_V,
+                 cat([lin.b_E, res.bM_E]), cat([lin.b_F, res.bM_F]), cat([lin.b_V, res.bM_V]),
+                 lin.yy_E, lin.yy_F, lin.yy_V, lin.n_E, lin.n_F, lin.n_V,
+                 lin.logw_E, lin.logw_F, lin.logw_V)
+
+
+# ---------------------------------------------------------------------------
+# Per-(quantity, TYPE) statistics.  These mirror the single-type functions above
+# but split each quantity's rows by their config-type index and accumulate one
+# Stats block PER TYPE (a leading n_types axis on every field).  The split is a
+# weight MASK (w * (type == t)) -- the structural weights carry NO sigma, so each
+# per-(q,t) Gram stays theta-INDEPENDENT and cacheable exactly like the linear
+# statistics above.  The per-type noise sigma_{q,t} enters only in the objective
+# (objective.combine), NOT the Gram, which is what preserves the streamed
+# theta-independent Gram caching.  With a single type these reduce (up to the
+# leading size-1 axis) to the functions above, so the fit is bit-identical.
+
+def _linear_type_stats_typed(Phi_B, y, w, tidx, n_types):
+    comps = [_linear_type_stats(Phi_B, y, jnp.where(tidx == t, w, 0.0))
+             for t in range(n_types)]
+    return tuple(jnp.stack([c[k] for c in comps]) for k in range(5))
+
+
+def batch_linear_stats_typed(model, cfg, batch, n_types):
+    from ..rows import linear_rows_bounded
+    r = linear_rows_bounded(model, cfg, batch)
+    L = r.E.shape[-1]
+    E = _linear_type_stats_typed(r.E, batch.y_E, batch.w_E, batch.cfg_type, n_types)
+    F = _linear_type_stats_typed(r.F.reshape(-1, L), batch.y_F.reshape(-1),
+                                 jnp.repeat(batch.w_F, 3), jnp.repeat(batch.node_type, 3), n_types)
+    V = _linear_type_stats_typed(r.V.reshape(-1, L), batch.y_V.reshape(-1),
+                                 jnp.repeat(batch.w_V, 6), jnp.repeat(batch.cfg_type, 6), n_types)
+    return Stats(E[0], F[0], V[0], E[1], F[1], V[1], E[2], F[2], V[2],
+                 E[3], F[3], V[3], E[4], F[4], V[4])
+
+
+def linear_statistics_typed(model, cfg, ds, n_types):
+    """theta-independent linear statistics, one Stats block per type
+    (leading n_types axis on every field)."""
+    L = cfg.len_basis
+    z2, z1, z0 = jnp.zeros((n_types, L, L)), jnp.zeros((n_types, L)), jnp.zeros((n_types,))
+    zero = Stats(z2, z2, z2, z1, z1, z1, z0, z0, z0, z0, z0, z0, z0, z0, z0)
+    f = jax.checkpoint(lambda b: batch_linear_stats_typed(model, cfg, b, n_types))
+    return jax.lax.scan(lambda c, b: (jax.tree.map(jnp.add, c, f(b)), None), zero, ds)[0]
+
+
+def _residual_type_stats_typed(Phi_B, Phi_M, y, w, tidx, n_types):
+    comps = [_residual_type_stats(Phi_B, Phi_M, y, jnp.where(tidx == t, w, 0.0))
+             for t in range(n_types)]
+    return tuple(jnp.stack([c[k] for c in comps]) for k in range(3))
+
+
+def batch_residual_stats_typed(theta, spec, model, ind, cfg, batch, n_types):
+    r = batch_rows(theta, spec, model, ind, cfg, batch)
+    L, Dt = cfg.len_basis, r.E.shape[-1]
+    sl = lambda A: (A[..., :L], A[..., L:])
+    parts = []
+    for R, y, w, tidx, reps in (
+            (r.E, batch.y_E, batch.w_E, batch.cfg_type, 1),
+            (r.F, batch.y_F, batch.w_F, jnp.repeat(batch.node_type, 3), 3),
+            (r.V, batch.y_V, batch.w_V, jnp.repeat(batch.cfg_type, 6), 6)):
+        B, Mrows = sl(R.reshape(-1, Dt))
+        parts.append(_residual_type_stats_typed(B, Mrows, y.reshape(-1),
+                                                jnp.repeat(w, reps), tidx, n_types))
+    return ResidualStats(parts[0][0], parts[1][0], parts[2][0],
+                         parts[0][1], parts[1][1], parts[2][1],
+                         parts[0][2], parts[1][2], parts[2][2])
+
+
+def residual_statistics_typed(theta, spec, model, ind, cfg, ds, n_types):
+    L, M = cfg.len_basis, ind.XM.shape[0]
+    zBM, zMM, zM = (jnp.zeros((n_types, L, M)), jnp.zeros((n_types, M, M)),
+                    jnp.zeros((n_types, M)))
+    zero = ResidualStats(zBM, zBM, zBM, zMM, zMM, zMM, zM, zM, zM)
+    f = jax.checkpoint(lambda th, b: batch_residual_stats_typed(th, spec, model, ind, cfg, b, n_types))
+    return jax.lax.scan(lambda c, b: (jax.tree.map(jnp.add, c, f(theta, b)), None), zero, ds)[0]
+
+
+def assemble_statistics_typed(lin, res):
+    """Per-type full Stats: vmap assemble_statistics over the leading type axis."""
+    return jax.vmap(assemble_statistics)(lin, res)
+
+
+# ---------------------------------------------------------------------------
+# Streamed POPS statistics (Task 9).  One extra pass over the dataset that
+# produces the SAME per-point misspecification corrections `deltas` as Task-8's
+# pops_corrections on the whole (whitened) design assembled at once, but never
+# materialises more than one batch's rows.
+#
+# Per batch we build the linear rows (rows.linear_rows, the M=0 arm), whiten
+# each quantity's rows/residual by w/sigma_q (Task 7's pops.whiten), and compute
+# the per-point correction delta_i and leverage h_i with pops.pointwise_corrections
+# (Task 8's formula, NO boolean masking -- jit-safe under scan).  The scan stacks
+# every batch's (delta, h); the leverage_pct subselection is applied ONCE,
+# eagerly, after the scan (pops.leverage_select), which is where the only
+# non-jit-safe boolean lives.  With leverage_pct=0 every point (including padded
+# w=0 rows, which carry delta=0, h=0) is kept, so streaming == monolithic
+# elementwise (tests/test_gp_stats.py).
+
+def _batch_pops_pointwise(model, cfg, batch, c_star, Sigma0, sigma):
+    """One batch's per-point corrections and leverages, quantities concatenated
+    in E, F, V order.  `sigma` maps 'E'/'F'/'V' -> per-quantity noise scale."""
+    from ...uq.pops import pointwise_corrections, whiten
+    from ..rows import linear_rows_bounded
+    r = linear_rows_bounded(model, cfg, batch)
+    L = r.E.shape[-1]
+    ds_d, ds_h = [], []
+    for phi, y, w, sq in (
+            (r.E, batch.y_E, batch.w_E, sigma["E"]),
+            (r.F.reshape(-1, L), batch.y_F.reshape(-1), jnp.repeat(batch.w_F, 3), sigma["F"]),
+            (r.V.reshape(-1, L), batch.y_V.reshape(-1), jnp.repeat(batch.w_V, 6), sigma["V"])):
+        phi_t, r_t = whiten(phi, y - phi @ c_star, w, sq)
+        d, h = pointwise_corrections(Sigma0, phi_t, r_t)
+        ds_d.append(d); ds_h.append(h)
+    return jnp.concatenate(ds_d, 0), jnp.concatenate(ds_h, 0)
+
+
+def _stream_pops_pointwise(model, cfg, ds, c_star, Sigma0, sigma):
+    """Stream _batch_pops_pointwise over ds, returning all per-point (deltas, h)
+    flattened batch-major.  jit-safe (no boolean masking)."""
+    body = lambda carry, batch: (
+        carry, _batch_pops_pointwise(model, cfg, batch, c_star, Sigma0, sigma))
+    _, (dd, hh) = jax.lax.scan(body, 0.0, ds)        # dd (B, P, L), hh (B, P)
+    L = dd.shape[-1]
+    return dd.reshape(-1, L), hh.reshape(-1)
+
+
+def pops_statistics(c_star, Sigma0, prob, ds, sigma, *, leverage_pct=0.0):
+    """Streamed POPS pointwise corrections over the dataset ``ds``.
+
+    Returns the SAME ``deltas`` (K, L) as Task-8's ``pops.pops_corrections`` on
+    the whole whitened design assembled in one batch, but streams ``ds`` one
+    batch at a time (peak memory is one batch's rows plus the accumulated
+    per-point (delta, h)).
+
+    Parameters
+    ----------
+    c_star : (L,) array     fitted linear weights (``objective.posterior`` mean).
+    Sigma0 : (L, L) array   epistemic weight covariance ``A^{-1}``
+                            (``objective.posterior``'s precision inverse).
+    prob   : Problem        supplies ``model``/``cfg`` for the linear rows.
+    ds     : Dataset        streamed, leading batch axis (the same ``ds`` fed to
+                            the statistics/LML; splitting it into more batches
+                            leaves ``deltas`` unchanged).
+    sigma  : mapping        per-quantity noise scales, keys ``'E'``/``'F'``/``'V'``
+                            (single config-type; per-type sigma is a documented
+                            extension, not implemented here).
+    leverage_pct : float    keyword-only; percentile in [0, 100], 0 keeps all.
+    """
+    from ...uq.pops import leverage_select
+    deltas, h = _stream_pops_pointwise(prob.model, prob.cfg, ds, c_star, Sigma0, sigma)
+    return leverage_select(deltas, h, leverage_pct)
+
+
+# ---------------------------------------------------------------------------
+# Streaming POPS (Swinburne & Perez, structural weights).  Every member is
+# delta_i = A phi_i c_i  with  c_i = r_i / h_i,  h_i = phi_i . A . phi_i  (A
+# symmetric), so the statistics the predictive needs are Gram-shaped:
+#     sum delta delta^T = A (sum c_i^2 phi_i phi_i^T) A,   sum delta = A (sum c_i phi_i)
+# and the (K, L) matrix of corrections is never formed.  Memory is O(L^2) plus two
+# scalars per observation; each pass holds one batch of rows.
+# ---------------------------------------------------------------------------
+
+def _pops_batch_rows(model, cfg, batch, qs=(1.0, 1.0, 1.0)):
+    """Loss-weighted rows w*phi, weighted target w*y and raw rows phi for one
+    batch, quantities concatenated E, F, V (padded rows carry w = 0).  The weight
+    is the structural weight times the per-quantity loss scale qs = (1/sigma_E,
+    1/sigma_F, 1/sigma_V)."""
+    from ..rows import linear_rows_bounded
+    r = linear_rows_bounded(model, cfg, batch)
+    L = r.E.shape[-1]
+    phi = jnp.concatenate([r.E, r.F.reshape(-1, L), r.V.reshape(-1, L)])
+    y = jnp.concatenate([batch.y_E, batch.y_F.reshape(-1), batch.y_V.reshape(-1)])
+    w = jnp.concatenate([batch.w_E * qs[0], jnp.repeat(batch.w_F, 3) * qs[1], jnp.repeat(batch.w_V, 6) * qs[2]])
+    return phi * w[:, None], w * y, phi
+
+
+def pops_leverage_residual(model, cfg, ds, c_star, A, qs=(1.0, 1.0, 1.0)):
+    """Pass 1: whitened leverage h_i = pw_i . A . pw_i and residual r_i = w_i (y_i -
+    phi_i . c*) of every row, each (n_batches, rows_per_batch).  Padded rows have
+    h = 0 (w = 0)."""
+    def body(carry, batch):
+        pw, wy, phi = _pops_batch_rows(model, cfg, batch, qs)
+        h = jnp.sum((pw @ A) * pw, axis=1)
+        r = wy - (pw @ c_star)
+        return carry, (h, r)
+    _, (h, r) = jax.lax.scan(body, 0.0, ds)
+    return h, r
+
+
+def pops_moment_sums(model, cfg, ds, coef, qs=(1.0, 1.0, 1.0)):
+    """Pass 2: W = sum_i coef_i^2 pw_i pw_i^T and s = sum_i coef_i pw_i, with
+    coef (n_batches, rows) = r/h on member rows and 0 elsewhere."""
+    def body(carry, xs):
+        batch, c = xs
+        pw, _, _ = _pops_batch_rows(model, cfg, batch, qs)
+        pc = pw * c[:, None]
+        W, s = carry
+        return (W + pc.T @ pc, s + pw.T @ c), None
+    return jax.lax.scan(body, _moment_init(model, cfg, ds), (ds, coef))[0]
+
+
+def _moment_init(model, cfg, ds):
+    first = jax.tree.map(lambda a: a[0], ds)
+    L = jax.eval_shape(lambda b: _pops_batch_rows(model, cfg, b)[0], first).shape[-1]
+    return jnp.zeros((L, L)), jnp.zeros(L)
+
+
+def pops_projection_bounds(model, cfg, ds, coef, keep, B, qs=(1.0, 1.0, 1.0)):
+    """Pass 3: per-axis min / max over member rows of the projected corrections
+    (pw_i @ B) * coef_i, with B = A @ support (L, d).  Exact for zero percentile
+    clipping (the hypercube default)."""
+    d = B.shape[1]
+    def body(carry, xs):
+        batch, c, k = xs
+        pw, _, _ = _pops_batch_rows(model, cfg, batch, qs)
+        proj = (pw @ B) * c[:, None]
+        lo, hi = carry
+        lo = jnp.minimum(lo, jnp.min(jnp.where(k[:, None], proj, jnp.inf), axis=0))
+        hi = jnp.maximum(hi, jnp.max(jnp.where(k[:, None], proj, -jnp.inf), axis=0))
+        return (lo, hi), None
+    init = (jnp.full(d, jnp.inf), jnp.full(d, -jnp.inf))
+    return jax.lax.scan(body, init, (ds, coef, keep))[0]
+
+
+def pops_envelope_streamed(model, cfg, ds, coef, keep, Q, qs=(1.0, 1.0, 1.0)):
+    """Member min / max of the prediction shift phi* . delta_i = (Q @ pw_i) * coef_i
+    at test rows, with Q = phi* @ A (n, L).  Returns (lo, hi), each (n,)."""
+    n = Q.shape[0]
+    def body(carry, xs):
+        batch, c, k = xs
+        pw, _, _ = _pops_batch_rows(model, cfg, batch, qs)
+        shift = (Q @ pw.T) * c[None, :]                       # (n, rows)
+        lo, hi = carry
+        lo = jnp.minimum(lo, jnp.min(jnp.where(k[None, :], shift, jnp.inf), axis=1))
+        hi = jnp.maximum(hi, jnp.max(jnp.where(k[None, :], shift, -jnp.inf), axis=1))
+        return (lo, hi), None
+    init = (jnp.full(n, jnp.inf), jnp.full(n, -jnp.inf))
+    return jax.lax.scan(body, init, (ds, coef, keep))[0]
+
+
+# ---------------------------------------------------------------------------
+# Host-cached POPS rows.  Every pass above recomputes the ACE design rows
+# (linear_rows: the descriptor Jacobian) for the whole training set; a POPS fit is
+# ~5 passes per ridge, so ridge selection over a 13-value grid re-ran the basis ~40
+# times (2.8 h at the production Cantor basis, where one pass is ~4 min).  HostRows
+# evaluates the rows ONCE, keeps the loss-weighted live rows in host RAM in
+# fixed-size blocks, and every pass streams those blocks through small jitted
+# kernels.  Memory: n_live_rows * L * 8 B on the host (~85 GB for Cantor-2560 at
+# L = 27.6k), one block on the device.
+# ---------------------------------------------------------------------------
+
+def _pops_live_rows(model, cfg, batch, qs):
+    pw, wy, _ = _pops_batch_rows(model, cfg, batch, qs)
+    w = jnp.concatenate([batch.w_E, jnp.repeat(batch.w_F, 3), jnp.repeat(batch.w_V, 6)])
+    return pw, wy, w
+
+
+@jax.jit
+def _k_gram(acc, pw, wy):
+    M, b = acc
+    return M + pw.T @ pw, b + pw.T @ wy
+
+
+@jax.jit
+def _k_leverage(pw, wy, c, A):
+    return jnp.sum((pw @ A) * pw, axis=1), wy - pw @ c
+
+
+@jax.jit
+def _k_moments(acc, pw, c):
+    W, s = acc
+    pc = pw * c[:, None]
+    return W + pc.T @ pc, s + pw.T @ c
+
+
+@jax.jit
+def _k_bounds(acc, pw, c, k, B):
+    lo, hi = acc
+    proj = (pw @ B) * c[:, None]
+    return (jnp.minimum(lo, jnp.min(jnp.where(k[:, None], proj, jnp.inf), axis=0)),
+            jnp.maximum(hi, jnp.max(jnp.where(k[:, None], proj, -jnp.inf), axis=0)))
+
+
+@jax.jit
+def _k_envelope(acc, pw, c, k, Q):
+    lo, hi = acc
+    shift = (Q @ pw.T) * c[None, :]
+    return (jnp.minimum(lo, jnp.min(jnp.where(k[None, :], shift, jnp.inf), axis=1)),
+            jnp.maximum(hi, jnp.max(jnp.where(k[None, :], shift, -jnp.inf), axis=1)))
+
+
+class HostRows:
+    """The POPS row passes over loss-weighted live rows cached in host RAM.
+
+    ``blocks`` are (block, L) float64 host arrays of w*phi (the last one padded with
+    zero rows, which have h = 0 and so count as padding everywhere), ``targets`` the
+    matching w*y.  Per-row outputs (h, r, coef, keep) are (n_blocks, block) arrays."""
+
+    def __init__(self, model, cfg, ds, qs=(1.0, 1.0, 1.0), block=16384):
+        f = jax.jit(lambda b: _pops_live_rows(model, cfg, b, qs))
+        self.block, self.blocks, self.targets, self.n_rows = block, [], [], 0
+        buf = tbuf = None
+        fill = 0
+        for i in range(ds.n_batches):
+            pw, wy, w = f(jax.tree.map(lambda a: a[i], ds))
+            live = np.asarray(w) > 0
+            pw, wy = np.asarray(pw)[live], np.asarray(wy)[live]
+            self.n_rows += len(pw)
+            j = 0
+            while j < len(pw):
+                if buf is None:
+                    buf, tbuf, fill = np.zeros((block, pw.shape[1])), np.zeros(block), 0
+                n = min(block - fill, len(pw) - j)
+                buf[fill:fill + n], tbuf[fill:fill + n] = pw[j:j + n], wy[j:j + n]
+                fill += n; j += n
+                if fill == block:
+                    self.blocks.append(buf); self.targets.append(tbuf); buf = None
+        if buf is not None:
+            self.blocks.append(buf); self.targets.append(tbuf)
+        self.L = self.blocks[0].shape[1]
+
+    def _stream(self):
+        for pw, wy in zip(self.blocks, self.targets):
+            yield jax.device_put(pw), jax.device_put(wy)
+
+    def gram(self):
+        """M = sum pw^T pw and b = sum pw^T wy (the POPS data Gram and moment)."""
+        acc = (jnp.zeros((self.L, self.L)), jnp.zeros(self.L))
+        for pw, wy in self._stream():
+            acc = _k_gram(acc, pw, wy)
+        return acc
+
+    def leverage_residual(self, c_star, A):
+        out = [_k_leverage(pw, wy, c_star, A) for pw, wy in self._stream()]
+        return jnp.stack([h for h, _ in out]), jnp.stack([r for _, r in out])
+
+    def moment_sums(self, coef):
+        acc = (jnp.zeros((self.L, self.L)), jnp.zeros(self.L))
+        for (pw, _), c in zip(self._stream(), coef):
+            acc = _k_moments(acc, pw, c)
+        return acc
+
+    def projection_bounds(self, coef, keep, B):
+        d = B.shape[1]
+        acc = (jnp.full(d, jnp.inf), jnp.full(d, -jnp.inf))
+        for (pw, _), c, k in zip(self._stream(), coef, keep):
+            acc = _k_bounds(acc, pw, c, k, B)
+        return acc
+
+    def envelope(self, coef, keep, Q):
+        n = Q.shape[0]
+        acc = (jnp.full(n, jnp.inf), jnp.full(n, -jnp.inf))
+        for (pw, _), c, k in zip(self._stream(), coef, keep):
+            acc = _k_envelope(acc, pw, c, k, Q)
+        return acc
+
+
+class DeviceRows:
+    """The same passes as HostRows, recomputing the rows inside each scan (no host
+    memory; one ACE evaluation of the training set per pass)."""
+
+    def __init__(self, model, cfg, ds, qs=(1.0, 1.0, 1.0)):
+        self.model, self.cfg, self.ds, self.qs = model, cfg, ds, qs
+
+    def leverage_residual(self, c_star, A):
+        return pops_leverage_residual(self.model, self.cfg, self.ds, c_star, A, self.qs)
+
+    def moment_sums(self, coef):
+        return pops_moment_sums(self.model, self.cfg, self.ds, coef, self.qs)
+
+    def projection_bounds(self, coef, keep, B):
+        return pops_projection_bounds(self.model, self.cfg, self.ds, coef, keep, B, self.qs)
+
+    def envelope(self, coef, keep, Q):
+        return pops_envelope_streamed(self.model, self.cfg, self.ds, coef, keep, Q, self.qs)
+
+
+def host_rows_bytes(ds, L):
+    """Host RAM HostRows would take for ds at basis size L (live rows only)."""
+    live = int(np.sum(np.asarray(ds.w_E) > 0) + 3 * np.sum(np.asarray(ds.w_F) > 0)
+               + 6 * np.sum(np.asarray(ds.w_V) > 0))
+    return live * L * 8
+
+
+def available_host_bytes():
+    """The memory limit this process runs under: the cgroup limit (containers) or
+    physical RAM."""
+    import os
+    for p in ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"):
+        try:
+            v = open(p).read().strip()
+            if v.isdigit() and int(v) < 1 << 60:
+                return int(v)
+        except OSError:
+            pass
+    return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")

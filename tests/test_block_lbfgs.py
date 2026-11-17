@@ -1,4 +1,4 @@
-"""fit.block_lbfgs: curvature-matched block scaling and the joint -> alternating fallback,
+"""fit.linear.block_lbfgs: curvature-matched block scaling and the joint -> alternating fallback,
 on toy objectives with known curvature."""
 import jax
 import numpy as np
@@ -7,7 +7,7 @@ import pytest
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 
-from ace_jax.fit import block_lbfgs as bl
+from ace_jax.fit.linear import block_lbfgs as bl
 
 
 def quad(blocks, a, b, c):
@@ -98,7 +98,7 @@ def test_joint_linesearch_failure_falls_back_to_alternating(monkeypatch):
 def test_hooks_and_single_compile():
     """normalise / after_round run once per round; changing arg VALUES between rounds
     reuses the compiled step."""
-    from ace_jax.fit.radial_learn import _lbfgs_step
+    from ace_jax.fit.radial.learn import _lbfgs_step
     seen = []
 
     def normalise(blocks):

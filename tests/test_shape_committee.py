@@ -21,7 +21,7 @@ def _setup(name, seed=0):
 
     from ace_jax.eval import load
     from ace_jax.fit.data import Config, build_dataset
-    from ace_jax.fit.inducing import GPConfig
+    from ace_jax.fit.gp.inducing import GPConfig
     path = FIXTURE_DIR / CASES[name][0]
     if not path.exists():
         pytest.skip(f"missing {path.name}")
@@ -40,7 +40,7 @@ def _setup(name, seed=0):
 
 
 def _rows_shape(model, g, b, R, dinv):
-    from ace_jax.fit.jackknife import atom_shape
+    from ace_jax.uq.jackknife import atom_shape
     from ace_jax.fit.rows import linear_rows
     F = np.asarray(linear_rows(model, g, b)[0].F)
     return atom_shape(R, dinv, F)
@@ -49,7 +49,7 @@ def _rows_shape(model, g, b, R, dinv):
 @pytest.mark.parametrize("name", sorted(CASES))
 @pytest.mark.parametrize("chunk", [None, 7])
 def test_committee_shape_equals_rows_shape(name, chunk):
-    from ace_jax.fit.jackknife import committee_shape
+    from ace_jax.uq.jackknife import committee_shape
     model, g, b = _setup(name)
     L = g.len_basis
     rng = np.random.default_rng(1)
@@ -66,7 +66,7 @@ def test_committee_shape_equals_rows_shape(name, chunk):
 
 def test_committee_ignores_trailing_e0_columns():
     """A joint-E0 posterior's R has NZ E0 rows after the readout; force rows are zero there."""
-    from ace_jax.fit.jackknife import committee_shape
+    from ace_jax.uq.jackknife import committee_shape
     model, g, b = _setup("si")
     rng = np.random.default_rng(2)
     R = rng.normal(size=(g.len_basis, 4))
@@ -78,7 +78,7 @@ def test_committee_ignores_trailing_e0_columns():
 
 
 def test_truncate_shape_factor():
-    from ace_jax.fit.jackknife import truncate_shape_factor
+    from ace_jax.uq.jackknife import truncate_shape_factor
     rng = np.random.default_rng(3)
     R = rng.normal(size=(40, 12)) @ np.diag(2.0 ** -np.arange(12))
     Rt = truncate_shape_factor(R, 1.0)

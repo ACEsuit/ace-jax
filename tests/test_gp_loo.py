@@ -11,12 +11,12 @@ import jax.numpy as jnp
 from ace_jax.eval import highest_precision, load
 from ace_jax.fit.data import build_dataset, load_configs
 from ace_jax.fit.hypers import Hypers, default_prior, to_array
-from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
-from ace_jax.fit.kernels import KernelSpec
-from ace_jax.fit.loo import config_row_index, loo_objective
-from ace_jax.fit.objective import Problem, make_log_density, posterior
+from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features
+from ace_jax.fit.gp.kernels import KernelSpec
+from ace_jax.uq.loo import config_row_index, loo_objective
+from ace_jax.fit.linear.objective import Problem, make_log_density, posterior
 from ace_jax.fit.rows import batch_rows
-from ace_jax.fit.stats import sufficient_statistics
+from ace_jax.fit.linear.stats import sufficient_statistics
 
 XYZ = FIXTURE_DIR / "si_tiny_train.xyz"
 pytestmark = pytest.mark.skipif(not XYZ.exists(), reason="missing si_tiny_train.xyz")

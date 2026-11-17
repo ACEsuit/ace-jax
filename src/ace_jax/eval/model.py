@@ -145,7 +145,7 @@ class ACEModel(EdgeSiteModel):
     # part of `lean`): the energy is unchanged, but the pair channel is no longer
     # Apair, so the basis methods (descriptors, Jacobians, fitting rows) refuse.
     energy_only: bool = eqx.field(static=True, default=False)
-    # The tensor radial's Wnlq were learned (`fit.radial_model.with_radial`,
+    # The tensor radial's Wnlq were learned (`fit.radial.model.with_radial`,
     # `radial_learn`), not exported or authored.  `lean`'s default ("auto")
     # splines an analytic R_nl only when this is set; stored as meta_json
     # "radial_learned" (absent = False).  Only the tensor radial is ever learned.
@@ -207,7 +207,7 @@ class ACEModel(EdgeSiteModel):
         """(E, n_q) the analytic tensor radial's basis per edge, R_nl = sum_q basis_q W_nlq:
         env(x) P_q(x) ("poly"), or PACE's g_k(r) ("sbessel", `pace_radial._sbessel` on [0, rc]
         with rc the pair cutoff, zero from rc on).  The single definition the learner's Gram,
-        roughness and conversions read (`fit.radial_model`)."""
+        roughness and conversions read (`fit.radial.model`)."""
         n_q = self.rnl_Wnlq.shape[-1]
         if self.rnl_basis == "sbessel":
             from .pace_radial import _sbessel

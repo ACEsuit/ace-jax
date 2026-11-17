@@ -42,8 +42,8 @@ def descriptors(calc, frames, log=print):
 
 def build(a):
     from ace_jax.calc.point import ACECalculator
-    from ace_jax.fit.ard import ARDPosterior
-    from ace_jax.fit.support import build_support, explained_variance, fit_pca, flatten_support, n_pass, \
+    from ace_jax.uq.ard import ARDPosterior
+    from ace_jax.uq.support import build_support, explained_variance, fit_pca, flatten_support, n_pass, \
         support_body, support_features
     post = ARDPosterior.load(a.posterior)
     calc = ACECalculator(a.model, posterior=a.posterior)
@@ -95,14 +95,14 @@ def build(a):
 
 
 def load_ref(path):
-    from ace_jax.fit.support import unflatten_support
+    from ace_jax.uq.support import unflatten_support
     z = np.load(path)
     return unflatten_support({k[8:]: z[k] for k in z.files if k.startswith("support_")})
 
 
 def evaluate(ref, sets, alpha, calc=None):
     """{name: {family: (frac flagged, n_eff median, atoms)}}; support_check per configuration (as served)."""
-    from ace_jax.fit.support import support_check
+    from ace_jax.uq.support import support_check
     res = {}
     for name, (X, Z, cfg, fam) in sets.items():
         bad, ne, fams = np.zeros(len(Z), bool), [], np.asarray(fam)
@@ -167,7 +167,7 @@ def main(argv=None):
         build(a)
         return
     from ace_jax.calc.point import ACECalculator
-    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.uq.ard import ARDPosterior
     post = ARDPosterior.load(a.posterior)
     calc = ACECalculator(a.model, posterior=a.posterior)
     alpha = float(np.asarray(post.group_table["alpha"]))

@@ -4,7 +4,7 @@ import pytest
 
 jax.config.update("jax_enable_x64", True)
 
-from ace_jax.fit.pops import (
+from ace_jax.uq.pops import (
     pops_corrections,
     pops_envelope,
     pops_posterior,

@@ -28,13 +28,13 @@ from ase.io import read                                                         
 from jax.scipy.linalg import cho_solve, solve_triangular                          # noqa: E402
 
 from ace_jax.eval import highest_precision                                          # noqa: E402
-from ace_jax.fit.ard import (ARDEvidence, ard_gamma, ard_posterior, body_order_columns,      # noqa: E402
+from ace_jax.uq.ard import (ARDEvidence, ard_gamma, ard_posterior, body_order_columns,      # noqa: E402
                              joint_ard_stats)
 from ace_jax.fit.data import Config, build_dataset                                  # noqa: E402
 from ace_jax.fit.pipeline import FitConfig, load_fit_data                           # noqa: E402
 from ace_jax.fit.pipeline.problem import build_problem                              # noqa: E402
 from ace_jax.fit.rows import chunked_rows_fn, linear_rows                           # noqa: E402
-from ace_jax.fit.stats import linear_statistics                                     # noqa: E402
+from ace_jax.fit.linear.stats import linear_statistics                                     # noqa: E402
 
 data, run = sys.argv[1], sys.argv[2]
 T0 = time.time()

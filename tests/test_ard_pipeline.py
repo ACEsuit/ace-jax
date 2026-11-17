@@ -52,7 +52,7 @@ def ard_fit():
 
 
 def test_fit_ard_predicts_with_tempered_force_variance(ard_fit):
-    from ace_jax.fit.ard import predict_ard
+    from ace_jax.uq.ard import predict_ard
     res = ard_fit
     assert res.ard is not None and res.ard.posterior.kappa > 0
     p = res.preds.arrays["test/map"]
@@ -63,7 +63,7 @@ def test_fit_ard_predicts_with_tempered_force_variance(ard_fit):
 
 def test_write_outputs_saves_posterior_and_report(ard_fit, tmp_path):
     from ace_jax import ACECalculator
-    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.uq.ard import ARDPosterior
     from ace_jax.fit.pipeline import write_outputs
     from ase import Atoms
     write_outputs(ard_fit, tmp_path, layout=("cli",), argv={})
@@ -119,7 +119,7 @@ def test_joint_ard_noise_comes_from_the_ard_refit(ard_fit):
 
 def test_fit_hands_the_cached_statistics_to_the_ard_stage(monkeypatch):
     """I1: fit() passes the objective's cached linear statistics to run_ard_stage (joint mode)."""
-    from ace_jax.fit import ard
+    from ace_jax.uq import ard
     from ace_jax.fit.pipeline import fit, load_fit_data
     seen = []
     real = ard.run_ard_stage
@@ -137,7 +137,7 @@ def test_fit_hands_the_cached_statistics_to_the_ard_stage(monkeypatch):
 def test_ard_checkpoint_survives_a_failure_in_prediction(tmp_path, monkeypatch):
     """I2: the stock checkpoint writer writes posterior.npz and ard.json when the "ard" stage fires."""
     import ace_jax.fit.pipeline.run as R
-    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.uq.ard import ARDPosterior
     from ace_jax.fit.pipeline import load_fit_data
     from ace_jax.fit.pipeline.outputs import checkpoint_writer
 
