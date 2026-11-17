@@ -184,3 +184,28 @@ def test_fit_to_selected_atoms(basis_spdf):
     pred = model.predict(d.positions, d.cell, d.numbers)
     # atoms 2 and 3 were not fitted but are equivalent to 0 and 1
     assert max(np.abs(pred["H"][k] - d.blocks["H"][k]).max() for k in pred["H"]) < 1e-6
+
+
+def test_fit_statistics_are_generic_factors(basis_spdf):
+    """`stats=True`: one `fit.linear.stats.Factor` per design (species, L, parity), with a
+    right-hand side per (shell pair, channel).  The posterior mean of the generic diagonal-prior
+    model from it is the fitted coefficient, its evidence is finite, and two copies of the data
+    give twice the Gram."""
+    import jax.numpy as jnp
+
+    from ace_jax.fit.linear import objective as lo
+    require_optional("h5py")
+    d = deeph.read(FIX)
+    model, report, st = fit_onsite(basis_spdf, [d], stats=True, ridge=1e-8)
+    _, _, st2 = fit_onsite(basis_spdf, [d, d], stats=True, ridge=1e-8)
+    assert st and all(key[0] in (6, 14) for key in st)
+    for key, (fac, keys) in st.items():
+        k = fac.R.shape[0]
+        assert fac.c.shape == (k, 2 * len(keys)) and fac.yy.shape == (2 * len(keys),)
+        assert all(report[ck][:2] == (int(fac.n), k) for ck in keys)
+        mu, _ = lo.posterior_qr(jnp.full(k, 1e-8), [fac], [0.0])
+        for q, ck in enumerate(keys):
+            assert np.allclose(np.asarray(mu)[:, 2 * q:2 * q + 2].T, model.coef[ck], rtol=1e-9, atol=1e-9)
+        assert np.isfinite(float(lo.log_evidence_qr(jnp.full(k, 1e-8), [fac], [0.0])))
+        scale = np.abs(np.asarray(fac.G)).max()
+        assert np.allclose(st2[key].factor.G, 2 * fac.G, atol=1e-9 * scale) and float(st2[key].factor.n) == 2 * float(fac.n)

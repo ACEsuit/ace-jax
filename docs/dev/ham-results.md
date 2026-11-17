@@ -439,3 +439,12 @@ Full H, 108-atom SiC, site (2, 2) + env (5, 6, 4, 4, 4), float64, mnf148 (`HAM_T
 - With the predicted S instead of the reference S the numbers are the same to 1 % (S is predicted to 0.01 meV).
 - For SCF injection only the blocks matter (the DFT code solves its own eigenproblem with its own basis threshold), so this concerns direct use of the predicted bands.
 - Prediction: 99 to 123 ms per atom for this call (8 threads, including compilation; 31 orbitals and 328 bonds per atom, three channels). Not yet timed properly.
+
+## Onto the package structure of #168 and #169 (2026-11-17)
+
+`main` merged (conflict-free). Then, on this branch (step 6 of `docs/dev/specs/2026-11-17-package-structure-design.md`, done here before the branch merges, by the owner's decision):
+
+- `basis/cg.py` (from `ham/cg.py`), a framework module.
+- `ace_jax.operators` (orbitals, data, features, bond, onsite, offsite, offsite_fast, fit) and `ace_jax.ham` (deeph, cache, operator): moves only.
+- The block fit on `fit.linear`: one design per (species [pair], L, parity[, same shell]) with every shell pair and channel as a right-hand side, streamed with `host_qr_stream`, solved with `posterior_qr`; `stats=True` returns `Factor`s. Same coefficients as before (the 12-structure Fe fit reproduces every number above); the fit time is unchanged (285 s against 296 s), because it is the NumPy feature construction per chunk of bonds, not the QR.
+- Still to do, after #170: the site features on `eval.features` / `eval.product` without the carrier `ACEModel` (the two edges in the layer test's allow-list), and the element-embedding (TrACE) provider.
