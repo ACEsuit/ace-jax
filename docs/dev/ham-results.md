@@ -274,3 +274,22 @@ No variant reaches 0.4 eV on BCC. More coupled radials help a little, more data 
 - **The on-site model is good enough**: with the reference off-site blocks the bands are right to 11 meV (FCC) and 55 meV (BCC).
 - **The whole problem is the off-site model, at medium and long range.** Nearest-neighbour bonds are fine in FCC; the second and third shells (3.5–5.5 Å) and the long bonds each cost about as much as the paper's whole budget.
 - This is the regime the shared-feature design is weakest in by construction: for a bond longer than a few ångström the environment that matters lies between and around the two atoms, and features centred on each atom separately, summed, do not describe it. ACEhamiltonians' bond-centred cylinder does.
+
+## With the bond-environment group: inside the paper's target (2026-11-17)
+
+`ham/bond.py` now has a fourth feature group, the bond-environment ACE at correlation order 1 (ACEhamiltonians' off-site model): the bond harmonics coupled with A^env = Σ_k w_k R_n(|x_k|) Y_λ(x_k), x_k the position of environment atom k relative to the bond midpoint, w_k a smooth cutoff around each end of the bond. It is the same for a bond and its reverse, so reversal stays exact; the tests check rotation, inversion and reversal with it on.
+
+Same test and metric as the section above (`band_accuracy.py … env=5.0,6,4,4,4`: cutoff 5 Å around each end, 6 environment radials, l ≤ 4, coupled with 4 bond radials and bond harmonics l ≤ 4; the rest as before: coupled site features 4 radials l ≤ 4, bond cutoff 9 Å, 20,000 training bonds; largest least-squares problem 1212 columns, fit 206 s):
+
+| | FCC: paper's band error | BCC | plain RMSE to E_F + 10 eV (FCC / BCC) |
+|---|---|---|---|
+| paper's optimised model | < 0.4 eV | < 0.4 eV | – |
+| shared site features only | 0.219 eV | 0.711 eV | 959 / 973 meV |
+| **with the bond-environment group** | **0.021 eV** | **0.107 eV** | **82 / 98 meV** |
+| reference on-site, predicted off-site | 0.024 eV | 0.033 eV | 90 / 108 meV |
+| predicted on-site, reference off-site | 0.007 eV | 0.097 eV | 11 / 55 meV |
+
+- **Both phases are now well inside the paper's 0.4 eV**: by a factor of about 19 on FCC and 4 on BCC, and the unoccupied bands to 10 eV above the Fermi level are right to about 0.1 eV where they were wrong by 1 eV.
+- The off-site error is now spread evenly over bond lengths (each range alone costs 0.015–0.05 eV), no longer concentrated beyond the first shell.
+- On BCC the on-site model is now the larger part (0.097 eV with the reference off-site blocks).
+- **Not yet measured: the cost.** This group pools an environment per bond, which the shared-feature design avoided; the compiled predictor does not have it yet (`OffsitePredictor` refuses, the reference `OffsiteModel.predict` has it), so there is no timing, and no test of how small the group can be made, or whether the site-coupled groups are still needed beside it.

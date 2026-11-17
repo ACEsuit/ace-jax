@@ -13,6 +13,8 @@ bands along the paper's k-path (`ACEhamiltonians.jl/data/<phase>_tb_bandpath.jso
 Also printed: the plain RMSE of the valence bands up to E_F + 10 eV, and the same two numbers for
 the reference truncated at the bond cutoff.
     JAX_PLATFORMS=cpu uv run python bench/ham/band_accuracy.py <site radials> <n_bond> <n_cpl> <l_cpl> [rcut_bond=9] [n_train=20000]
+        [env=<r_env>,<n_env>,<l_env>,<n_ebond>,<l_ebond>]
+`env=`: add the bond-environment feature group (`ham/bond.py`).
 """
 import json
 import os
@@ -65,10 +67,12 @@ def report(label, e, ref, ef):
             f"({int(val.sum())} values): RMSE {1e3 * np.sqrt((d ** 2).mean()):.1f} meV, max {1e3 * np.abs(d).max():.0f} meV")
 
 
-def main(nsite, n_bond, n_cpl, l_cpl, rcut_bond=9.0, n_train=20000):
+def main(nsite, n_bond, n_cpl, l_cpl, rcut_bond=9.0, n_train=20000, env=None):
     site = build_site_basis([13], order=1, totaldegree=40, lmax_feat=4, rcut=9.0, wL=0.5,
                             nmax_by_order=(nsite,), lmax_by_order=(4,))
     basis = B.BondBasis(site=site, rcut_bond=rcut_bond, n_bond=n_bond, n_cpl=n_cpl, l_cpl=l_cpl)
+    if env:
+        basis = basis._replace(r_env=env[0], n_env=int(env[1]), l_env=int(env[2]), n_ebond=int(env[3]), l_ebond=int(env[4]))
     t = time.perf_counter()
     on_train = []
     for name, _ in ON.TRAIN:
@@ -78,9 +82,11 @@ def main(nsite, n_bond, n_cpl, l_cpl, rcut_bond=9.0, n_train=20000):
     onsite, _ = fit_onsite(site, on_train, channels=("H", "S"), atoms=[a for _, a in ON.TRAIN])
     del on_train
     offsite, _ = fit_offsite(basis, [OA.dataset(n, basis, n_train // 2, k)[0] for k, n in enumerate(OA.TRAIN)], channels=("H", "S"))
-    print(f"site radials {nsite}, n_bond {n_bond}, n_cpl {n_cpl}, l_cpl {l_cpl}, bond cutoff {rcut_bond}, {n_train} training bonds; "
-          f"fitted in {time.perf_counter() - t:.0f} s")
-    f_on, f_off = OnsitePredictor(onsite), OffsitePredictor(offsite)
+    kmax = max(np.asarray(c).shape[1] for c in offsite.coef.values())
+    print(f"site radials {nsite}, n_bond {n_bond}, n_cpl {n_cpl}, l_cpl {l_cpl}, bond cutoff {rcut_bond}, env {env}, {n_train} training bonds; "
+          f"largest problem {kmax} columns; fitted in {time.perf_counter() - t:.0f} s")
+    f_on = OnsitePredictor(onsite)
+    f_off = None if env else OffsitePredictor(offsite)
     s = aitb.atom_signs(aitb.AL.ls(13))
     for phase in ("FCC", "BCC"):
         path = json.load(open(os.path.join(ROOT, "ACEhamiltonians.jl", "data", f"{phase}_tb_bandpath.json")))
@@ -105,8 +111,15 @@ def main(nsite, n_bond, n_cpl, l_cpl, rcut_bond=9.0, n_train=20000):
         trunc = bands(HR[inside], SR[inside], n_ref[inside], kpts)
         # the prediction: atom 0's on-site block and its bonds
         _, (on_blocks,) = f_on.dense(pos, cell, d["numbers"])
-        g, off = f_off.dense(pos, cell, d["numbers"])
-        e, blk = off[(13, 13)]
+        if f_off is not None:
+            g, off = f_off.dense(pos, cell, d["numbers"])
+            e, blk = off[(13, 13)]
+        else:                                           # reference predictor, atom 0's bonds only
+            g = B.bond_graph(basis, pos, cell, d["numbers"])
+            out = offsite.predict(pos, cell, d["numbers"], only=lambda gg: np.flatnonzero(gg.i == 0))
+            e = np.flatnonzero(g.i == 0)
+            keys = [(int(g.R[b, 0]), int(g.R[b, 1]), int(g.R[b, 2]), 0, int(g.j[b])) for b in e]
+            blk = np.stack([[out[c][k] for c in ("H", "S")] for k in keys])
         mine = g.i[e] == 0
         n_pred = np.concatenate([np.zeros((1, 3)), np.rint(g.rij[e][mine] @ np.linalg.inv(prim))])
         Hp = np.concatenate([np.asarray(on_blocks)[:1, 0], blk[mine, 0]])
@@ -131,5 +144,6 @@ def main(nsite, n_bond, n_cpl, l_cpl, rcut_bond=9.0, n_train=20000):
 
 
 if __name__ == "__main__":
-    a = sys.argv[1:]
-    main(int(a[0]), int(a[1]), int(a[2]), int(a[3]), *(float(x) if k == 0 else int(x) for k, x in enumerate(a[4:])))
+    a = [x for x in sys.argv[1:] if not x.startswith("env=")]
+    env = next((tuple(float(v) for v in x[4:].split(",")) for x in sys.argv[1:] if x.startswith("env=")), None)
+    main(int(a[0]), int(a[1]), int(a[2]), int(a[3]), *(float(x) if k == 0 else int(x) for k, x in enumerate(a[4:])), env=env)
