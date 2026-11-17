@@ -9,7 +9,7 @@ import pytest
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 
-from ace_jax.eval import edge_model as em
+from ace_jax.eval import product as em
 
 
 def _specs(rng, n_a):
