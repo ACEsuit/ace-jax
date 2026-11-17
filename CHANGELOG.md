@@ -10,6 +10,9 @@
   `objective.log_evidence_qr`, `objective.posterior_qr` and `lml_host.HostQREvidence` give the evidence
   and the posterior. `ace_jax.uq.ard.ARDEvidence` and `ace_jax.uq.jackknife.press_scores_rows` take any
   labelled quantities. The energy, force and virial fit uses these functions; its results are bit-identical.
+- **`ace_jax.eval.features`** has the `SiteFeatures` protocol for equivariant site features, and `pooled_a`,
+  which gives the one-particle basis of a linear ACE from a radial and index arrays.
+  `ace_jax.eval.radial.TensorRadial` is the tensor radial of a model without the model.
 - **`ace_jax.uq.force.ForceUQ`** gives the force uncertainty of a posterior for one structure. It takes the
   design rows of the model from an object such as `ace_jax.fit.design.ForceDesign`.
   `ACECalculator(posterior=...)` uses it (`calc.uq`); the results are the same.
