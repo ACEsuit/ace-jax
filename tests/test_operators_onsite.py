@@ -257,3 +257,41 @@ def test_fit_with_the_evidence(basis_spdf):
     err = lambda m: np.sqrt(np.mean(np.concatenate([(m.predict(d.positions, d.cell, d.numbers)[c][k] - v).ravel()
                                                     for c in ("H", "S") for k, v in d.blocks[c].items() if k[:3] == (0, 0, 0) and k[3] == k[4]]) ** 2))
     assert err(model) < err(tight)
+
+
+@pytest.mark.parametrize("select", ["loo", "press"])
+def test_fit_leaving_structures_out(basis_spdf, select):
+    """sigma_c="loo" / "press": the prior scale of every shell pair and channel from the
+    structures left out one at a time.  The criterion in the statistics is the one of refits
+    without each structure (press, checked directly), and the factor is the plain fit's."""
+    import jax.numpy as jnp
+
+    from ace_jax.fit.linear import objective as lo
+    from ace_jax.operators.fit import LOO_RHO
+    require_optional("h5py")
+    d = deeph.read(FIX)
+    rng = np.random.default_rng(0)
+    ds = [d._replace(positions=d.positions + 0.02 * rng.normal(size=d.positions.shape)) for _ in range(3)]
+    model, report, st = fit_onsite(basis_spdf, ds, sigma_c=select, stats=True)
+    _, _, st0 = fit_onsite(basis_spdf, ds, stats=True)
+    assert st and all(s.hyper.shape == (2 * len(s.keys), 4) and np.isfinite(s.hyper).all() for s in st.values())
+    for key, s in st.items():
+        assert np.allclose(s.factor.G, st0[key].factor.G, atol=1e-9 * np.abs(np.asarray(s.factor.G)).max())
+        rho = 2.0 * np.log10(s.hyper[:, 0] / s.hyper[:, 3])
+        assert np.abs(rho[:, None] - LOO_RHO[None]).min(1).max() < 1e-6
+    if select == "press":                              # one design, by refits without each structure
+        key = next(k for k in st if k[1] == 1)
+        s, (_, L, p) = st[key], key
+        smooth = basis_spdf.smoothness(L, p)
+        parts = [fit_onsite(basis_spdf, [x], stats=True)[2][key].factor for x in ds]
+        q = 0
+        rho = 2.0 * np.log10(s.hyper[q, 0] / s.hyper[q, 3])
+        def press(r):
+            lin, tot = jnp.asarray(smooth ** 2 * 10.0 ** r), 0.0
+            for b in range(len(ds)):
+                mu = np.asarray(lo.posterior_qr(lin, [parts[j] for j in range(len(ds)) if j != b], [0.0, 0.0])[0])[:, q]
+                f = parts[b]
+                tot += float(((np.asarray(f.R) @ mu - np.asarray(f.c)[:, q]) ** 2).sum() + f.yy[q] - (np.asarray(f.c)[:, q] ** 2).sum())
+            return tot
+        assert np.isclose(press(rho), -s.hyper[q, 2], rtol=1e-6)
+        assert all(press(rho) <= press(r) * (1 + 1e-9) for r in LOO_RHO[::6])

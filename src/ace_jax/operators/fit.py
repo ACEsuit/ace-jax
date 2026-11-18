@@ -18,6 +18,7 @@ import numpy as np
 
 from ..basis import cg
 from ..fit.linear import lml_svd
+from ..fit.linear import loo
 from ..fit.linear import multistart
 from ..fit.linear import objective as lo
 from ..fit.linear import stats as ls
@@ -27,9 +28,9 @@ from .onsite import OnsiteModel, _features, design, parts_of, shell_pairs, site_
 class DesignStats(NamedTuple):
     """The statistics of one design: `factor` (a `fit.linear.stats.Factor` with one right-hand side
     per (coefficient key, channel)) and `keys`, the coefficient keys in the order of its
-    right-hand sides (channels innermost).  hyper: with sigma_c="evidence", (n_rhs, 4): for each
-    right-hand side the noise sigma and prior scale sigma_c that maximise its evidence, the log
-    evidence there, and the sigma_c the coefficients were solved with (`_evidence`)."""
+    right-hand sides (channels innermost).  hyper: with sigma_c="evidence", "loo" or "press",
+    (n_rhs, 4): for each right-hand side the noise sigma and prior scale sigma_c chosen, the
+    criterion there, and the sigma_c the coefficients were solved with (`_evidence`, `_loo`)."""
     factor: ls.Factor
     keys: tuple
     hyper: object = None
@@ -88,34 +89,81 @@ def _evidence(fac, gamma, ridge, nc):
     return mean, hyper
 
 
+SELECT = ("evidence", "loo", "press")                  # sigma_c= by a criterion rather than a number
+LOO_RHO = np.arange(-24.0, 6.01, 0.5)                  # log10 sigma^2 / sigma_c^2 tried by "loo" and "press"
+
+
+def _loo(fac, gamma, ridge, blocks, press):
+    """The leave-one-structure-out fit of one design.  blocks: per structure (R_g, c_g, e_g), the
+    triangular factor of its rows, Q_g^T Y and the squared norm of the part of each target
+    outside its columns.  For every rho = sigma^2 / sigma_c^2 of LOO_RHO (prior precision
+    gamma_j^2 rho at unit noise; `ridge` where gamma_j = 0) the structures are left out one at a
+    time in closed form (`fit.linear.loo.loo_terms`: the block leverages of `aj fit
+    --objective loo`, the residuals of the CR3 jackknife), and each right-hand side takes the
+    rho of its largest criterion: the log predictive density of the left-out structures at
+    the noise that maximises it, or (`press`) minus their squared prediction error.  Residuals
+    shared by the atoms of a structure count once per structure, where the evidence reads them
+    as independent noise.  A rho at which a structure has leverage 1 within roundoff is skipped.
+    Returns (mean, hyper) as `_evidence` (hyper[:, 2]: the criterion)."""
+    gamma, n = np.asarray(gamma, float), float(fac.n)
+    P, Y = (jnp.asarray(np.stack([b[i] for b in blocks])) for i in (0, 1))
+    ee = np.sum([b[2] for b in blocks], axis=0)
+    f = ls.Factor(jnp.asarray(fac.R), jnp.asarray(fac.c), jnp.asarray(fac.yy), fac.n, jnp.zeros(()))
+    crit, s2, means = [], [], []
+    for r in LOO_RHO:
+        quad, hld, pr, mean = (np.asarray(v) for v in loo.loo_terms(jnp.asarray(np.where(gamma > 0, gamma ** 2 * 10.0 ** r, ridge)), f, P, Y))
+        s2.append((quad + ee) / n); means.append(mean)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            crit.append(-(pr + ee) if press else -0.5 * n * np.log(s2[-1]) + hld)
+    crit = np.where(np.isfinite(crit), crit, -np.inf)
+    best, q = crit.argmax(0), np.arange(crit.shape[1])
+    sig = np.sqrt(np.asarray(s2)[best, q])
+    sc = sig / 10.0 ** (0.5 * LOO_RHO[best])
+    return np.asarray(means)[best, :, q].T, np.stack([sig, sc, crit[best, q], sc], axis=1)
+
+
 def _need_x64():
     if not jax.config.jax_enable_x64:
         raise ValueError("the block fit needs float64: jax.config.update('jax_enable_x64', True)")
 
 
-def _fit(designs, n_chunks, rows, nc, ridge, device=False, gamma=None, evidence=False):
+def _fit(designs, n_chunks, rows, nc, ridge, device=False, gamma=None, select=None, groups=None):
     """Stream and solve.  designs: {design key: (n columns, [coefficient keys])}; rows(i) ->
     {design key: (A (n_rows, n_columns), Y (n_rows, n_keys * nc))} for chunk i (a design without
     rows in the chunk is left out).  Returns (coef, report, stats).
 
     device: rows(i) gives {design key: (A, Y, n_rows)} with A a JAX array on the device, padded
     with zero rows to a fixed size (n_rows: the real ones), and the triangular factors are
-    merged there (`design.qr_merge`): nothing the size of the design rows comes to the host."""
+    merged there (`design.qr_merge`): nothing the size of the design rows comes to the host.
+
+    groups (select "loo" or "press"): the structure of each chunk.  Each structure's rows are
+    then merged into a factor of their own, kept on the host for `_loo` (per design, structures x
+    columns^2 numbers), and the factor of all the rows is the merge of those."""
     live = [d for d, (k, _) in designs.items() if k > 0]
     yy = {d: np.zeros(len(keys) * nc) for d, (_, keys) in designs.items()}
     n = dict.fromkeys(designs, 0)
     if device:
         from .design import qr_merge
-        Rs = {}
+        Rs, blocks, g0 = {}, {}, None
+
+        def close():                                     # the finished structure's factors: to the host, and into the total
+            for d in [d for gd, d in Rs if gd == g0 and gd is not None]:
+                R, k = Rs.pop((g0, d)), designs[d][0]
+                blocks.setdefault(d, []).append((np.asarray(R[:k, :k]), np.asarray(R[:k, k:]), np.asarray((R[k:, k:] ** 2).sum(0))))
+                Rs[(None, d)] = jnp.linalg.qr(jnp.concatenate([Rs[(None, d)], R]), mode="r") if (None, d) in Rs else R
         for i in range(n_chunks):
+            g = None if groups is None else groups[i]
+            if g != g0:
+                close(); g0 = g
             for d, (A, Y, rows_d) in rows(i).items():
                 yy[d] += (Y ** 2).sum(0)
                 n[d] += rows_d
                 if d in live:
                     w = designs[d][0] + Y.shape[1]
-                    Rs[d] = qr_merge(Rs.get(d, jnp.zeros((w, w))), A, jnp.asarray(Y))
-        acc = {d: (R[:designs[d][0], :designs[d][0]], R[:designs[d][0], designs[d][0]:]) for d, R in Rs.items()}
-        return _solve(designs, acc, yy, n, nc, ridge, gamma, evidence)
+                    Rs[(g, d)] = qr_merge(Rs.get((g, d), jnp.zeros((w, w))), A, jnp.asarray(Y))
+        close()
+        acc = {d: (R[:designs[d][0], :designs[d][0]], R[:designs[d][0], designs[d][0]:]) for (_, d), R in Rs.items()}
+        return _solve(designs, acc, yy, n, nc, ridge, gamma, select, blocks)
 
     def parts(i):
         out = rows(int(i))
@@ -125,20 +173,31 @@ def _fit(designs, n_chunks, rows, nc, ridge, device=False, gamma=None, evidence=
         return [out.get(d, (np.zeros((0, designs[d][0])), np.zeros((0, len(designs[d][1]) * nc)))) for d in live]
 
     init = [(np.zeros((designs[d][0],) * 2), np.zeros((designs[d][0], len(designs[d][1]) * nc))) for d in live]
-    acc = dict(zip(live, ls.host_qr_stream(parts, np.arange(n_chunks), init))) if live else {}
+    blocks = {}
+    if groups is not None and live:                      # a factor per structure, then their merge
+        for g in np.unique(groups):
+            y0 = {d: yy[d].copy() for d in live}
+            for d, (R, c) in zip(live, ls.host_qr_stream(parts, np.arange(n_chunks), init, batches=np.flatnonzero(np.asarray(groups) == g))):
+                R, c = np.asarray(R), np.asarray(c)
+                blocks.setdefault(d, []).append((R, c, np.maximum(yy[d] - y0[d] - (c ** 2).sum(0), 0.0)))
+        acc = dict(zip(live, ls.host_qr_stream(lambda j: [(blocks[d][int(j)][0], blocks[d][int(j)][1]) for d in live],
+                                               np.arange(len(blocks[live[0]])), init)))
+    else:
+        acc = dict(zip(live, ls.host_qr_stream(parts, np.arange(n_chunks), init))) if live else {}
     for d in designs:                                    # designs without columns: only their scalars
         if d not in acc:
             parts_d = [rows(i).get(d) for i in range(n_chunks)] if not live else []
             for p in parts_d:
                 if p is not None:
                     yy[d] += (p[1] ** 2).sum(0); n[d] += len(p[1])
-    return _solve(designs, acc, yy, n, nc, ridge, gamma, evidence)
+    return _solve(designs, acc, yy, n, nc, ridge, gamma, select, blocks)
 
 
-def _solve(designs, acc, yy, n, nc, ridge, gamma=None, evidence=False):
+def _solve(designs, acc, yy, n, nc, ridge, gamma=None, select=None, blocks=None):
     """Coefficients, report and statistics from the factors (R, c) of each design.  gamma:
     {design key: prior precision of each column} added to the ridge (the smoothness prior), or,
-    with `evidence`, {design key: smoothness of each column} for `_evidence`."""
+    with `select` (one of SELECT), {design key: smoothness of each column} for `_evidence` or,
+    with the per-structure `blocks` of `_fit`, `_loo`."""
     coef, report, stats = {}, {}, {}
     for d, (k, keys) in designs.items():
         if not n[d]:
@@ -150,8 +209,10 @@ def _solve(designs, acc, yy, n, nc, ridge, gamma=None, evidence=False):
         R, c = acc[d]
         fac = ls.Factor(R, c, jnp.asarray(yy[d]), jnp.asarray(float(n[d])), jnp.zeros(()))
         hyper = None
-        if evidence:
+        if select == "evidence":
             mu, hyper = _evidence(fac, gamma[d], ridge, nc)
+        elif select:
+            mu, hyper = _loo(fac, gamma[d], ridge, blocks[d], select == "press")
         else:
             lin = jnp.full(k, ridge) if gamma is None else ridge + jnp.asarray(gamma[d])
             mu = np.asarray(lo.posterior_qr(lin, [fac], [0.0])[0])                       # (k, n_keys * nc)
@@ -177,7 +238,9 @@ def fit_onsite(basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10,
     (`SiteBasis.smoothness`; unit noise, so sigma_c is in the units of the blocks).  The constant
     column of the L = 0 parts keeps the ridge alone.  "evidence": sigma_c and the noise of every
     shell pair and channel maximise its evidence (`_evidence`; the values are in the statistics'
-    `hyper`)."""
+    `hyper`).  "loo": sigma_c of every shell pair and channel maximises the predictive density of
+    the structures left out one at a time (`_loo`; `aj fit --objective loo` for these rows);
+    "press": it minimises their squared prediction error."""
     _need_x64()
     datasets = list(datasets)
     orbitals = datasets[0].basis if orbitals is None else orbitals
@@ -213,11 +276,12 @@ def fit_onsite(basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10,
         return out
 
     ev = isinstance(sigma_c, str)
-    if ev and sigma_c != "evidence":
-        raise ValueError(f"sigma_c: None, a number or 'evidence', got {sigma_c!r}")
+    if ev and sigma_c not in SELECT:
+        raise ValueError(f"sigma_c: None, a number or one of {SELECT}, got {sigma_c!r}")
     smooth = lambda L, p: np.concatenate([basis.smoothness(L, p), np.zeros(int(L == 0))])
     gamma = None if sigma_c is None else {(z, L, p): smooth(L, p) if ev else smooth(L, p) ** 2 / sigma_c ** 2 for z, L, p in designs}
-    coef, report, st = _fit(designs, len(datasets), rows, nc, ridge, gamma=gamma, evidence=ev)
+    coef, report, st = _fit(designs, len(datasets), rows, nc, ridge, gamma=gamma, select=sigma_c if ev else None,
+                            groups=np.arange(len(datasets)) if ev and sigma_c != "evidence" else None)
     model = OnsiteModel(basis=basis, coef=coef, orbitals=orbitals, channels=tuple(channels))
     return (model, report, st) if stats else (model, report)
 
@@ -237,7 +301,9 @@ def fit_offsite(bond_basis, datasets, orbitals=None, channels=("H", "S"), ridge=
     and QR there, in float64).  False: the NumPy reference `bond.features` with host merges (the
     same coefficients; tests compare the two).
 
-    sigma_c: as `fit_onsite`, with `bond.smoothness` for the columns of each design."""
+    sigma_c: as `fit_onsite`, with `bond.smoothness` for the columns of each design.  "loo" and
+    "press" hold a triangular factor per structure and design on the host: structures x
+    columns^2 numbers each."""
     from . import bond as B
     from .offsite import OffsiteModel, block_lps, canonical_pairs, site_features
 
@@ -293,10 +359,11 @@ def fit_offsite(bond_basis, datasets, orbitals=None, channels=("H", "S"), ridge=
         return out
 
     ev = isinstance(sigma_c, str)
-    if ev and sigma_c != "evidence":
-        raise ValueError(f"sigma_c: None, a number or 'evidence', got {sigma_c!r}")
+    if ev and sigma_c not in SELECT:
+        raise ValueError(f"sigma_c: None, a number or one of {SELECT}, got {sigma_c!r}")
     gamma = None if sigma_c is None else {
         key: B.smoothness(bond_basis, key[2], key[3], key[4]) ** (1 if ev else 2) / (1.0 if ev else sigma_c ** 2) for key in designs}
+    sel = dict(select=sigma_c if ev else None, groups=[c[0] for c in chunks] if ev and sigma_c != "evidence" else None)
     if compiled:
         from .design import bond_designs
         progs, dev = {}, {}
@@ -326,8 +393,8 @@ def fit_offsite(bond_basis, datasets, orbitals=None, channels=("H", "S"), ridge=
                 out[key] = (A, Y, len(sel) * (2 * L + 1))
             return out
 
-        coef, report, st = _fit(designs, len(chunks), rows_device, nc, ridge, device=True, gamma=gamma, evidence=ev)
+        coef, report, st = _fit(designs, len(chunks), rows_device, nc, ridge, device=True, gamma=gamma, **sel)
     else:
-        coef, report, st = _fit(designs, len(chunks), rows, nc, ridge, gamma=gamma, evidence=ev)
+        coef, report, st = _fit(designs, len(chunks), rows, nc, ridge, gamma=gamma, **sel)
     model = OffsiteModel(bond=bond_basis, coef=coef, orbitals=orbitals, channels=tuple(channels))
     return (model, report, st) if stats else (model, report)

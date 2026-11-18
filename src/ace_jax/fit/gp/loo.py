@@ -1,12 +1,14 @@
 """Leave-one-CONFIGURATION-out pseudo-likelihood by block leverages.  Solves
 the manuscript's 'LOO with forces' complication: a configuration has one
 energy but many force rows, so the unit left out is the configuration's whole
-row block, and (I - H_aa)^-1 on that block is what the closed form needs."""
+row block, and (I - H_aa)^-1 on that block is what the closed form needs
+(`fit.linear.loo.block_loo`)."""
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax.scipy.linalg import cho_solve, solve_triangular
+from jax.scipy.linalg import cho_solve
 
+from ..linear.loo import block_loo
 from ..objective import _chol_S
 from ..rows import batch_rows
 
@@ -49,11 +51,7 @@ def loo_objective(theta, st, prob, ds, cfg_rows):
 
         def per_config(idx):
             P = Phi_t[idx]                                            # (R, Dt)
-            A = solve_triangular(L, P.T, lower=True)                  # (Dt, R)
-            Q = jnp.eye(idx.shape[0]) - A.T @ A
-            g = y_t[idx] - P @ mu
-            Lq = jnp.linalg.cholesky(Q)
-            u = solve_triangular(Lq, g, lower=True)
+            u, Lq = block_loo(L, P, y_t[idx] - P @ mu)
             return -0.5 * u @ u + jnp.sum(jnp.log(jnp.diag(Lq)))
 
         return jnp.sum(jax.vmap(per_config)(rows_b))

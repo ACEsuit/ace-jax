@@ -172,3 +172,35 @@ def test_ard_evidence_takes_any_quantities():
     np.testing.assert_allclose(vq + const, ref, rtol=1e-10)
     two = np.array([2, 2, 2, 3, 3, 3, 3])                                # two groups: one more hyperparameter
     assert len(ARDEvidence(ard_qr_stats(labelled), gamma, two, quantities=q).h0(theta)) == 4
+
+
+def test_leave_one_block_out_is_the_refit_without_the_block():
+    """`fit.linear.loo.loo_terms` against refits: the squared residuals of each block predicted
+    from the others (press), g^T Q^-1 g and log det Q of the block leverages; blocks given as
+    their own triangular factors (with the part of y outside their columns added) give the same."""
+    from ace_jax.fit.linear import loo
+    rng = np.random.default_rng(1)
+    k, q, nb, m = 6, 3, 5, 9
+    P, Y = rng.normal(size=(nb, m, k)), rng.normal(size=(nb, m, q))
+    lin = np.linspace(0.2, 1.5, k)
+    A, y = P.reshape(-1, k), Y.reshape(-1, q)
+    Qa, Ra = np.linalg.qr(A)
+    fac = ls.Factor(jnp.asarray(Ra), jnp.asarray(Qa.T @ y), jnp.asarray((y ** 2).sum(0)), jnp.asarray(float(len(y))), jnp.zeros(()))
+    quad, hld, press, mean = (np.asarray(v) for v in loo.loo_terms(jnp.asarray(lin), fac, jnp.asarray(P), jnp.asarray(Y)))
+    S = A.T @ A + np.diag(lin)
+    assert np.allclose(mean, np.linalg.solve(S, A.T @ y), atol=1e-12)
+    pr, qd, ld = 0.0, 0.0, 0.0
+    for b in range(nb):
+        keep = np.arange(nb) != b
+        Ab, yb = P[keep].reshape(-1, k), Y[keep].reshape(-1, q)
+        e = Y[b] - P[b] @ np.linalg.solve(Ab.T @ Ab + np.diag(lin), Ab.T @ yb)          # the block, predicted without it
+        Qb = np.eye(m) - P[b] @ np.linalg.solve(S, P[b].T)
+        pr, qd, ld = pr + (e ** 2).sum(0), qd + np.einsum("iq,ij,jq->q", e, Qb, e), ld + np.linalg.slogdet(Qb)[1]
+    assert np.allclose(press, pr, rtol=1e-10) and np.allclose(quad, qd, rtol=1e-10) and np.isclose(2 * hld, ld, rtol=1e-10)
+    Rb, cb, eb = [], [], 0.0                                                             # each block as its factor
+    for b in range(nb):
+        Qf, R = np.linalg.qr(P[b])
+        c = Qf.T @ Y[b]
+        Rb.append(R); cb.append(c); eb = eb + (Y[b] ** 2).sum(0) - (c ** 2).sum(0)
+    quad2, hld2, press2, _ = (np.asarray(v) for v in loo.loo_terms(jnp.asarray(lin), fac, jnp.asarray(np.stack(Rb)), jnp.asarray(np.stack(cb))))
+    assert np.allclose(press2 + eb, press, rtol=1e-10) and np.allclose(quad2 + eb, quad, rtol=1e-10) and np.isclose(hld2, hld, rtol=1e-10)
