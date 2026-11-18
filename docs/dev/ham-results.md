@@ -721,3 +721,17 @@ Against the rerun on 11 other structures: overlap to 4.7e-4; valence bands from 
 | without added s and p (mapped), all-electron | 29.8 | 19.8 | 0.017 | 434 | 434 | 330 | 151 |
 
 With the smaller basis the full generalised eigenproblem is usable and the eigenvalue error follows the block error (the factor of about ten the noise test gives for a well-conditioned overlap); the blocks are now the limit. Both changes together: running.
+
+### Against the first-order estimate of the 2022 paper
+
+Zhang et al. (arXiv:2111.13736, section III.3) propagate errors to bands by ε̃ − ε ∼ ⟨φ|ΔH − ε ΔS|φ⟩ "in the limit as ΔH, ΔS → 0" (φ S-normalised; no bound, nothing on the conditioning of S). `work/first_order.py`: that estimate against the actual change, full overlap, random ΔH, four alloy test structures, states from E_F − 12 to E_F + 5 eV.
+
+| noise per block element | light: first order | light: actual | smaller basis: first order | smaller basis: actual |
+|---|---|---|---|---|
+| 0.3 meV | 2.30 meV | 2.37 | 1.68 | 1.68 |
+| 3 meV | 22.6 | 916 | 17.2 | 17.6 |
+| 25 meV | 194 | 7,895 | 142 | 398 |
+
+- The estimate holds where it claims to: at 0.3 meV in both bases, and to 3 meV in the smaller one. The factor of about seven between the noise per block element and the eigenvalue error is first order too: an element of H(k) sums the noise of every periodic image of a pair (0.3 meV per block element is 0.62 meV per element of H(k)), and |φ|² in the window is 0.8 to 5.
+- Where it fails is set by the states above the window, not by those in it. Their |φ|² reaches 2,276 in the light basis and 27 in the smaller one (1/s for a direction of overlap eigenvalue s), so their own first-order shifts are −7 eV at 0.3 meV and −78 eV at 3 meV in the light basis: they cross the window, and the estimate for the window's states, which assumes each state stays isolated, no longer applies. In the smaller basis the same shifts are −0.07, −1.4 and −5 eV.
+- So the paper's estimate is consistent with everything here, and its range of validity is ‖ΔH‖ small against s_min times the distance to the states above. The paper's aluminium basis (minimal plus one d shell, 14 orbitals) is well conditioned, which is why its error ribbons contained the DFT bands. For a light-defaults basis an uncertainty propagated to first order (HInitASI's, and Phase 1's) is only meaningful after the basis is reduced or the overlap conditioned.
