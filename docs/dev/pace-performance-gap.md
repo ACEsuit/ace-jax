@@ -1,5 +1,7 @@
 # PACE performance gap: ace-jax vs ML-PACE on the GPU
 
+> **Historical (2026-10-02).** A record of the investigation, kept for its method. The timings predate the C++ and CUDA kernels, the automatic DAG product basis and lammps-jax on the CPU. Current timings: `docs/dev/accuracy-cost-results.md` (silicon, and the multi-component rows) and the user Performance page.
+
 Branch `perf/pace-gap-investigation` (on top of `feat/bench-scaling`). Everything
 here was measured on Modal A100-80GB, unless a line says it is an estimate. The
 code is in `bench/perf/`. The raw results are in `bench/perf/results/*.json`. §11

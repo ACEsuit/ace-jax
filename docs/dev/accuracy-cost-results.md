@@ -352,6 +352,39 @@ python bench/si_qoi/plot_cost_web.py "${ROWS[@]}"     # -> docs/user/assets/benc
 Fits, QoIs and timings themselves: `bench/accuracy_cost/` (`sweep.yaml`, `timing.py`, the Sulis job scripts in
 `envs/`); the fitted models are on /storage, not in the repository.
 
+## Multi-component speed rows: Cantor (2026-11-17)
+
+The user Performance page's second half was the SiGe and Cantor scaling figures of `docs/dev/benchmarks.md`
+(rows of 2026-09-30 to 2026-10-04, ace-jax 0.1.0: before the kernels, `aa_dag="auto"`, lammps-jax on the CPU, the
+pace/kk GPU rewrite and Symmetrix v0.3.0). They are replaced by one table from `bench/accuracy_cost/multicomponent.py`:
+the medium random-weight Cantor (CrMnFeCoNi, fcc) models of `bench/scaling/models.py`, in LAMMPS, float64, with this
+benchmark's driver (`timing.run_cases`: gate, N/8 check, 3 repeats, median) and builds.
+
+| code, model | A100, µs/atom-step (32,768 atoms) | CPU 128 x 1, µs/atom-step (8,192 atoms) | gate: max dE/atom (eV), max dF (eV/Å) |
+|---|--:|--:|---|
+| ace-jax kernel (CUDA / C++), linear ACE (447 functions per element) | 0.150 | 0.376 | 5.6e-17, 2.3e-13 |
+| ace-jax XLA program, linear ACE | 0.591 | 3.85 | 2.8e-17, 1.4e-14 |
+| ace-jax XLA program, PACE `.yace` (496 per element) | 0.718 | 5.61 | 2.8e-17, 8.5e-15 |
+| ML-PACE (`pace/kk`, `pace`), the same `.yace` | 0.296 | 0.505 | 1.5e-14, 1.7e-9 |
+| MACE-MP-0b2 medium, Symmetrix v0.3.0 (`symmetrix/mace`) | 7.54 | 29.4 | 2.4e-11, 7.9e-8 |
+
+- Builds: lammps-jax `lmp-jax.sh` (GPU) and `lmp-jax-ffi-cpu.sh` (CPU); ML-PACE `lmp-pacetab.sh` / `lmp-pacetab-cpu.sh`
+  (LAMMPS develop ec02ed0); Symmetrix fc7e532 (v0.3.0) `lmp-symx3.sh` / `lmp-symx3-cpu.sh`, with its own extraction
+  of the model (`mace_medium_Cantor-symx3.json`, 2.1 GB). Kernels built in the job from the staged tree (4b1de03).
+- Jobs: `envs/sulis-gpu-cantor.sbatch` (2291530, gpu012), `envs/sulis-cpu-cantor.sbatch` (2291420 and, for MACE,
+  2291529; node063). Rows: `results/sulis/sulis-gpu-cantor[-kernel].jsonl`, `sulis-cpu-128x1-cantor[-kernel].jsonl`.
+- Gate: three rattled 256-atom Cantor cells (`gate_n`; a 64-atom fcc cell is narrower than twice the cutoffs).
+- GPU sizes are the silicon benchmark's. A first GPU run at 8,192 atoms was below the plateau for every code but
+  MACE (kernel 0.210, XLA linear ACE 0.718, PACE 0.754, ML-PACE 0.306, MACE 7.51 µs/atom-step) and is not kept.
+  MACE takes 15.8 GB of the A100 at 32,768 atoms (the October build ran out of 40 GB above 8,192).
+- CPU: one layout (128 x 1) for every code, not each model's fastest as on silicon. The N/8 check (1,024 atoms,
+  8 per rank) fails for the ace-jax bundles (`check_status: error`), so their plateau flag is unknown; ML-PACE's
+  passes; MACE's differs by more than 20% (`not_plateau`), and its 128 ranks take 278 GB.
+- Not rerun: SiGe, the small and large models, standalone lines, float32, ACEpotentials.jl, memory and size
+  scaling. `docs/dev/benchmarks.md` keeps the October rows for those, marked historical.
+
+Table for the page: `python -m accuracy_cost.multicomponent table > ../docs/snippets/benchmarks-cantor.md` (from `bench/`).
+
 ## Open
 
 - ACE + GP was dropped from the families pending the GP LML cost study (issue #60).

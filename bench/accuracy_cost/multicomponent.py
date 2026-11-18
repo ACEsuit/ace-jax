@@ -16,7 +16,9 @@ import sys
 from . import common, timing
 
 SYSTEM, SIZE, FAMILY = "Cantor", "medium", "cantor"
-N = {"gpu": (8192, 1024), "cpu": (8192, 1024)}    # MACE-MP-0b2 medium in float64 runs out of an A100's 40 GB above 8,192
+# GPU: the silicon benchmark's sizes (8,192 atoms is below the GPU codes' throughput plateau; MACE-MP-0b2 medium on
+# Symmetrix v0.3.0 takes 5 GB there).  CPU: 64 atoms per rank on 128 ranks; the N/8 check does not run for ace-jax
+N = {"gpu": timing.N["gpu"], "cpu": (8192, 1024)}
 GATE_N = 256                                      # a 4 x 4 x 4 fcc cell (14.4 A): wider than twice any cutoff here
 CODES = {"acejax-ace": "acejax-ace", "acejax-pace": "acejax-pace", "mlpace": "mlpace", "mace": "mace-symx3"}
 
@@ -69,5 +71,43 @@ def main(argv=None):
                      repeats=a.repeats, work=work, meta=meta, redo=a.redo, ready=ready)
 
 
+# ---- the user page's table ---------------------------------------------------
+
+SULIS = common.HERE / "results" / "sulis"
+FILES = {("gpu", False): "sulis-gpu-cantor.jsonl", ("gpu", True): "sulis-gpu-cantor-kernel.jsonl",
+         ("cpu", False): "sulis-cpu-128x1-cantor.jsonl", ("cpu", True): "sulis-cpu-128x1-cantor-kernel.jsonl"}
+# (code, kernel): the table's row label, in the page's order
+LINES = [(("acejax-ace", True), "ace-jax, linear ACE, kernel (C++ on the CPU, CUDA on the GPU)"),
+         (("acejax-ace", False), "ace-jax, linear ACE, compiled JAX program"),
+         (("acejax-pace", False), "ace-jax, PACE model, compiled JAX program"),
+         (("mlpace", False), "ML-PACE, the same PACE model"),
+         (("mace-symx3", False), "MACE-MP-0b2 medium, Symmetrix")]
+
+
+def timed(results=SULIS):
+    """{(code, kernel, device): the ok timed row} of the committed results."""
+    out = {}
+    for (device, kernel), name in FILES.items():
+        f = pathlib.Path(results) / name
+        for ln in f.read_text().splitlines() if f.exists() else []:
+            r = json.loads(ln)
+            if r.get("mode") == "lammps" and r.get("status") == "ok":
+                out[r["code"], kernel, device] = r
+    return out
+
+
+def table(results=SULIS):
+    """The Performance page's table (docs/snippets/benchmarks-cantor.md): µs per atom and MD step, lower is better."""
+    rows = timed(results)
+    us = lambda r: f"{1e6 * r['step_s'] / r['n_atoms']:.3g}" if r else "—"
+    out = ["| Code and model | A100 GPU | CPU node (128 cores) |", "|---|--:|--:|"]
+    for (code, kernel), label in LINES:
+        out.append(f"| {label} | {us(rows.get((code, kernel, 'gpu')))} | {us(rows.get((code, kernel, 'cpu')))} |")
+    return "\n".join(out) + "\n"
+
+
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    if sys.argv[1:2] == ["table"]:
+        print(table(), end="")
+    else:
+        main(sys.argv[1:])

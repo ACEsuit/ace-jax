@@ -32,6 +32,6 @@ LIB=$($PY -c "from ace_jax.eval import ffi; print(ffi.library())")
 echo "kernel $LIB"
 ACEJAX_EXPORT_FFI=1 LAMMPS_JAX_FFI_HANDLERS=$($PY -c "from ace_jax.eval import ffi; print(ffi.handlers('$LIB'))") \
     $PY -m accuracy_cost.multicomponent cpu --env $E --codes acejax-ace \
-    --results $R/sulis-cpu-128x1-cantor-kernel.jsonl "$@" || true
+    --results $R/sulis-cpu-128x1-cantor-kernel.jsonl || true       # ("$@", e.g. --codes, is for the pass below / above)
 $PY -m accuracy_cost.multicomponent cpu --env $E --results $R/sulis-cpu-128x1-cantor.jsonl "$@" || true
 echo "done $(date -Is)"

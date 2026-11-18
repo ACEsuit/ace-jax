@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The multi-component speed rows (accuracy_cost/multicomponent.py: Cantor, medium random-weight models, 8,192 atoms,
+# The multi-component speed rows (accuracy_cost/multicomponent.py: Cantor, medium random-weight models, 32,768 atoms,
 # float64) on a Sulis A100, with the silicon benchmark's builds: ace-jax's XLA bundles (linear ACE and PACE) and its
 # CUDA kernel (linear ACE; built here with the CUDA 12.6 module's nvcc, as sulis-gpu-cudak.sbatch), ML-PACE pace/kk
 # (LAMMPS develop ec02ed0, lmp-pacetab.sh) and MACE-MP-0b2 medium on Symmetrix v0.3.0 (lmp-symx3.sh).
@@ -36,5 +36,5 @@ LIB=$($PY -c "from ace_jax.eval import ffi; print(ffi.library(gpu=True))")
 export LAMMPS_JAX_FFI_HANDLERS=$($PY -c "from ace_jax.eval import ffi; print(ffi.handlers('$LIB', gpu=True))")
 echo "kernel $LIB"
 ACEJAX_EXPORT_FFI=1 $PY -m accuracy_cost.multicomponent gpu --env $E --codes acejax-ace \
-    --results $R/sulis-gpu-cantor-kernel.jsonl "$@" || true
+    --results $R/sulis-gpu-cantor-kernel.jsonl || true       # ("$@", e.g. --codes, is for the pass below / above)
 echo "done $(date -Is)"
