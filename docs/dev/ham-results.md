@@ -685,3 +685,39 @@ Full models (site order 1, environment order 1; 80 training, 16 test structures)
 - **A bug in the categorical prior, fixed.** A categorical basis folds the neighbour element into the radial index, n = (n' − 1) NZ + z', and `SiteBasis.smoothness` took that n as the radial degree, so the penalty grew with the element's position in the list. With n' (sigma_c 1e5): 207 → 50 meV. One-element fits (gold, Al, Fe) are unchanged.
 
 What follows: for many elements use `widths=(S, d, ...)`, order 1 at full width and the higher orders compressed, which needs order-2 site features and a prior chosen by the evidence to be worth it. The bond-environment channels (`env_emb`) are order 1 and have the same limit.
+
+## Why the alloy's eigenvalues are wrong by eV: a nearly dependent basis (2026-11-18)
+
+The four-element C/Si/Ge/Sn set (FHI-aims light defaults, all-electron) gave 3 to 6 eV eigenvalue RMSE with blocks at 25 to 29 meV. It is the basis, not the model or the scoring.
+
+- **Reference H plus random noise** of the model's block error reproduces it (`work/alloy_eig_noise.py`, eigenvalues in the span of the overlap's eigenvectors above 1e-3): 0.3 meV per element gives 2 meV, 3 meV gives 46 meV, 25 meV gives 4.8 eV. S(k) has eigenvalues down to 2.5e-4; states in that subspace move by tens of eV and fall into the window.
+- **Truncating the overlap moves the reference**: dropping eigenvalues below 1e-3, 1e-2, 1e-1 shifts the window eigenvalues by 12, 116, 271 meV. The fitted model's error at those thresholds: 3,046, 775, 166 meV (with sigma_c 1e6: 3,012, 577, 157). No threshold is usable at this block accuracy.
+- **Which functions.** The directions below 1e-2 are in the outer s and p shells (Ge p 31 %, Ge s 15 %, Sn p 23 %, Sn s 7 %, Si p 10 %; bcc Fe: its outer s shells, 94 %), not in the d and f polarisation functions: the valence s and p of the free atom and the s and p the light defaults add (`hydro 2 p`, `hydro 2 s` / `3 s`, `ionic 3 s` / `5 s`), reaching 5 Å under `cut_pot 3.5 1.5 1.0`.
+- **Core projection does not change the conditioning** (same count of small eigenvalues; smallest 2.7e-4 against 2.5e-4), as a Schur complement must not make it worse and the core functions were never the cause. It does help the fit: off-site H 24.4 to 9.9 meV, eigenvalues 1,012 / 171 / 59 meV at the three thresholds. The projection is less exact than on aluminium (occupied valence bands 10 to 23 meV, with Ge 3d and Sn 4d taken as core).
+- **Data.** The on-site error still falls steeply with data (identity embedding, sigma_c 1e6: 117, 98, 32, 22 meV for 10, 20, 40, 80 structures; training error 7.5 to 12 meV).
+
+### Basis variants (12 structures, FHI-aims rerun; `giv_basis/`, `work/basis_compare.py`)
+
+| basis | smallest S eigenvalue (worst / median) | below 1e-3 / 1e-2 | eigenvalues under 3 meV noise, full overlap | valence bands against light | energy per atom against light (spread) |
+|---|---|---|---|---|---|
+| light | 2.0e-4 / 3.0e-4 | 11.1 / 29.1 | 1,184 meV | – | – |
+| `cut_pot` 3.0 (6 structures) | 4.3e-4 / 4.8e-4 | 7.2 / 25.8 | 112 | 1.5 meV | +26 meV (4) |
+| `cut_pot` 2.5 (7 structures) | 4.5e-4 / 1.2e-3 | 0.9 / 17.3 | 21 | 6.5 | +109 (45) |
+| without the added s and p | 3.1e-3 / 1.6e-2 | 0 / 0.2 | 18 | 62 | +275 (19) |
+| without them, `cut_pot` 3.0 (11) | 6.8e-3 / 1.7e-2 | 0 / 0.1 | 15 | 58 | +321 (12) |
+
+### The smaller basis without a rerun (`bench/ham/reduce_basis.py`)
+
+Deleting the rows and columns of the added shells is wrong (690 meV in the valence bands): FHI-aims orthonormalises the functions of each l on an atom, and the added s comes before the outer valence s (order from `basis-indices.out`: C `1s, hydro 2s, 2s`; Si `1s, 2s, ionic 3s, 3s`), so the valence s of the light basis already has the added function taken out of it. The smaller basis' functions are on-site combinations of the light ones: for p a selection, for s e.g. 0.956 and 0.295 of two light shells for C, 0.989 and 0.147 for Si, 0.992 and 0.128 for Sn. The map T is fitted to the overlaps of one structure computed in both bases (residual 1e-10) and blocks transform as T_i^T M T_j.
+
+Against the rerun on 11 other structures: overlap to 4.7e-4; valence bands from the Fermi level 44 meV against light (the rerun: 63), 46 meV against the rerun. The mapped H is the light basis' self-consistent operator in the smaller basis, so it is not the rerun's matrix (elements differ by up to 14 eV, the absolute spectrum by 0.23 eV).
+
+### Fits (categorical, 80 / 16 structures, 3,000 bonds each)
+
+| data | H on-site | H off-site | S off-site | eigenvalues, full overlap | S > 1e-3 | S > 1e-2 | S > 1e-1 |
+|---|---|---|---|---|---|---|---|
+| light, all-electron | 28.3 meV | 24.4 | 0.037 | unusable | 3,046 | 775 | 166 |
+| light, core-projected | 28.8 | 9.9 | 0.187 | – | 1,012 | 171 | 59 |
+| without added s and p (mapped), all-electron | 29.8 | 19.8 | 0.017 | 434 | 434 | 330 | 151 |
+
+With the smaller basis the full generalised eigenproblem is usable and the eigenvalue error follows the block error (the factor of about ten the noise test gives for a well-conditioned overlap); the blocks are now the limit. Both changes together: running.

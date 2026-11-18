@@ -10,11 +10,11 @@ site basis:
                 Gaussian rows of unit norm), and the environment group on the same embedding rows
 The readouts stay per species (on-site) and per species pair (off-site) in every model.
     JAX_PLATFORMS=cpu uv run python bench/ham/species_fit.py <npz dir> <n_test> [bonds per structure=3000]
-        [d=1,2,3] [categorical=1] [threads=8] [seed=0] [smooth=<sigma_c>]
+        [d=1,2,3] [categorical=1] [threads=8] [seed=0] [smooth=<sigma_c>] [projected=0]
 (one model per process is safest: the compiled programs of four elements' species pairs are many,
 and a second model in the same process ran out of mappings for compiled code)
 Errors on the test structures: block RMSE, and eigenvalues from E_F - 12 to E_F + 5 eV on a k-grid
-with the reference overlap, in the span of the overlap's eigenvectors above 1e-3 (light bases are
+with the reference overlap, in the span of the overlap's eigenvectors above each of three thresholds (light bases are
 nearly dependent; docs/dev/ham-results.md)."""
 import glob
 import os
@@ -37,7 +37,7 @@ from ace_jax.operators.fit import fit_offsite, fit_onsite
 from ace_jax.operators.offsite_fast import OffsitePredictor
 from ace_jax.operators.onsite import OnsitePredictor
 
-CH, WIDTH, NK, STHR = ("H", "S"), 0.1, 3, 1e-3
+CH, WIDTH, NK, STHRS = ("H", "S"), 0.1, 3, (0.0, 1e-3, 1e-2, 1e-1)
 VALENCE = {6: 6, 14: 14, 32: 32, 50: 50}             # all-electron bases: every electron
 
 
@@ -67,7 +67,9 @@ def spectrum(H, X, nel):
     return e, mu
 
 
-def main(folder, n_test, n_bonds=3000, d=(1, 2, 3), categorical=1, threads=8, seed=0, smooth=None, nsite=12, rsite=6.0, env=(5.0, 4, 4, 2, 4), site=(2, 2)):
+def main(folder, n_test, n_bonds=3000, d=(1, 2, 3), categorical=1, threads=8, seed=0, smooth=None, nsite=12, rsite=6.0, env=(5.0, 4, 4, 2, 4), site=(2, 2), projected=0):
+    if projected:                                          # core-projected data: four valence electrons per atom
+        VALENCE.update({z: 4 for z in VALENCE})
     files = sorted(glob.glob(os.path.join(folder, "*.npz")))
     data = [cache.load(f)[0] for f in files]
     train, test = data[:-n_test], data[-n_test:]
@@ -88,10 +90,20 @@ def main(folder, n_test, n_bonds=3000, d=(1, 2, 3), categorical=1, threads=8, se
     for t in test:
         S = bloch(t, t.blocks["S"], ks)
         sv = [np.linalg.eigh(s) for s in S]
-        keep = min(int((w > STHR).sum()) for w, _ in sv)
-        X = [v[:, -keep:] / np.sqrt(w[-keep:]) for w, v in sv]
-        e, mu = spectrum(bloch(t, t.blocks["H"], ks), X, sum(VALENCE[int(z)] for z in t.numbers))
-        ref.append((X, e, mu))
+        Hk, nel, per = bloch(t, t.blocks["H"], ks), sum(VALENCE[int(z)] for z in t.numbers), []
+        for thr in STHRS:                                  # the span of the overlap's eigenvectors above each threshold
+            keep = min(int((w > thr).sum()) for w, _ in sv)
+            X = [v[:, -keep:] / np.sqrt(w[-keep:]) for w, v in sv]
+            per.append((X, *spectrum(Hk, X, nel)))
+        ref.append(per)
+    full = [spectrum(bloch(t, t.blocks["H"], ks), [v / np.sqrt(w) for w, v in (np.linalg.eigh(s) for s in bloch(t, t.blocks["S"], ks))],
+                     sum(VALENCE[int(z)] for z in t.numbers)) for t in test]
+    cost = []
+    for i in range(len(STHRS)):                            # what the truncation itself moves: lowest states of the window, by index
+        d = [(p[i][1][:, :p[i][1].shape[1]] - p[i][2]) - (e[:, :p[i][1].shape[1]] - m) for p, (e, m) in zip(ref, full)]
+        w = [(e[:, :x.shape[1]] > m - 12.0) & (e[:, :x.shape[1]] < m + 5.0) for x, (e, m) in zip(d, full)]
+        cost.append(1e3 * np.sqrt(np.mean(np.concatenate([x[k] for x, k in zip(d, w)]) ** 2)))
+    print("reference eigenvalues in the window, truncated against full overlap: " + ", ".join(f"S > {t:g}: {c:.1f} meV" for t, c in zip(STHRS, cost)), flush=True)
     for name, sb, emb in models:
         basis = B.BondBasis(site=sb, rcut_bond=rcut, n_bond=12, n_cpl=site[0], l_cpl=site[1], r_env=env[0], n_env=int(env[1]),
                             l_env=int(env[2]), n_ebond=int(env[3]), l_ebond=int(env[4]), env_emb=emb)
@@ -100,8 +112,8 @@ def main(folder, n_test, n_bonds=3000, d=(1, 2, 3), categorical=1, threads=8, se
         off, _ = fit_offsite(basis, [subset(x, n_bonds, k) for k, x in enumerate(train)], channels=CH, sigma_c=smooth)
         tfit = time.perf_counter() - t0
         f_on, f_off = OnsitePredictor(on), OffsitePredictor(off, threads=threads)
-        errs, band, times = {}, [], []
-        for t, (X, e0, mu0) in zip(test, ref):
+        errs, band, times = {}, [[] for _ in STHRS], []
+        for t, per in zip(test, ref):
             f_on(t.positions, t.cell, t.numbers); f_off(t.positions, t.cell, t.numbers)
             t0 = time.perf_counter()
             po, pf = f_on(t.positions, t.cell, t.numbers), f_off(t.positions, t.cell, t.numbers)
@@ -111,15 +123,17 @@ def main(folder, n_test, n_bonds=3000, d=(1, 2, 3), categorical=1, threads=8, se
                 for part, sel in (("on", onsite), ("off", lambda k: not onsite(k))):
                     errs.setdefault((c, part), []).append(np.concatenate(
                         [(pred[c][k] - v).ravel() for k, v in t.blocks[c].items() if sel(k)]))
-            e1, mu1 = spectrum(bloch(t, {k: pred["H"][k] for k in t.blocks["H"]}, ks), X, sum(VALENCE[int(z)] for z in t.numbers))
-            w = (e0 > mu0 - 12.0) & (e0 < mu0 + 5.0)
-            band.append(((e1 - mu1) - (e0 - mu0))[w])
+            Hp = bloch(t, {k: pred["H"][k] for k in t.blocks["H"]}, ks)
+            for b, (X, e0, mu0) in zip(band, per):
+                e1, mu1 = spectrum(Hp, X, sum(VALENCE[int(z)] for z in t.numbers))
+                w = (e0 > mu0 - 12.0) & (e0 < mu0 + 5.0)
+                b.append(((e1 - mu1) - (e0 - mu0))[w])
         rms = lambda v: 1e3 * np.sqrt((np.concatenate(v) ** 2).mean())
         nfeat = sum(sb.n(*lp) for lp in sb.lps)
         print(f"{name:14s} site features {nfeat:4d}, env channels {B.env_embedding(basis).shape[1]}, largest off-site problem "
               f"{max(np.asarray(c).shape[1] for c in off.coef.values()):4d} columns, fit {tfit:4.0f} s | H on-site {rms(errs[('H', 'on')]):7.2f} "
               f"off-site {rms(errs[('H', 'off')]):6.2f} meV; S off-site {rms(errs[('S', 'off')]):.3f} meV | eigenvalues RMSE "
-              f"{rms(band):6.1f} meV, max {1e3 * np.abs(np.concatenate(band)).max():5.0f} | {1e3 * np.mean(times):.2f} ms per atom, {threads} threads",
+              + ", ".join(f"S > {t:g}: {rms(b):.1f} (max {1e3 * np.abs(np.concatenate(b)).max():.0f})" for t, b in zip(STHRS, band)) + f" meV | {1e3 * np.mean(times):.2f} ms per atom, {threads} threads",
               flush=True)
         del f_on, f_off
         jax.clear_caches()

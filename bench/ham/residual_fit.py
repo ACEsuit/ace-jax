@@ -137,6 +137,28 @@ def main(npz, lab, work, nh=2, order=3, degree=12, rcut=6.0, nk=2, width=0.1, ne
         # the spectrum (the zero of the potential).  Energies only: its forces are not implemented.
         frames["resmu"][part].append((b, F - (fb - nel * len(a) * mu), None, None))
         frames["dft"][part].append((b, F, forces, stress))
+    # electronic structure of the H model on the test structures: what a potential alone does not give
+    es = {"eig": [], "eig_mu": [], "mu": [], "eb": []}
+    for n in [m for m in names if int(m.split("_")[1]) >= 100]:
+        d = cache.load(os.path.join(npz, n + ".npz"))[0]
+        N, w = len(d.numbers), np.asarray(calc.weights)
+        e0 = block_bands(BlockSum(list(d.blocks["H"]), d.numbers, d.basis), d.blocks["H"], d.blocks["S"], calc.kpts)
+        a = Atoms(numbers=d.numbers, positions=d.positions, cell=d.cell, pbc=True); a.calc = calc
+        e1 = np.asarray(a.calc.get_property("eigenvalues", a))
+        f0, mu0, _ = smeared_occupations(jax.numpy.asarray(e0), jax.numpy.asarray(w), nel * N, width, "gaussian")
+        f1, mu1, _ = smeared_occupations(jax.numpy.asarray(e1), jax.numpy.asarray(w), nel * N, width, "gaussian")
+        m = (e0 < float(mu0) + 3.0)[:, core * N:]                          # valence bands up to 3 eV above the Fermi level
+        de = (e1 - e0)[:, core * N:]
+        es["eig"].append(de[m]); es["eig_mu"].append((de - (float(mu1) - float(mu0)))[m])
+        es["mu"].append(float(mu1) - float(mu0)); es["eb"].append(float(((np.asarray(f1) * e1 - np.asarray(f0) * e0) * w[:, None])[:, core * N:].sum()) / N)
+    if es["mu"]:
+        r = lambda v: 1e3 * float(np.sqrt(np.mean(np.concatenate([np.ravel(x) for x in v]) ** 2)))
+        elec = dict(eigenvalue_rmse_meV=r(es["eig"]), eigenvalue_rmse_from_fermi_level_meV=r(es["eig_mu"]), eigenvalue_max_meV=1e3 * float(max(np.abs(x).max() for x in es["eig"])),
+                    fermi_level_rmse_meV=r([es["mu"]]), band_energy_rmse_meV_per_atom=r([es["eb"]]), structures=len(es["mu"]))
+        print(f"electronic structure of the H model, {elec['structures']} test structures (valence bands to E_F + 3 eV): eigenvalues RMSE {elec['eigenvalue_rmse_meV']:.2f} meV "
+              f"(from the Fermi level {elec['eigenvalue_rmse_from_fermi_level_meV']:.2f}, largest {elec['eigenvalue_max_meV']:.1f}); Fermi level RMSE {elec['fermi_level_rmse_meV']:.2f} meV; "
+              f"band energy RMSE {elec['band_energy_rmse_meV_per_atom']:.2f} meV per atom", flush=True)
+        json.dump(elec, open(os.path.join(work, "electronic.json"), "w"), indent=1)
     print(f"stage 2: band energy{', forces' if has_f else ''}{', stress' if has_s else ''} of {len(names)} structures in {time.perf_counter() - t:.0f} s "
           f"({len(frames['res']['train'])} train, {len(frames['res']['test'])} test)", flush=True)
     json.dump(dict(h_fit=fit_names, kpts=[nk] * 3, smearing="gaussian", width=width, nelectrons_per_atom=nel, core_bands_per_atom=core, bond_cutoff=rmax,
