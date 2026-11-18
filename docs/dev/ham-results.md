@@ -765,3 +765,11 @@ The figure is the test structure of median error (C4Ge7Si4Sn, 44 meV). Eigenvalu
 - `operators.io.save` / `load`: one `.npz` per model pair, laid out as the potentials' schema (`meta_json`, `schema_version` 1, `kind` "operator"); `HamiltonianCalculator("model.npz", ...)`; `aj eval --model model.npz --data <reference blocks | extxyz>`.
 - `sigma_c="loo"` / `"press"` (`fit.linear.loo`, the block leverages of `aj fit --objective loo`): alloy on-site H, light all-electron data, identity embedding (372 features): 23.4 meV with "loo", against 51.1 (no prior), 32.6 (evidence) and 21.9 (the best fixed prior, picked on the test set).
 - Order 2 with the evidence, degree 8, widths (4, 1), 850 features: 68.3 meV (66.4 with the fixed prior): no gain.
+
+### The prior removes the outlier (2026-11-18)
+
+The same categorical model on the reduced, core-projected alloy set with `smooth=evidence` (noise and prior scale of every shell pair and channel by the evidence, on-site and off-site): blocks unchanged (H on-site 29.97, off-site 8.50 meV; 29.30 and 8.55 without a prior), eigenvalues on the 3 x 3 x 3 grid at full overlap 46.5 meV (largest 321 meV) against 188.4 meV (largest 1,917 meV), and the same at every overlap threshold (46.5, 46.1, 40.5 meV at 1e-3, 1e-2, 1e-1). The unregularised fit's error was one structure with a spurious state (above); a block error of the same size without the poorly determined coefficient directions does not make it. Block errors do not show this; the electronic-structure metrics (`ham.metrics`) do.
+
+On-site only, alloy light all-electron data, the prior scale by criterion (test RMSE, meV): identity embedding, 372 features: "loo" 23.4, "press" 23.7, evidence 32.6, best fixed 21.9, none 51.1; categorical, 336: "loo" 28.6, evidence 31.2, none 28.3. Order 2 with the evidence, order-2 widths 1, 2, 4: 68.3, 70.5, 76.6 (training 23.9, 23.1, 22.1): overfitting the evidence does not control.
+
+`ham.metrics` on the unregularised model's 16 test structures (4 x 8 x 8 grid): fifteen have band RMSE at a common zero 18 to 52 meV (median 27), from own Fermi levels 23 to 75 (median 41), Fermi level -19 to +80 meV, band energy -116 to +131 meV per atom, DoS Wasserstein distance 9 to 32 meV; structure 8: 1,123 meV, Fermi level -1.57 eV, band energy -9.4 eV per atom, Wasserstein distance 996 meV.
