@@ -20,7 +20,7 @@ for n in 1 2 4 8 16 32 64 152; do
     grep -qsF "\"tag\": \"$tag\"" "$out.tags" && continue
     before=$(wc -l < "$out" 2>/dev/null || echo 0)
     mkdir -p "$out.models"                                      # each model as a file (operators.io), named by its tag
-    $py bench/ham/deeph_fit.py "$gold" "$n" 11 bonds=0 $m out="$out" save_model="$out.models/$(echo "$tag" | tr ' =,' '_--').npz" 2>&1 \
+    $py bench/ham/deeph_fit.py "$gold" "$n" 11 bonds=0 $m out="$out" save_model="$out.models/$(echo "$tag" | tr ' =,' '___').npz" 2>&1 \
       | grep -E "training structures|test set|bands |Fermi level|density of states|Error" | cut -c1-300
     [ "$(wc -l < "$out" 2>/dev/null || echo 0)" -gt "$before" ] && echo "{\"tag\": \"$tag\"}" >> "$out.tags"
   done
