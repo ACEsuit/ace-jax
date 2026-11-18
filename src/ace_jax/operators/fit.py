@@ -17,6 +17,8 @@ import jax.numpy as jnp
 import numpy as np
 
 from ..basis import cg
+from ..fit.linear import lml_svd
+from ..fit.linear import multistart
 from ..fit.linear import objective as lo
 from ..fit.linear import stats as ls
 from .onsite import OnsiteModel, _features, design, parts_of, shell_pairs, site_graph
@@ -25,9 +27,65 @@ from .onsite import OnsiteModel, _features, design, parts_of, shell_pairs, site_
 class DesignStats(NamedTuple):
     """The statistics of one design: `factor` (a `fit.linear.stats.Factor` with one right-hand side
     per (coefficient key, channel)) and `keys`, the coefficient keys in the order of its
-    right-hand sides (channels innermost)."""
+    right-hand sides (channels innermost).  hyper: with sigma_c="evidence", (n_rhs, 4): for each
+    right-hand side the noise sigma and prior scale sigma_c that maximise its evidence, the log
+    evidence there, and the sigma_c the coefficients were solved with (`_evidence`)."""
     factor: ls.Factor
     keys: tuple
+    hyper: object = None
+
+
+class _Prior(NamedTuple):
+    """What `fit.linear.lml_svd.svd_statistics` reads of a problem: the smoothness of the leading
+    columns and the fixed precisions of the trailing ones."""
+    gamma: np.ndarray
+    e0_prec: np.ndarray
+
+
+@jax.jit
+def _evidence_vg(x, s2, chat, P, p0, yy, n):
+    """Value and gradient in x = (log sigma, log sigma_c) of the evidence of one right-hand side
+    (chat (:,), yy): `fit.linear.lml_svd.log_evidence_svd` on the design's SVD."""
+    return jax.value_and_grad(lambda x: lml_svd.log_evidence_svd(x[0], x[1], lml_svd.SVDStats(s2, chat, P, p0, yy, n, jnp.zeros(()))))(x)
+
+
+RHO_STEP = 0.1          # decades: right-hand sides whose sigma^2 / sigma_c^2 agree to this share one posterior solve
+
+
+def _evidence(fac, gamma, ridge, nc):
+    """The evidence fit of one design.  Every right-hand side (a shell pair and a channel: their
+    scales differ by orders of magnitude) has its own noise sigma and smoothness-prior scale
+    sigma_c (coefficient j ~ N(0, sigma_c^2 / gamma_j^2); columns with gamma_j = 0 keep the
+    precision `ridge` at unit noise), the maximum of its evidence: the potential fit's SVD
+    evidence (`fit.linear.lml_svd`: one SVD of R D^-1 for the design, O(k) per evaluation) by
+    bounded L-BFGS from three starts (`fit.linear.multistart`).  The posterior mean depends on
+    rho = sigma^2 / sigma_c^2 alone, so right-hand sides are solved together by rho rounded to
+    RHO_STEP decades (`fit.linear.objective.posterior_qr`).  Returns (mean (k, n_rhs) in the
+    design's column order, hyper (n_rhs, 4): sigma, sigma_c at the maximum, the log evidence
+    there, and the sigma_c used after rounding)."""
+    gamma = np.asarray(gamma, float)
+    free = np.flatnonzero(gamma > 0)
+    order = np.concatenate([free, np.flatnonzero(gamma <= 0)])            # smoothness columns first, fixed ones last
+    R, c = np.asarray(fac.R, float)[:, order], np.asarray(fac.c, float)
+    yy, n = np.asarray(fac.yy, float), float(fac.n)
+    prior = _Prior(gamma[free], np.full(len(order) - len(free), ridge))
+    sv = lml_svd.svd_statistics([ls.Factor(R, c, jnp.asarray(yy.sum()), fac.n, jnp.zeros(()))], prior)
+    hyper = np.zeros((c.shape[1], 4))
+    for q in range(c.shape[1]):
+        scale = float(np.sqrt(max(yy[q] / n, 1e-300)))                    # rms of this target
+        lo_, hi_ = np.log([1e-9 * scale, 1e-3 * scale]), np.log([1e2 * scale, 1e15 * scale])
+        vg = lambda x, q=q: _evidence_vg(jnp.asarray(x), sv.s2, sv.chat[:, q], sv.P, sv.p0, jnp.asarray(yy[q]), sv.n)
+        best, _ = multistart.multistart_map(vg, [np.log([1e-2 * scale, v * scale]) for v in (1e2, 1e5, 1e8)], lo_, hi_, maxiter=200)
+        hyper[q, :3] = np.exp(best["x"][0]), np.exp(best["x"][1]), best["value"]
+    rho = np.round(2.0 * np.log10(hyper[:, 0] / hyper[:, 1]) / RHO_STEP) * RHO_STEP          # log10 sigma^2 / sigma_c^2
+    hyper[:, 3] = hyper[:, 0] / 10.0 ** (0.5 * rho)
+    mean = np.zeros_like(c)
+    for r in np.unique(rho):
+        q = np.flatnonzero(rho == r)
+        lin = jnp.asarray(np.concatenate([prior.gamma ** 2 * 10.0 ** r, prior.e0_prec]))
+        mu = lo.posterior_qr(lin, [ls.Factor(jnp.asarray(R), jnp.asarray(c[:, q]), jnp.asarray(yy[q]), fac.n, jnp.zeros(()))], [0.0])[0]
+        mean[np.ix_(order, q)] = np.asarray(mu)
+    return mean, hyper
 
 
 def _need_x64():
@@ -35,7 +93,7 @@ def _need_x64():
         raise ValueError("the block fit needs float64: jax.config.update('jax_enable_x64', True)")
 
 
-def _fit(designs, n_chunks, rows, nc, ridge, device=False, gamma=None):
+def _fit(designs, n_chunks, rows, nc, ridge, device=False, gamma=None, evidence=False):
     """Stream and solve.  designs: {design key: (n columns, [coefficient keys])}; rows(i) ->
     {design key: (A (n_rows, n_columns), Y (n_rows, n_keys * nc))} for chunk i (a design without
     rows in the chunk is left out).  Returns (coef, report, stats).
@@ -57,7 +115,7 @@ def _fit(designs, n_chunks, rows, nc, ridge, device=False, gamma=None):
                     w = designs[d][0] + Y.shape[1]
                     Rs[d] = qr_merge(Rs.get(d, jnp.zeros((w, w))), A, jnp.asarray(Y))
         acc = {d: (R[:designs[d][0], :designs[d][0]], R[:designs[d][0], designs[d][0]:]) for d, R in Rs.items()}
-        return _solve(designs, acc, yy, n, nc, ridge, gamma)
+        return _solve(designs, acc, yy, n, nc, ridge, gamma, evidence)
 
     def parts(i):
         out = rows(int(i))
@@ -74,12 +132,13 @@ def _fit(designs, n_chunks, rows, nc, ridge, device=False, gamma=None):
             for p in parts_d:
                 if p is not None:
                     yy[d] += (p[1] ** 2).sum(0); n[d] += len(p[1])
-    return _solve(designs, acc, yy, n, nc, ridge, gamma)
+    return _solve(designs, acc, yy, n, nc, ridge, gamma, evidence)
 
 
-def _solve(designs, acc, yy, n, nc, ridge, gamma=None):
+def _solve(designs, acc, yy, n, nc, ridge, gamma=None, evidence=False):
     """Coefficients, report and statistics from the factors (R, c) of each design.  gamma:
-    {design key: prior precision of each column} added to the ridge (the smoothness prior)."""
+    {design key: prior precision of each column} added to the ridge (the smoothness prior), or,
+    with `evidence`, {design key: smoothness of each column} for `_evidence`."""
     coef, report, stats = {}, {}, {}
     for d, (k, keys) in designs.items():
         if not n[d]:
@@ -90,13 +149,17 @@ def _solve(designs, acc, yy, n, nc, ridge, gamma=None):
             continue
         R, c = acc[d]
         fac = ls.Factor(R, c, jnp.asarray(yy[d]), jnp.asarray(float(n[d])), jnp.zeros(()))
-        lin = jnp.full(k, ridge) if gamma is None else ridge + jnp.asarray(gamma[d])
-        mu = np.asarray(lo.posterior_qr(lin, [fac], [0.0])[0])                           # (k, n_keys * nc)
+        hyper = None
+        if evidence:
+            mu, hyper = _evidence(fac, gamma[d], ridge, nc)
+        else:
+            lin = jnp.full(k, ridge) if gamma is None else ridge + jnp.asarray(gamma[d])
+            mu = np.asarray(lo.posterior_qr(lin, [fac], [0.0])[0])                       # (k, n_keys * nc)
         res2 = ((np.asarray(R) @ mu - np.asarray(c)) ** 2).sum(0) + np.maximum(yy[d] - (np.asarray(c) ** 2).sum(0), 0.0)
         for q, key in enumerate(keys):
             coef[key] = mu[:, q * nc:(q + 1) * nc].T.copy()
             report[key] = (n[d], k, np.sqrt(res2[q * nc:(q + 1) * nc] / n[d]))
-        stats[d] = DesignStats(fac, tuple(keys))
+        stats[d] = DesignStats(fac, tuple(keys), hyper)
     return coef, report, stats
 
 
@@ -112,7 +175,9 @@ def fit_onsite(basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10,
     sigma_c: None, the plain ridge; a number: the algebraic smoothness prior of the potential
     fit (`basis.prior`), precision ridge + (gamma / sigma_c)^2 on the feature of smoothness gamma
     (`SiteBasis.smoothness`; unit noise, so sigma_c is in the units of the blocks).  The constant
-    column of the L = 0 parts keeps the ridge alone."""
+    column of the L = 0 parts keeps the ridge alone.  "evidence": sigma_c and the noise of every
+    shell pair and channel maximise its evidence (`_evidence`; the values are in the statistics'
+    `hyper`)."""
     _need_x64()
     datasets = list(datasets)
     orbitals = datasets[0].basis if orbitals is None else orbitals
@@ -147,9 +212,12 @@ def fit_onsite(basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10,
                 out[(z, L, p)] = (A, np.concatenate(Y, axis=1))
         return out
 
-    gamma = None if sigma_c is None else {
-        (z, L, p): np.concatenate([basis.smoothness(L, p), np.zeros(int(L == 0))]) ** 2 / sigma_c ** 2 for z, L, p in designs}
-    coef, report, st = _fit(designs, len(datasets), rows, nc, ridge, gamma=gamma)
+    ev = isinstance(sigma_c, str)
+    if ev and sigma_c != "evidence":
+        raise ValueError(f"sigma_c: None, a number or 'evidence', got {sigma_c!r}")
+    smooth = lambda L, p: np.concatenate([basis.smoothness(L, p), np.zeros(int(L == 0))])
+    gamma = None if sigma_c is None else {(z, L, p): smooth(L, p) if ev else smooth(L, p) ** 2 / sigma_c ** 2 for z, L, p in designs}
+    coef, report, st = _fit(designs, len(datasets), rows, nc, ridge, gamma=gamma, evidence=ev)
     model = OnsiteModel(basis=basis, coef=coef, orbitals=orbitals, channels=tuple(channels))
     return (model, report, st) if stats else (model, report)
 
@@ -224,8 +292,11 @@ def fit_offsite(bond_basis, datasets, orbitals=None, channels=("H", "S"), ridge=
             out[(a, b, L, p, same)] = (A, np.concatenate(Y, axis=1))
         return out
 
+    ev = isinstance(sigma_c, str)
+    if ev and sigma_c != "evidence":
+        raise ValueError(f"sigma_c: None, a number or 'evidence', got {sigma_c!r}")
     gamma = None if sigma_c is None else {
-        key: B.smoothness(bond_basis, key[2], key[3], key[4]) ** 2 / sigma_c ** 2 for key in designs}
+        key: B.smoothness(bond_basis, key[2], key[3], key[4]) ** (1 if ev else 2) / (1.0 if ev else sigma_c ** 2) for key in designs}
     if compiled:
         from .design import bond_designs
         progs, dev = {}, {}
@@ -255,8 +326,8 @@ def fit_offsite(bond_basis, datasets, orbitals=None, channels=("H", "S"), ridge=
                 out[key] = (A, Y, len(sel) * (2 * L + 1))
             return out
 
-        coef, report, st = _fit(designs, len(chunks), rows_device, nc, ridge, device=True, gamma=gamma)
+        coef, report, st = _fit(designs, len(chunks), rows_device, nc, ridge, device=True, gamma=gamma, evidence=ev)
     else:
-        coef, report, st = _fit(designs, len(chunks), rows, nc, ridge, gamma=gamma)
+        coef, report, st = _fit(designs, len(chunks), rows, nc, ridge, gamma=gamma, evidence=ev)
     model = OffsiteModel(bond=bond_basis, coef=coef, orbitals=orbitals, channels=tuple(channels))
     return (model, report, st) if stats else (model, report)

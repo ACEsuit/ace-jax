@@ -10,7 +10,7 @@ site basis:
                 Gaussian rows of unit norm), and the environment group on the same embedding rows
 The readouts stay per species (on-site) and per species pair (off-site) in every model.
     JAX_PLATFORMS=cpu uv run python bench/ham/species_fit.py <npz dir> <n_test> [bonds per structure=3000]
-        [d=1,2,3] [categorical=1] [threads=8] [seed=0] [smooth=<sigma_c>] [projected=0]
+        [d=1,2,3] [categorical=1] [threads=8] [seed=0] [smooth=<sigma_c>|evidence] [projected=0]
 (one model per process is safest: the compiled programs of four elements' species pairs are many,
 and a second model in the same process ran out of mappings for compiled code)
 Errors on the test structures: block RMSE, and eigenvalues from E_F - 12 to E_F + 5 eV on a k-grid
@@ -144,6 +144,6 @@ if __name__ == "__main__":
     kw = {}
     for x in [x for x in a if "=" in x]:
         k, v = x.split("=")
-        kw[k] = tuple(int(t) for t in v.split(",") if t) if k == "d" else float(v) if k == "smooth" else int(v)
+        kw[k] = tuple(int(t) for t in v.split(",") if t) if k == "d" else (v if v == "evidence" else float(v)) if k == "smooth" else int(v)
     pos = [x for x in a if "=" not in x]
     main(pos[0], int(pos[1]), *(int(x) for x in pos[2:]), **kw)

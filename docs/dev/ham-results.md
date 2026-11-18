@@ -736,3 +736,18 @@ Zhang et al. (arXiv:2111.13736, section III.3) propagate errors to bands by ε̃
 - The estimate holds where it claims to: at 0.3 meV in both bases, and to 3 meV in the smaller one. The factor of about seven between the noise per block element and the eigenvalue error is first order too: an element of H(k) sums the noise of every periodic image of a pair (0.3 meV per block element is 0.62 meV per element of H(k)), and |φ|² in the window is 0.8 to 5.
 - Where it fails is set by the states above the window, not by those in it. Their |φ|² reaches 2,276 in the light basis and 27 in the smaller one (1/s for a direction of overlap eigenvalue s), so their own first-order shifts are −7 eV at 0.3 meV and −78 eV at 3 meV in the light basis: they cross the window, and the estimate for the window's states, which assumes each state stays isolated, no longer applies. In the smaller basis the same shifts are −0.07, −1.4 and −5 eV.
 - So the paper's estimate is consistent with everything here, and its range of validity is ‖ΔH‖ small against s_min times the distance to the states above. The paper's aluminium basis (minimal plus one d shell, 14 orbitals) is well conditioned, which is why its error ribbons contained the DFT bands. For a light-defaults basis an uncertainty propagated to first order (HInitASI's, and Phase 1's) is only meaningful after the basis is reduced or the overlap conditioned.
+
+## Evidence for the prior and noise of the block fit (2026-11-18)
+
+`fit_onsite` / `fit_offsite` take `sigma_c="evidence"` (`operators/fit.py::_evidence`). Nothing is reimplemented: per design, one SVD of R D^-1 by the potential fit's `fit.linear.lml_svd.svd_statistics` (columns without smoothness are its fixed-precision columns); per right-hand side (a shell pair and a channel) the two scales sigma and sigma_c maximise `log_evidence_svd` (O(k) per evaluation) by `fit.linear.multistart`'s bounded L-BFGS from three starts; the coefficients are `fit.linear.objective.posterior_qr`, right-hand sides solved together when their sigma^2 / sigma_c^2 agree to 0.1 decade. The scales are in `DesignStats.hyper`. Tests: the SVD evidence at the optimum equals the QR form's, the optimum is stationary, the mean is the QR posterior's, and drawn scales are recovered.
+
+Alloy, on-site H blocks, light all-electron data, 80 / 16 structures (test RMSE; `work/trace_onsite.py`):
+
+| site features | no prior | fixed sigma_c, best on the test set | evidence, one pair of scales per design and channel | evidence, per right-hand side |
+|---|---|---|---|---|
+| identity embedding, 372 | 51.1 meV | 21.9 (sigma_c 1e6) | 34.0 | 32.6 |
+| categorical, 336 | 28.3 | 28.3 (none) | 31.7 | 31.2 |
+
+- The optimisation is well behaved (no scale at a bound; sigma is 0.6 to 20 % of each target's rms; log10 sigma^2 / sigma_c^2 runs from −5 for some L = 0 targets to −13.6 at L = 6, against −12 for the best fixed prior).
+- It is not the test-error optimum: better than no prior for the identity embedding, worse than the best fixed value, and worse than no prior for the categorical basis. Replacing the L = 0 parts of the evidence model by the fixed prior's gives 27.9 meV and the L = 1 parts 29.3: the loss is in the low-L parts, where the evidence takes a prior up to 10^7 times stronger than the fixed one for some targets.
+- A likely reason (not shown): the residual of an order-1 model is misspecification, structured and shared by the atoms of a structure, not independent noise; the evidence reads it as noise and regularises. A leave-structure-out criterion (`uq.jackknife`'s PRESS on rows grouped by structure) would not make that assumption.

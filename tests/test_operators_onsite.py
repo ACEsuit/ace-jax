@@ -199,7 +199,7 @@ def test_fit_statistics_are_generic_factors(basis_spdf):
     model, report, st = fit_onsite(basis_spdf, [d], stats=True, ridge=1e-8)
     _, _, st2 = fit_onsite(basis_spdf, [d, d], stats=True, ridge=1e-8)
     assert st and all(key[0] in (6, 14) for key in st)
-    for key, (fac, keys) in st.items():
+    for key, (fac, keys, _) in st.items():
         k = fac.R.shape[0]
         assert fac.c.shape == (k, 2 * len(keys)) and fac.yy.shape == (2 * len(keys),)
         assert all(report[ck][:2] == (int(fac.n), k) for ck in keys)
@@ -209,3 +209,51 @@ def test_fit_statistics_are_generic_factors(basis_spdf):
         assert np.isfinite(float(lo.log_evidence_qr(jnp.full(k, 1e-8), [fac], [0.0])))
         scale = np.abs(np.asarray(fac.G)).max()
         assert np.allclose(st2[key].factor.G, 2 * fac.G, atol=1e-9 * scale) and float(st2[key].factor.n) == 2 * float(fac.n)
+
+
+def test_evidence_fit_is_the_generic_evidence():
+    """`_evidence`: for every right-hand side the SVD evidence at its optimum equals the QR form's
+    (`fit.linear.objective`), the optimum is stationary, the mean is the QR posterior's at the
+    scales used, and it finds the noise and prior scales the data were drawn with.  One column
+    has no smoothness (gamma 0): it keeps the ridge."""
+    import jax.numpy as jnp
+
+    from ace_jax.fit.linear import objective as lo
+    from ace_jax.fit.linear import stats as ls
+    from ace_jax.operators.fit import _evidence
+    rng = np.random.default_rng(0)
+    n, k, nc, ridge = 2000, 40, 2, 1e-10
+    gamma = np.concatenate([np.linspace(1.0, 6.0, k - 1) ** 2, [0.0]])
+    true = {0: (0.05, 30.0), 1: (2e-4, 0.5)}                               # channel: (sigma, sigma_c)
+    A = rng.normal(size=(n, k))
+    Y = np.zeros((n, 3 * nc))
+    for q in range(3 * nc):
+        sig, sc = true[q % nc]
+        c = np.concatenate([rng.normal(size=k - 1) * sc / gamma[:-1], [0.3]])
+        Y[:, q] = A @ c + sig * rng.normal(size=n)
+    Q, R = np.linalg.qr(A)
+    fac = ls.Factor(jnp.asarray(R), jnp.asarray(Q.T @ Y), jnp.asarray((Y ** 2).sum(0)), jnp.asarray(float(n)), jnp.zeros(()))
+    mean, hyper = _evidence(fac, gamma, ridge, nc)
+    for q, (sig, sc, value, used) in enumerate(hyper):
+        f = ls.Factor(fac.R, fac.c[:, q], fac.yy[q], fac.n, fac.logw)
+        lin = lambda lc, s2=1.0: jnp.concatenate([jnp.asarray(gamma[:-1]) ** 2 * jnp.exp(-2.0 * lc), jnp.asarray([ridge / s2])])
+        ev = lambda x, lin=lin, f=f: lo.log_evidence_qr(lin(x[1]), [f], [x[0]])
+        x = jnp.log(jnp.asarray([sig, sc]))
+        assert abs(float(ev(x)) - value) < 1e-6 * abs(value)
+        assert np.abs(np.asarray(jax.grad(ev)(x))).max() < 1e-3 * abs(value)
+        assert np.allclose(mean[:, q], np.asarray(lo.posterior_qr(lin(jnp.log(used), sig ** 2), [f], [jnp.log(sig)])[0]), atol=1e-8)
+        assert abs(np.log10(used / sc)) <= 0.03
+        assert 0.9 < sig / true[q % nc][0] < 1.1 and 0.5 < sc / true[q % nc][1] < 2.0
+
+
+def test_fit_with_the_evidence(basis_spdf):
+    """sigma_c="evidence" on real blocks: scales per design and channel in the statistics, a
+    model no worse on the fitted structure than a prior fixed far from them."""
+    require_optional("h5py")
+    d = deeph.read(FIX)
+    model, report, st = fit_onsite(basis_spdf, [d], sigma_c="evidence", stats=True)
+    assert st and all(s.hyper.shape == (2 * len(s.keys), 4) and np.isfinite(s.hyper).all() and (s.hyper[:, :2] > 0).all() for s in st.values())
+    tight, _ = fit_onsite(basis_spdf, [d], sigma_c=1e-3)
+    err = lambda m: np.sqrt(np.mean(np.concatenate([(m.predict(d.positions, d.cell, d.numbers)[c][k] - v).ravel()
+                                                    for c in ("H", "S") for k, v in d.blocks[c].items() if k[:3] == (0, 0, 0) and k[3] == k[4]]) ** 2))
+    assert err(model) < err(tight)
