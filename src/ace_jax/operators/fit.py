@@ -106,7 +106,8 @@ def _loo(fac, gamma, ridge, blocks, press):
     as independent noise.  A rho at which a structure has leverage 1 within roundoff is skipped.
     Returns (mean, hyper) as `_evidence` (hyper[:, 2]: the criterion)."""
     gamma, n = np.asarray(gamma, float), float(fac.n)
-    P, Y = (jnp.asarray(np.stack([b[i] for b in blocks])) for i in (0, 1))
+    m = max(len(b[0]) for b in blocks)                   # a structure with fewer rows than columns keeps only those rows
+    P, Y = (jnp.asarray(np.stack([np.concatenate([b[i], np.zeros((m - len(b[i]), b[i].shape[1]))]) for b in blocks])) for i in (0, 1))
     ee = np.sum([b[2] for b in blocks], axis=0)
     f = ls.Factor(jnp.asarray(fac.R), jnp.asarray(fac.c), jnp.asarray(fac.yy), fac.n, jnp.zeros(()))
     crit, s2, means = [], [], []
@@ -120,6 +121,14 @@ def _loo(fac, gamma, ridge, blocks, press):
     sig = np.sqrt(np.asarray(s2)[best, q])
     sc = sig / 10.0 ** (0.5 * LOO_RHO[best])
     return np.asarray(means)[best, :, q].T, np.stack([sig, sc, crit[best, q], sc], axis=1)
+
+
+def _live_rows(R, c):
+    """The rows of a factor that carry anything: a structure with fewer rows than the design has
+    columns leaves the others at zero (to roundoff), and `_loo` need not hold or solve them."""
+    size = np.sqrt((R ** 2).sum(1) + (c ** 2).sum(1))
+    keep = size > 1e-13 * max(size.max(), 1e-300)
+    return R[keep], c[keep]
 
 
 def _need_x64():
@@ -149,7 +158,7 @@ def _fit(designs, n_chunks, rows, nc, ridge, device=False, gamma=None, select=No
         def close():                                     # the finished structure's factors: to the host, and into the total
             for d in [d for gd, d in Rs if gd == g0 and gd is not None]:
                 R, k = Rs.pop((g0, d)), designs[d][0]
-                blocks.setdefault(d, []).append((np.asarray(R[:k, :k]), np.asarray(R[:k, k:]), np.asarray((R[k:, k:] ** 2).sum(0))))
+                blocks.setdefault(d, []).append((*_live_rows(np.asarray(R[:k, :k]), np.asarray(R[:k, k:])), np.asarray((R[k:, k:] ** 2).sum(0))))
                 Rs[(None, d)] = jnp.linalg.qr(jnp.concatenate([Rs[(None, d)], R]), mode="r") if (None, d) in Rs else R
         for i in range(n_chunks):
             g = None if groups is None else groups[i]
@@ -178,7 +187,7 @@ def _fit(designs, n_chunks, rows, nc, ridge, device=False, gamma=None, select=No
         for g in np.unique(groups):
             y0 = {d: yy[d].copy() for d in live}
             for d, (R, c) in zip(live, ls.host_qr_stream(parts, np.arange(n_chunks), init, batches=np.flatnonzero(np.asarray(groups) == g))):
-                R, c = np.asarray(R), np.asarray(c)
+                R, c = _live_rows(np.asarray(R), np.asarray(c))
                 blocks.setdefault(d, []).append((R, c, np.maximum(yy[d] - y0[d] - (c ** 2).sum(0), 0.0)))
         acc = dict(zip(live, ls.host_qr_stream(lambda j: [(blocks[d][int(j)][0], blocks[d][int(j)][1]) for d in live],
                                                np.arange(len(blocks[live[0]])), init)))

@@ -249,3 +249,24 @@ def test_species_aware_environment_on_real_data(basis):
                 assert set(got) >= set(off)
                 assert max(np.abs(got[k] - pred[k]).max() for k in off) < 1e-9 * max(np.abs(pred[k]).max() for k in off)
     assert rms["aware"] < rms["blind"] * (1 + 1e-6) and rms["blind"] < 0.8 * rms["two"], rms
+
+
+def test_fit_leaving_structures_out(basis):
+    """sigma_c="press" off-site: a factor per structure (bond chunks merged by structure), on
+    the device and on the host: the same choices and coefficients, and the plain fit's factor.  (With more
+    columns than rows the left-out fits interpolate and the criterion is roundoff.)"""
+    require_optional("h5py")
+    d = deeph.read(FIX)
+    rng = np.random.default_rng(0)
+    ds = [d._replace(positions=d.positions + 0.02 * rng.normal(size=d.positions.shape)) for _ in range(3)]
+    basis = basis._replace(n_cpl=0, l_cpl=0)            # two-centre: fewer columns than a structure's rows, a well-posed choice
+    a, _, sa = fit_offsite(basis, ds, sigma_c="press", stats=True, chunk=512)
+    b, _, sb = fit_offsite(basis, ds, sigma_c="press", stats=True, compiled=False, chunk=512)
+    _, _, s0 = fit_offsite(basis, ds, stats=True)
+    assert sa.keys() == sb.keys() == s0.keys()
+    for key in sa:
+        rho = lambda h: np.log10(h[:, 0] / np.where(h[:, 3] > 0, h[:, 3], 1.0), where=h[:, 0] > 0, out=np.zeros(len(h)))   # the choice (a target that is zero has none)
+        assert np.isfinite(sa[key].hyper).all() and np.allclose(rho(sa[key].hyper), rho(sb[key].hyper), atol=1e-6)
+        G = np.asarray(s0[key].factor.G)
+        assert np.allclose(sa[key].factor.G, G, atol=1e-8 * np.abs(G).max())
+    assert all(np.allclose(a.coef[k], b.coef[k], rtol=1e-3, atol=1e-3) for k in a.coef)                  # the few C-C bonds leave directions of 1e-5 relative; coefficients ~100
