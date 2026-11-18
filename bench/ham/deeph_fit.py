@@ -31,6 +31,7 @@ import numpy as np
 from scipy.optimize import brentq
 
 from ace_jax.ham import deeph
+from ace_jax.ham import metrics as M
 from ace_jax.ham.operator import BlockSum, block_bands
 from ace_jax.operators import bond as B
 from ace_jax.operators.data import OperatorData
@@ -40,6 +41,7 @@ from ace_jax.operators.offsite_fast import OffsitePredictor
 from ace_jax.operators.onsite import OnsitePredictor
 
 KB = 8.617333262e-5
+WINDOW = (-12.0, 5.0)                    # eV from the reference Fermi level: the states `ham.metrics` scores
 
 
 def onsite(k):
@@ -73,7 +75,7 @@ def train_names(folder, seed=0):
 
 
 def main(folder, n_train, nel, bonds=3000, site=(2, 2), env=(5.0, 6, 4, 4, 4), nsite=12, nbond=12, rsite=7.0, nk=7, threads=8,
-         ntest=None, seed=0, T=1000.0, pred=None, out=None, smooth=None):
+         ntest=None, seed=0, T=1000.0, pred=None, out=None, smooth=None, save_model=None):
     record = dict(n_train=n_train, bonds=bonds, site=site, env=env, nsite=nsite, nbond=nbond, rsite=rsite, seed=seed, sigma_c=smooth,
                   backend=jax.default_backend(), threads=threads)
     if pred:
@@ -100,6 +102,9 @@ def main(folder, n_train, nel, bonds=3000, site=(2, 2), env=(5.0, 6, 4, 4, 4), n
           f"{bonds or 'all'} bonds of each; site radials {nsite} to {rsite} A, {nbond} bond radials, site group {site}, env {env}, "
           f"bond cutoff {rcut}; largest problem {kmax} columns; fitted in {time.perf_counter() - t:.0f} s", flush=True)
     del train
+    if save_model:                                       # `operators.io`: aj eval and the calculator read it
+        from ace_jax.operators import io
+        io.save(save_model, on, off, info=dict(record, data=os.path.abspath(folder)))
     f_on, f_off = OnsitePredictor(on), OffsitePredictor(off, threads=threads)
 
     def predict(d, name):
@@ -121,7 +126,7 @@ def score(folder, nel, predict, nk, ntest, T, label):
     """The test set's H MAE and smeared eigenvalue error of predict(d, name) -> (blocks, s per atom)."""
     ks = np.array([[a, b, c] for a in range(nk) for b in range(nk) for c in range(nk)]) / nk
     tests = sorted(os.listdir(os.path.join(folder, "test")))[:ntest]
-    err, ee, ee_abs, times = [], [], [], []
+    err, ee, ee_abs, times, per = [], [], [], [], []
     for name in tests:
         d = deeph.read(os.path.join(folder, "test", name))
         pred, dt = predict(d, name)
@@ -142,15 +147,17 @@ def score(folder, nel, predict, nk, ntest, T, label):
         w = fermi(e0, mu0, T)
         ee.append((np.abs((e1 - mu1) - (e0 - mu0)) * w).sum() / w.sum())
         ee_abs.append((np.abs(e1 - e0) * w).sum() / w.sum())
+        per.append(M.spectrum_metrics(e0, e1, nel * len(d.numbers), len(d.numbers), width=KB * T, window=WINDOW))
         print(f"  {name}: H MAE {1e3 * np.abs(diff).mean():.3f} meV, EE {1e3 * ee[-1]:.2f} meV "
               f"(absolute {1e3 * ee_abs[-1]:.2f}), {1e3 * dt:.1f} ms per atom", flush=True)
     err = np.concatenate(err)
     print(f"test set ({len(tests)} structures): H MAE {1e3 * np.abs(err).mean():.3f} meV, RMSE {1e3 * np.sqrt((err ** 2).mean()):.3f} meV, "
           f"largest {1e3 * np.abs(err).max():.1f} meV; EE mean {1e3 * np.mean(ee):.2f} meV (absolute {1e3 * np.mean(ee_abs):.2f}); "
           f"{1e3 * np.mean(times):.1f} ms per atom; {label}")
+    print("\n".join(M.format_summary(M.summary(per))), flush=True)
     return dict(n_test=len(tests), h_mae_meV=1e3 * float(np.abs(err).mean()), h_rmse_meV=1e3 * float(np.sqrt((err ** 2).mean())),
                 h_max_meV=1e3 * float(np.abs(err).max()), ee_meV=1e3 * float(np.mean(ee)), ee_abs_meV=1e3 * float(np.mean(ee_abs)),
-                ms_per_atom=1e3 * float(np.mean(times)))
+                ms_per_atom=1e3 * float(np.mean(times)), metrics=M.summary(per), window=list(WINDOW))
 
 
 if __name__ == "__main__":
@@ -158,7 +165,7 @@ if __name__ == "__main__":
     kw = {}
     for x in [x for x in a if "=" in x]:
         k, v = x.split("=")
-        kw[k] = (v if k in ("pred", "out") else None if v == "none" else float(v) if k in ("rsite", "smooth") else int(v) if k in ("bonds", "nsite", "nbond", "nk", "threads", "ntest", "seed")
+        kw[k] = (v if k in ("pred", "out", "save_model") else None if v == "none" else float(v) if k in ("rsite", "smooth") else int(v) if k in ("bonds", "nsite", "nbond", "nk", "threads", "ntest", "seed")
                  else tuple(float(t) if k == "env" and i == 0 else int(t) for i, t in enumerate(v.split(","))))
     pos = [x for x in a if "=" not in x]
     main(pos[0], int(pos[1]), float(pos[2]), **kw)

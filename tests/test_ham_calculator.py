@@ -132,12 +132,14 @@ def test_calculator_from_a_model_file_and_aj_eval(models, tmp_path, capsys):  # 
                                                                    {"H": {k: v + shift * S[k] for k, v in H.items()}, "S": S}))
         frames.append((at, a.get_potential_energy(), ref.get_fermi_level(), a.get_forces()))
     args = ["--kpts", "2", "1", "2", "--nelectrons", "40", "--width", "0.2"]
-    main(["eval", "--model", path, "--data", str(tmp_path / "ref"), *args, "--window", "-50", "50", "--blocks-out", str(tmp_path / "pred")])
+    main(["eval", "--model", path, "--data", str(tmp_path / "ref"), *args, "--window", "-50", "50", "--metrics-out", str(tmp_path / "m.json"), "--blocks-out", str(tmp_path / "pred")])
     out = capsys.readouterr().out
     row = {tuple(ln.split()[:2]): [float(v) for v in ln.split()[2:]] for ln in out.splitlines() if ln.startswith("  ")}
     assert max(row[("S", "on-site")] + row[("S", "off-site")]) < 1e-9 and row[("H", "off-site")][0] > 0
-    band = next(ln for ln in out.splitlines() if ln.startswith("eigenvalues"))
-    assert float(band.split("RMSE")[1].split(",")[0]) < 1e-5 and abs(float(band.split("RMSE")[2].split()[0]) - 1e3 * shift) < 1e-5
+    import json
+    m = json.load(open(tmp_path / "m.json"))["summary"]            # the shift: in the common-zero error and the Fermi level only
+    assert m["aligned_rmse"] < 1e-8 and abs(m["band_rmse"] - shift) < 1e-8 and abs(m["fermi_rmse"] - shift) < 1e-8 and m["n"] == 2
+    assert "bands at a common zero" in out and not m["outliers"]
     assert (tmp_path / "pred" / "0001" / "hamiltonians_pred.h5").exists()                       # the layout: the write_results test
     write_cextxyz(str(tmp_path / "s.xyz"), [f[0] for f in frames])
     main(["eval", "--model", path, "--data", str(tmp_path / "s.xyz"), *args, "--out", str(tmp_path / "o.xyz")])

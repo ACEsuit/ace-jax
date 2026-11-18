@@ -358,20 +358,21 @@ def _eval_operator(a):
 
     --data a directory of reference blocks (ace-jax operator caches *.npz, or subdirectories in
     the DeepH layout): prints the block errors of every channel, on-site and off-site, and the
-    errors of the model's eigenvalues (its H and its S) against the reference's on the --kpts
-    grid: bands within --window of the reference Fermi level, each spectrum from its own Fermi
-    level, and the Fermi level itself.
+    electronic-structure errors of the model's eigenvalues (its H and its S) against the
+    reference's on the --kpts grid, bands within --window of the reference Fermi level
+    (`ham.metrics`: band errors at a common zero and from own Fermi levels, Fermi level, band
+    energy, density of states; --metrics-out writes the per-structure records as JSON).
     --data an extxyz file: the band energy, Fermi level, forces and stress of each structure;
     --out writes them back as <prefix>band_energy, <prefix>free_energy, <prefix>fermi_level
     (info), <prefix>forces (arrays) and <prefix>stress (info, periodic cells).
     --blocks-out DIR: the predicted H and S of structure i in DIR/<i>, DeepH layout."""
     import glob
-    import jax.numpy as jnp
     from ase import Atoms
     from ase.stress import voigt_6_to_full_3x3_stress
     from .ham import cache, deeph
     from .ham.calculator import HamiltonianCalculator
-    from .ham.operator import BlockSum, block_bands, smeared_occupations
+    from .ham import metrics as M
+    from .ham.operator import BlockSum, block_bands
     calc = HamiltonianCalculator(a.model, kpts=tuple(a.kpts), nelectrons=_electrons(a.nelectrons), width=a.width, smearing=a.smearing,
                                  threads=a.threads)
     ch, orb = calc.predictor.channels, calc.predictor.orbitals
@@ -388,7 +389,7 @@ def _eval_operator(a):
         if not names:
             raise UsageError(f"{a.data}: no operator caches (*.npz) and no DeepH directories")
         onsite = lambda k: k[:3] == (0, 0, 0) and k[3] == k[4]
-        err, band, fermi = {}, [], []
+        err, per = {}, []
         print(f"{len(names)} reference structures; eigenvalues on {len(calc.kpts)} k-points, {a.window[0]:g} to {a.window[1]:g} from the Fermi level")
         for i, name in enumerate(names):
             d = cache.load(name)[0] if name.endswith(".npz") else deeph.read(name)
@@ -403,23 +404,23 @@ def _eval_operator(a):
                         err.setdefault((c, part), []).append(np.concatenate([(pred[c][k] - v).ravel() for k, v in d.blocks[c].items()
                                                                               if sel(k) and k in pred[c]] or [np.zeros(0)]))
             if calc.channel in d.blocks and (calc.overlap is None or calc.overlap in d.blocks):
-                e1, mu1 = np.asarray(calc.get_property("eigenvalues", at)), calc.get_fermi_level()
+                e1 = np.asarray(calc.get_property("eigenvalues", at))
                 Hb = d.blocks[calc.channel]
                 Sb = d.blocks[calc.overlap] if calc.overlap else {k: np.eye(*v.shape) * float(onsite(k)) for k, v in Hb.items()}
                 e0 = block_bands(BlockSum(sorted(Hb), d.numbers, orb), Hb, Sb, calc.kpts)
-                mu0 = float(smeared_occupations(jnp.asarray(e0), jnp.asarray(calc.weights), calc.electrons(d.numbers), calc.width,
-                                                calc.smearing, calc.degeneracy)[1])
-                w = (e0 > mu0 + a.window[0]) & (e0 < mu0 + a.window[1])
-                band.append(((e1 - mu1) - (e0 - mu0))[w]); fermi.append(mu1 - mu0)
+                per.append(dict(name=os.path.basename(name), **M.spectrum_metrics(
+                    e0, e1, calc.electrons(d.numbers), len(d.numbers), calc.weights, calc.width, calc.smearing, calc.degeneracy, tuple(a.window))))
             blocks_out(i, at)
         rms = lambda v: float(np.sqrt(np.mean(np.concatenate(v) ** 2))) if sum(len(x) for x in v) else float("nan")
         mae = lambda v: float(np.mean(np.abs(np.concatenate(v)))) if sum(len(x) for x in v) else float("nan")
         print("blocks (1e-3 of the data's unit: meV for H in eV)   RMSE        MAE        max")
         for (c, part), v in err.items():
             print(f"  {c:6s} {part:9s} {1e3 * rms(v):22.4f} {1e3 * mae(v):10.4f} {1e3 * max((np.abs(x).max() for x in v if len(x)), default=np.nan):10.3f}")
-        if band:
-            print(f"eigenvalues from the Fermi level: RMSE {1e3 * rms(band):.2f}, MAE {1e3 * mae(band):.2f}, max {1e3 * max(np.abs(x).max() for x in band if len(x)):.1f}; "
-                  f"Fermi level RMSE {1e3 * float(np.sqrt(np.mean(np.square(fermi)))):.2f} (1e-3 of the data's unit)")
+        if per:
+            print("\n".join(M.format_summary(M.summary(per), unit="(1e-3 of the data's unit)")))
+            if a.metrics_out:
+                with open(a.metrics_out, "w") as f:
+                    json.dump(dict(summary=M.summary(per), structures=per), f, indent=1)
         return
     configs = load_configs(a.data, energy_key=a.energy_key, force_key=a.force_key, virial_key=a.virial_key, stress_key=a.stress_key)
     frames = None
@@ -1021,6 +1022,7 @@ def _parser():
     hm.add_argument("--smearing", choices=["fermi-dirac", "gaussian"], default="fermi-dirac")
     hm.add_argument("--window", type=float, nargs=2, default=[-12.0, 5.0],
                     help="eigenvalues scored: from LO to HI of the reference Fermi level (default -12 5)")
+    hm.add_argument("--metrics-out", default=None, help="JSON file for the electronic-structure metrics of every reference structure")
     hm.add_argument("--blocks-out", default=None, help="directory for the predicted H and S blocks of each structure (DeepH layout)")
     hm.add_argument("--threads", type=int, default=1, help="threads of the off-site evaluation on a CPU (default 1)")
     cal = sub.add_parser("calibrate", help="recalibrate the per-group conformal scales of an ARD posterior "
