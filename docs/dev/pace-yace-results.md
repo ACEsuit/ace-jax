@@ -1,5 +1,7 @@
 # PACE `.yace` import: deployment results (Task 9)
 
+> **Historical (2026-09-24).** A record of the first `.yace` deployment results. The timings predate the C++ and CUDA kernels, the automatic DAG product basis and lammps-jax on the CPU. Current timings: `docs/dev/accuracy-cost-results.md` (silicon, and the multi-component rows) and the user Performance page.
+
 Date 2026-09-24. Branch `feat/pace-yace`. Raw numbers are in
 `bench/pace_modal/last_results.json`, produced by `modal run bench/pace_modal/run.py`
 on one Modal **L4** GPU.

@@ -285,9 +285,9 @@ def cases(device, only=None):
 
 # ---- child side: one gate or one timed case, in a fresh process -------------
 
-def gate_cells():
+def gate_cells(system="Si", n=GATE_N):
     from scaling.structures import supercell
-    return [supercell("Si", GATE_N, seed=k, rattle=RATTLE) for k in range(GATE_CELLS)]
+    return [supercell(system, n, seed=k, rattle=RATTLE) for k in range(GATE_CELLS)]
 
 
 def gate_tol(style, code, row):
@@ -315,7 +315,8 @@ def gate_model(row, device, env, work):
     from scaling.run_lammps import export_bundle
     from scaling.sweep import lammps_supported
     code, style, work = row["code"], STYLE[row["code"]], pathlib.Path(work)
-    out = {"gate": style, "n_atoms": GATE_N, "cells": GATE_CELLS}
+    gate_n = row.get("gate_n", GATE_N)                # (multicomponent.py: a larger cell for another system)
+    out = {"gate": style, "n_atoms": gate_n, "cells": GATE_CELLS}
     if style == "nep-gpumd":
         return gate_gpumd(row, env, work, out)
     if not lammps_supported(code, device):
@@ -328,7 +329,7 @@ def gate_model(row, device, env, work):
         if why:
             return {**out, "status": "unsupported", "error": why}
     lmp, checks = env["lmp"], []
-    for k, at in enumerate(gate_cells()):
+    for k, at in enumerate(gate_cells(row.get("system", "Si"), gate_n)):
         layouts = (parity.BUNDLE_LAYOUTS if k == 0 else ("auto",)) if style == "acejax" else (None,)
         if style == "acejax" and os.environ.get("ACEJAX_EXPORT_FFI"):
             layouts = ("matrix",)                              # the FFI kernel: the matrix layout only

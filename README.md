@@ -100,8 +100,8 @@ both.
 
 The [Performance page](https://acesuit.github.io/ace-jax/benchmarks/) gives
 the benchmarks. On silicon, it compares the accuracy and the cost of ace-jax
-with other interatomic potentials in LAMMPS. On SiGe and Cantor, it compares
-the speed of ace-jax with ML-PACE and MACE.
+with other interatomic potentials in LAMMPS. On a five-element alloy, it
+compares the speed of ace-jax with ML-PACE and MACE.
 
 ## Citing
 

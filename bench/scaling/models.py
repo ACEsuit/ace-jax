@@ -18,7 +18,7 @@ import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-DIR = ROOT / "bench" / "scaling" / "models"
+DIR = pathlib.Path(os.environ.get("BENCH_MODELS_DIR") or ROOT / "bench" / "scaling" / "models")   # git-ignored
 SIZES_JSON = ROOT / "bench" / "scaling" / "model_sizes.json"      # committed; models are not
 SIZES = ("small", "medium", "large")
 ELEMENTS = {"SiGe": ["Si", "Ge"], "Cantor": ["Cr", "Mn", "Fe", "Co", "Ni"]}

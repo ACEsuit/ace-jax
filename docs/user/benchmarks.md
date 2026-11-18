@@ -5,8 +5,9 @@ This page gives two benchmarks:
 1. **Accuracy and cost on silicon.** Fitted models of each family are
    compared at the same accuracy. The cost is the time per atom and MD step
    in LAMMPS.
-2. **Speed on SiGe and Cantor.** Models with random weights are compared at
-   the same size. These figures compare speed only, not accuracy.
+2. **Speed on a five-element alloy.** Models with random weights are timed
+   on the CrMnFeCoNi (Cantor) alloy. This table compares speed only, not
+   accuracy.
 
 ## Accuracy and cost: silicon
 
@@ -262,70 +263,55 @@ lower cost. The fine-tuned foundation models have lower errors.
 - The GAP parameter count includes only the sparse-point coefficients. The
   GAP kernel also keeps the sparse descriptors.
 
-## Speed: SiGe and Cantor
+## Speed: a five-element alloy
 
-Each figure shows the throughput against the system size. The throughput is
-in **atom-steps per second** (atoms × evaluations per second; higher is
-better).
+The silicon benchmark has one element. This table shows the cost for a
+system with five elements: the equiatomic CrMnFeCoNi (Cantor) alloy on an fcc
+lattice. The cost is in microseconds per atom-step (lower is better), in
+LAMMPS and in float64.
 
-- **Workload.** The workload is similar to MD. Before each timed evaluation
-  of energy and forces, each atom moves a small distance, as between two
-  MD steps. The compilation time is not included.
-- **Models.** The models are **medium-size models with random weights**.
-  Their cost is the same as the cost of a fitted model, but they do not
-  predict correctly:
-    - PACE `.yace` models of approximately 500 basis functions for each
-      element (ace-jax and ML-PACE evaluate the same files);
-    - linear ACE models of approximately 450 basis functions for each
-      element;
-    - MACE-MP-0b2 medium.
-- **Standalone** (solid lines) is a direct call of the evaluator, outside an
-  MD engine. For ace-jax and MACE, this is one ASE calculator call from
-  Python, including the neighbour list.
-- **LAMMPS** (dashed lines) is the time of one MD step in LAMMPS: ace-jax
-  with lammps-jax ([LAMMPS export](howto/lammps.md)), ML-PACE as
-  `pair_style pace`, MACE with Symmetrix.
-- **Systems.** SiGe, a random alloy on diamond, and Cantor, the equiatomic
-  CrMnFeCoNi alloy on fcc.
+--8<-- "benchmarks-cantor.md"
 
-### CPU, float64
+- **Models.** The models have **random weights**. Their cost is the same as
+  the cost of a fitted model of the same size, but they do not predict
+  correctly. Thus this table compares only speed.
+    - The linear ACE model has 447 basis functions for each element.
+    - The PACE model has 496 basis functions for each element. ace-jax and
+      ML-PACE evaluate the same `.yace` file.
+    - The MACE model is MACE-MP-0b2 medium.
+- **Codes.** The LAMMPS builds are those of the silicon benchmark: ace-jax
+  with lammps-jax, ML-PACE as `pair_style pace` and `pair_style pace/kk`,
+  and MACE with Symmetrix v0.3.0.
+- **ace-jax kernel.** The kernel evaluates linear ACE models only. Thus the
+  PACE model runs as the compiled JAX program.
+- **GPU.** One NVIDIA A100, 32,768 atoms, one MPI rank.
+- **CPU.** One node with two 64-core AMD EPYC 7742 CPUs, 8,192 atoms, 128
+  MPI ranks with one thread for each rank.
+- **Parity.** Before the timing, each code in LAMMPS is compared with its
+  own reference evaluator on three cells of 256 atoms. All codes agree with
+  their references.
 
-![Throughput against system size on CPU in float64, SiGe and Cantor panels: ACEpotentials.jl trim library and ML-PACE in LAMMPS are fastest, ace-jax standalone 6–10× below ML-PACE and level with ACEpotentials.jl direct, MACE slowest](assets/benchmarks/cpu_float64.png)
+The results are:
 
-When these figures were made, lammps-jax supported only GPUs. Thus the CPU
-figure shows ace-jax standalone only. The silicon benchmark above includes
-ace-jax in LAMMPS on the CPU.
+- On the linear ACE model, the ace-jax kernel is 3.9 times faster than the
+  compiled JAX program on the A100. On the CPU, it is 10 times faster.
+- The ace-jax kernel on the linear ACE model costs less than ML-PACE on the
+  PACE model: 0.15 against 0.30 µs/atom-step on the A100, and 0.38 against
+  0.51 on the CPU. These are different models of approximately the same
+  size.
+- On the same PACE model, ML-PACE is 2.4 times faster than ace-jax on the
+  A100. On the CPU, it is 11 times faster.
+- MACE-MP-0b2 medium costs 7.5 µs/atom-step on the A100 and 29 on the CPU.
+  This is 50 and 78 times the cost of the ace-jax kernel on the linear ACE
+  model.
 
-### GPU, float64
-
-![Throughput against system size on GPU in float64, SiGe and Cantor panels, for ace-jax PACE and linear ACE, ML-PACE and MACE, in LAMMPS and standalone](assets/benchmarks/gpu_float64.png)
-
-### GPU, float32
-
-![Throughput against system size on GPU in float32, SiGe and Cantor panels, for ace-jax PACE and linear ACE and MACE standalone](assets/benchmarks/gpu_float32.png)
-
-### At 8,192 atoms
-
-Atom-steps per second at 8,192 atoms. "—" shows that a code does not run
-in that setting, or ran out of memory at a smaller size.
-
---8<-- "benchmarks-table.md"
-
-## Caveats
-
---8<-- "benchmarks-notes.md"
-- Random weights set the cost of a model, not its accuracy. Thus these
-  numbers compare only speed. A fitted model of the same size has the same
-  speed.
-- ace-jax standalone uses its neighbour list again while the atoms stay in
-  the skin. MACE standalone builds the list again at each call.
-- The throughput depends on the model size, the cutoff and the number of
-  neighbours. The [full benchmarks](https://github.com/ACEsuit/ace-jax/blob/main/docs/dev/benchmarks.md)
-  include small and large models, peak memory and the largest system that
-  fits in memory.
+!!! warning
+    The CPU row uses 128 MPI ranks with one thread for all codes. The
+    silicon benchmark uses the fastest layout of each model. Thus a code can
+    be faster on the CPU with a different layout. The cost of MACE on the
+    CPU changed by more than 20% between 1,024 and 8,192 atoms.
 
 ## More
 
-- [Full benchmark results](https://github.com/ACEsuit/ace-jax/blob/main/docs/dev/benchmarks.md):
-  every model size and host, memory, precision, parity checks and versions.
-- [How to rerun the benchmarks](https://github.com/ACEsuit/ace-jax/blob/main/bench/scaling/README.md).
+- [Full results of both benchmarks](https://github.com/ACEsuit/ace-jax/blob/main/docs/dev/accuracy-cost-results.md):
+  every model, the parity checks, the versions and the commands.
