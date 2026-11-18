@@ -10,7 +10,8 @@ site basis:
                 Gaussian rows of unit norm), and the environment group on the same embedding rows
 The readouts stay per species (on-site) and per species pair (off-site) in every model.
     JAX_PLATFORMS=cpu uv run python bench/ham/species_fit.py <npz dir> <n_test> [bonds per structure=3000]
-        [d=1,2,3] [categorical=1] [threads=8] [seed=0] [smooth=<sigma_c>|evidence] [projected=0]
+        [d=1,2,3] [categorical=1] [threads=8] [seed=0] [smooth=<sigma_c>|evidence|loo|press] [projected=0] [save=<prefix>]
+(save: each model is written to <prefix>.<name>.npz, `operators.io`)
 (one model per process is safest: the compiled programs of four elements' species pairs are many,
 and a second model in the same process ran out of mappings for compiled code)
 Errors on the test structures: block RMSE, and eigenvalues from E_F - 12 to E_F + 5 eV on a k-grid
@@ -31,6 +32,7 @@ from scipy.special import erfc
 
 from ace_jax.ham import cache
 from ace_jax.operators import bond as B
+from ace_jax.operators import io
 from ace_jax.operators.data import OperatorData
 from ace_jax.operators.features import build_embedding_site_basis, build_site_basis
 from ace_jax.operators.fit import fit_offsite, fit_onsite
@@ -67,7 +69,7 @@ def spectrum(H, X, nel):
     return e, mu
 
 
-def main(folder, n_test, n_bonds=3000, d=(1, 2, 3), categorical=1, threads=8, seed=0, smooth=None, nsite=12, rsite=6.0, env=(5.0, 4, 4, 2, 4), site=(2, 2), projected=0):
+def main(folder, n_test, n_bonds=3000, d=(1, 2, 3), categorical=1, threads=8, seed=0, smooth=None, nsite=12, rsite=6.0, env=(5.0, 4, 4, 2, 4), site=(2, 2), projected=0, save=None):
     if projected:                                          # core-projected data: four valence electrons per atom
         VALENCE.update({z: 4 for z in VALENCE})
     files = sorted(glob.glob(os.path.join(folder, "*.npz")))
@@ -111,6 +113,9 @@ def main(folder, n_test, n_bonds=3000, d=(1, 2, 3), categorical=1, threads=8, se
         on, _ = fit_onsite(sb, train, channels=CH, sigma_c=smooth)
         off, _ = fit_offsite(basis, [subset(x, n_bonds, k) for k, x in enumerate(train)], channels=CH, sigma_c=smooth)
         tfit = time.perf_counter() - t0
+        if save:
+            io.save(f"{save}.{name.replace(' ', '')}.npz", on, off, info=dict(data=os.path.abspath(folder), n_train=len(train), n_test=n_test,
+                                                                                  bonds_per_structure=n_bonds, smooth=smooth, projected=projected, seed=seed))
         f_on, f_off = OnsitePredictor(on), OffsitePredictor(off, threads=threads)
         errs, band, times = {}, [[] for _ in STHRS], []
         for t, per in zip(test, ref):
@@ -144,6 +149,6 @@ if __name__ == "__main__":
     kw = {}
     for x in [x for x in a if "=" in x]:
         k, v = x.split("=")
-        kw[k] = tuple(int(t) for t in v.split(",") if t) if k == "d" else (v if v == "evidence" else float(v)) if k == "smooth" else int(v)
+        kw[k] = tuple(int(t) for t in v.split(",") if t) if k == "d" else (v if v in ("evidence", "loo", "press") else float(v)) if k == "smooth" else v if k == "save" else int(v)
     pos = [x for x in a if "=" not in x]
     main(pos[0], int(pos[1]), *(int(x) for x in pos[2:]), **kw)
