@@ -751,3 +751,17 @@ Alloy, on-site H blocks, light all-electron data, 80 / 16 structures (test RMSE;
 - The optimisation is well behaved (no scale at a bound; sigma is 0.6 to 20 % of each target's rms; log10 sigma^2 / sigma_c^2 runs from −5 for some L = 0 targets to −13.6 at L = 6, against −12 for the best fixed prior).
 - It is not the test-error optimum: better than no prior for the identity embedding, worse than the best fixed value, and worse than no prior for the categorical basis. Replacing the L = 0 parts of the evidence model by the fixed prior's gives 27.9 meV and the L = 1 parts 29.3: the loss is in the low-L parts, where the evidence takes a prior up to 10^7 times stronger than the fixed one for some targets.
 - A likely reason (not shown): the residual of an order-1 model is misspecification, structured and shared by the atoms of a structure, not independent noise; the evidence reads it as noise and regularises. A leave-structure-out criterion (`uq.jackknife`'s PRESS on rows grouped by structure) would not make that assumption.
+
+## Alloy bands and density of states against DFT (2026-11-18)
+
+`bench/ham/alloy_bands.py`: the categorical model on the reduced, core-projected alloy set (80 training structures, no prior; the 29.3 / 8.6 meV row above), every test structure. DFT bands: the FHI-aims blocks summed at each k-point; model bands: the predicted H with the DFT overlap, full overlap; ASE's path of the tetragonal 16-atom cell (folded bands); density of states on a 4 x 8 x 8 Monkhorst-Pack grid, 0.1 eV Gaussian; both from the DFT Fermi level.
+
+![bands](figures/ham-alloy-bands.png)
+
+The figure is the test structure of median error (C4Ge7Si4Sn, 44 meV). Eigenvalue RMSE on the grid, E_F - 12 to E_F + 5 eV, each spectrum from its own Fermi level, per test structure (meV): 54, 66, 35, 37, 26, 23, 23, 25, **768**, 45, 24, 44, 23, 54, 75, 53. Fifteen structures are between 23 and 75 meV (median 44); one, C9Ge2Si4Sn (nine carbon atoms of sixteen; H blocks 18.4 meV against 5.5 to 9.9 for the others), has its Fermi level 1.57 eV low. That structure is what the 188 meV of the table above (3 x 3 x 3 grid, all structures pooled, worst state 1.9 eV) mostly is. Not examined yet: which states move, and how many training structures are as carbon-rich.
+
+## Model files, and the prior scale by leaving structures out (2026-11-18)
+
+- `operators.io.save` / `load`: one `.npz` per model pair, laid out as the potentials' schema (`meta_json`, `schema_version` 1, `kind` "operator"); `HamiltonianCalculator("model.npz", ...)`; `aj eval --model model.npz --data <reference blocks | extxyz>`.
+- `sigma_c="loo"` / `"press"` (`fit.linear.loo`, the block leverages of `aj fit --objective loo`): alloy on-site H, light all-electron data, identity embedding (372 features): 23.4 meV with "loo", against 51.1 (no prior), 32.6 (evidence) and 21.9 (the best fixed prior, picked on the test set).
+- Order 2 with the evidence, degree 8, widths (4, 1), 850 features: 68.3 meV (66.4 with the fixed prior): no gain.
