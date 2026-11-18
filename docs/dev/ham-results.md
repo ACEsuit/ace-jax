@@ -719,8 +719,9 @@ Against the rerun on 11 other structures: overlap to 4.7e-4; valence bands from 
 | light, all-electron | 28.3 meV | 24.4 | 0.037 | unusable | 3,046 | 775 | 166 |
 | light, core-projected | 28.8 | 9.9 | 0.187 | – | 1,012 | 171 | 59 |
 | without added s and p (mapped), all-electron | 29.8 | 19.8 | 0.017 | 434 | 434 | 330 | 151 |
+| without added s and p (mapped), core-projected | 29.3 | 8.6 | 0.172 | 188 | 188 | 93 | 41 |
 
-With the smaller basis the full generalised eigenproblem is usable and the eigenvalue error follows the block error (the factor of about ten the noise test gives for a well-conditioned overlap); the blocks are now the limit. Both changes together: running.
+With the smaller basis the full generalised eigenproblem is usable and the eigenvalue error follows the block error (the factor of about ten the noise test gives for a well-conditioned overlap); the blocks are now the limit. Both changes together (9 to 16 orbitals per atom): 188 meV with the full overlap, from an unusable light all-electron set; the on-site blocks, 29 meV in every row, are what is left.
 
 ### Against the first-order estimate of the 2022 paper
 
