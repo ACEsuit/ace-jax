@@ -102,3 +102,45 @@ def test_core_bands_are_left_out_of_the_energy_and_its_derivatives(setup):
         dx = np.zeros_like(atoms.positions); dx[i, d] = h
         fd = -(free(atoms.positions + dx) - free(atoms.positions - dx)) / (2 * h)
         assert abs(fd - F[i, d]) < 1e-5 * max(1.0, np.abs(F).max()), (i, d, fd, F[i, d])
+
+
+def test_calculator_from_a_model_file_and_aj_eval(models, tmp_path, capsys):  # noqa: F811
+    """A model file (`operators.io`) as the calculator's predictor gives the models' results, and
+    `aj eval` on it: against reference blocks (here the model's own, H shifted by a constant
+    times S: zero block and band errors but for the shift, which moves only the Fermi level) and
+    on an extxyz file (band energy, Fermi level, forces and stress written back)."""
+    from ase_extxyz.io import read_cextxyz, write_cextxyz
+
+    from ace_jax.cli import main
+    from ace_jax.ham import cache
+    from ace_jax.operators import io
+    from ace_jax.operators.data import OperatorData
+    path = str(tmp_path / "ham.npz")
+    io.save(path, *models)
+    kw = dict(kpts=(2, 1, 2), nelectrons=40, width=0.2)
+    ref, calc = HamiltonianCalculator(models, **kw), HamiltonianCalculator(path, **kw)
+    frames, shift = [], 0.25
+    (tmp_path / "ref").mkdir()
+    for i in range(2):
+        pos, cell, numbers = structure(i)
+        at = Atoms(numbers=numbers, positions=pos, cell=cell, pbc=True)
+        a, b = at.copy(), at.copy()
+        a.calc, b.calc = ref, calc
+        assert a.get_potential_energy() == b.get_potential_energy() and np.array_equal(a.get_forces(), b.get_forces())
+        H, S = ref.get_hamiltonian(at), ref.get_overlap(at)
+        cache.save(str(tmp_path / "ref" / f"{i}.npz"), OperatorData(cell, pos, numbers, ref.predictor.orbitals,
+                                                                   {"H": {k: v + shift * S[k] for k, v in H.items()}, "S": S}))
+        frames.append((at, a.get_potential_energy(), ref.get_fermi_level(), a.get_forces()))
+    args = ["--kpts", "2", "1", "2", "--nelectrons", "40", "--width", "0.2"]
+    main(["eval", "--model", path, "--data", str(tmp_path / "ref"), *args, "--window", "-50", "50", "--blocks-out", str(tmp_path / "pred")])
+    out = capsys.readouterr().out
+    row = {tuple(ln.split()[:2]): [float(v) for v in ln.split()[2:]] for ln in out.splitlines() if ln.startswith("  ")}
+    assert max(row[("S", "on-site")] + row[("S", "off-site")]) < 1e-9 and row[("H", "off-site")][0] > 0
+    band = next(ln for ln in out.splitlines() if ln.startswith("eigenvalues"))
+    assert float(band.split("RMSE")[1].split(",")[0]) < 1e-5 and abs(float(band.split("RMSE")[2].split()[0]) - 1e3 * shift) < 1e-5
+    assert (tmp_path / "pred" / "0001" / "hamiltonians_pred.h5").exists()                       # the layout: the write_results test
+    write_cextxyz(str(tmp_path / "s.xyz"), [f[0] for f in frames])
+    main(["eval", "--model", path, "--data", str(tmp_path / "s.xyz"), *args, "--out", str(tmp_path / "o.xyz")])
+    for f, (_, e, mu, F) in zip(read_cextxyz(str(tmp_path / "o.xyz"), index=":", create_calc=False), frames):
+        assert abs(f.info["ace_band_energy"] - e) < 1e-6 and abs(f.info["ace_fermi_level"] - mu) < 1e-6      # the file's digits
+        assert np.allclose(f.arrays["ace_forces"], F, atol=1e-6) and f.info["ace_stress"].shape == (3, 3)

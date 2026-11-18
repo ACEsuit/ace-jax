@@ -2,7 +2,7 @@
 structure they come from (eigenvalues, Fermi level, the H and S blocks).
 
     from ace_jax.ham.calculator import HamiltonianCalculator
-    calc = HamiltonianCalculator((onsite, offsite), kpts=(4, 4, 4), nelectrons={79: 11}, width=0.1)
+    calc = HamiltonianCalculator("model.npz", kpts=(4, 4, 4), nelectrons={79: 11}, width=0.1)     # or (onsite, offsite)
     atoms.calc = calc
     atoms.get_forces(); atoms.get_stress()
     calc.get_eigenvalues(kpt=0); calc.get_fermi_level()
@@ -15,6 +15,8 @@ energy is the BAND energy of the predicted H and S, sum_k w_k sum_n f e, and the
 are the derivatives of its free energy (`HamiltonianPredictor.band_energy`: the trace form, the
 eigensolver is not differentiated).  It is not a total energy: there is no repulsive or
 double-counting term, so it is a building block (e.g. beside a pair potential), not a potential."""
+import os
+
 import numpy as np
 from ase.calculators.calculator import Calculator, all_changes
 from ase.stress import full_3x3_to_voigt_6_stress
@@ -23,7 +25,8 @@ from .operator import SMEARINGS, HamiltonianPredictor
 
 
 class HamiltonianCalculator(Calculator):
-    """predictor: a `HamiltonianPredictor`, or (onsite model, offsite model).
+    """predictor: a model file (`operators.io.save`; `threads=` for its off-site evaluation), a
+    `HamiltonianPredictor`, or (onsite model, offsite model).
     kpts: (n1, n2, n3), a Gamma-centred grid of fractional k-points i / n, or an (n_k, 3) array of
     fractional k-points; weights: their weights (default equal).
     nelectrons: the electrons the bands hold: None, the atomic numbers (an all-electron basis); a
@@ -44,9 +47,11 @@ class HamiltonianCalculator(Calculator):
     implemented_properties = ["energy", "free_energy", "forces", "stress", "eigenvalues", "fermi_level", "hamiltonian", "overlap"]
 
     def __init__(self, predictor, kpts=(1, 1, 1), weights=None, nelectrons=None, width=0.1, smearing="fermi-dirac",
-                 overlap="S", channel="H", degeneracy=2.0, device=False, core_bands=None, **kwargs):
+                 overlap="S", channel="H", degeneracy=2.0, device=False, core_bands=None, threads=1, **kwargs):
         super().__init__(**kwargs)
-        self.predictor = predictor if isinstance(predictor, HamiltonianPredictor) else HamiltonianPredictor(*predictor)
+        if isinstance(predictor, (str, os.PathLike)):
+            predictor = HamiltonianPredictor.from_file(predictor, threads=threads)
+        self.predictor = predictor if isinstance(predictor, HamiltonianPredictor) else HamiltonianPredictor(*predictor, threads=threads)
         if smearing not in SMEARINGS:
             raise ValueError(f"smearing must be one of {SMEARINGS}, got {smearing!r}")
         k = np.asarray(kpts, float)

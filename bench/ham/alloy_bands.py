@@ -93,13 +93,16 @@ def plot(src, fig, which="median"):
     for t in r["ticks"]:
         a.axvline(t, color=MUTED, lw=0.5)
     a.axhline(0.0, color=MUTED, lw=0.5, ls=":")
-    a.set_xticks(r["ticks"]); a.set_xticklabels(["Γ" if s == "G" else s for s in r["labels"]])
+    names = {}                                          # a break of the path: both ends at one tick, "Z|X"
+    for t, s in zip(r["ticks"], r["labels"]):
+        names.setdefault(float(t), []).append("Γ" if s == "G" else s)
+    a.set_xticks(list(names)); a.set_xticklabels(["|".join(v) for v in names.values()])
     a.set_xlim(r["x"][0], r["x"][-1]); a.set_ylim(*WIN); a.set_ylabel("E − E$_F$ (DFT) / eV")
     a.plot([], [], color=INK, lw=1.6, label="DFT (FHI-aims)"); a.plot([], [], color=MODEL, lw=1.0, ls=(0, (4, 2)), label="ACE model")
-    a.legend(loc="upper right", frameon=True, framealpha=0.92, edgecolor="none", fontsize=9)
+    a.legend(loc="lower left", bbox_to_anchor=(0.0, 1.0), ncol=2, frameon=False, fontsize=9, borderaxespad=0.2)
     e = np.linspace(WIN[0], WIN[1], 1200)
     dos = lambda ev: 2.0 * np.exp(-0.5 * ((e[:, None] - (ev.ravel() - mu)[None]) / SMEAR) ** 2).sum(1) / (SMEAR * np.sqrt(2 * np.pi) * len(ev))
-    b.fill_betweenx(e, 0.0, dos(r["grid_dft"]), color=INK, alpha=0.18, lw=0)
+    b.fill_betweenx(e, 0.0, dos(r["grid_dft"]), color=INK, alpha=0.10, lw=0)
     b.plot(dos(r["grid_dft"]), e, color=INK, lw=1.2)
     b.plot(dos(r["grid_model"]), e, color=MODEL, lw=1.0, ls=(0, (4, 2)))
     b.axhline(0.0, color=MUTED, lw=0.5, ls=":")
@@ -108,8 +111,8 @@ def plot(src, fig, which="median"):
         for s in ("top", "right"):
             ax.spines[s].set_visible(False)
     g = "×".join(str(v) for v in r["grid"])
-    f.suptitle(f"{r['formula']} (test structure {i}): eigenvalue RMSE {r['rmse']:.0f} meV, H blocks {r['h_rmse']:.1f} meV; DoS on a {g} grid, {SMEAR} eV Gaussian",
-               fontsize=10, x=0.125, ha="left")
+    f.suptitle(f"{r['formula']}, test structure {i}: eigenvalue RMSE {r['rmse']:.0f} meV, H blocks {r['h_rmse']:.1f} meV\n"
+               f"DoS: {g} k-points, {SMEAR} eV Gaussian", fontsize=10, x=0.125, y=1.0, ha="left")
     f.savefig(fig, dpi=200, bbox_inches="tight")
     print(f"structure {i} {r['formula']}: RMSE {r['rmse']:.1f} meV; all: " + " ".join(f"{x['rmse']:.0f}" for x in res))
 

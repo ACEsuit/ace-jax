@@ -3,6 +3,7 @@ ACE model, run the requested rungs of the ladder, write draws and the metrics
 table (per atom energies in meV/atom, forces in eV/A, virials in eV)."""
 import argparse
 import json
+import os
 import pathlib
 
 import jax
@@ -337,6 +338,113 @@ def _run_fit(a):
     return {key.split("/")[1]: m for key, m in res.preds.metrics.items() if key.startswith("test/")}
 
 
+def _is_operator(path):
+    """A model file written by `operators.io.save` (meta kind "operator")."""
+    if not str(path).endswith(".npz"):
+        return False
+    z = np.load(path)
+    return "meta_json" in z.files and json.loads(bytes(z["meta_json"]).decode()).get("kind") == "operator"
+
+
+def _electrons(text):
+    """--nelectrons: None, a number per cell, or Z:n,Z:n electrons per atom of each element."""
+    if text is None:
+        return None
+    return {int(z): float(n) for z, n in (x.split(":") for x in text.split(","))} if ":" in text else float(text)
+
+
+def _eval_operator(a):
+    """`aj eval` of a Hamiltonian model file, through `HamiltonianCalculator`.
+
+    --data a directory of reference blocks (ace-jax operator caches *.npz, or subdirectories in
+    the DeepH layout): prints the block errors of every channel, on-site and off-site, and the
+    errors of the model's eigenvalues (its H and its S) against the reference's on the --kpts
+    grid: bands within --window of the reference Fermi level, each spectrum from its own Fermi
+    level, and the Fermi level itself.
+    --data an extxyz file: the band energy, Fermi level, forces and stress of each structure;
+    --out writes them back as <prefix>band_energy, <prefix>free_energy, <prefix>fermi_level
+    (info), <prefix>forces (arrays) and <prefix>stress (info, periodic cells).
+    --blocks-out DIR: the predicted H and S of structure i in DIR/<i>, DeepH layout."""
+    import glob
+    import jax.numpy as jnp
+    from ase import Atoms
+    from ase.stress import voigt_6_to_full_3x3_stress
+    from .ham import cache, deeph
+    from .ham.calculator import HamiltonianCalculator
+    from .ham.operator import BlockSum, block_bands, smeared_occupations
+    calc = HamiltonianCalculator(a.model, kpts=tuple(a.kpts), nelectrons=_electrons(a.nelectrons), width=a.width, smearing=a.smearing,
+                                 threads=a.threads)
+    ch, orb = calc.predictor.channels, calc.predictor.orbitals
+    calc.overlap = "S" if "S" in ch else None
+    calc.channel = "H" if "H" in ch else next(c for c in ch if c != "S")
+    p = a.prefix
+
+    def blocks_out(i, at):
+        if a.blocks_out:
+            calc.write_results(os.path.join(a.blocks_out, f"{i:04d}"), at)
+
+    if os.path.isdir(a.data):
+        names = sorted(glob.glob(os.path.join(a.data, "*.npz"))) or sorted(d for d in glob.glob(os.path.join(a.data, "*")) if os.path.isdir(d))
+        if not names:
+            raise UsageError(f"{a.data}: no operator caches (*.npz) and no DeepH directories")
+        onsite = lambda k: k[:3] == (0, 0, 0) and k[3] == k[4]
+        err, band, fermi = {}, [], []
+        print(f"{len(names)} reference structures; eigenvalues on {len(calc.kpts)} k-points, {a.window[0]:g} to {a.window[1]:g} from the Fermi level")
+        for i, name in enumerate(names):
+            d = cache.load(name)[0] if name.endswith(".npz") else deeph.read(name)
+            if d.basis != orb:
+                raise UsageError(f"{name}: its orbital basis is not the model's")
+            at = Atoms(numbers=d.numbers, positions=d.positions, cell=d.cell, pbc=True)
+            at.calc = calc
+            pred = calc._blocks(at)
+            for c in ch:
+                if c in d.blocks:
+                    for part, sel in (("on-site", onsite), ("off-site", lambda k: not onsite(k))):
+                        err.setdefault((c, part), []).append(np.concatenate([(pred[c][k] - v).ravel() for k, v in d.blocks[c].items()
+                                                                              if sel(k) and k in pred[c]] or [np.zeros(0)]))
+            if calc.channel in d.blocks and (calc.overlap is None or calc.overlap in d.blocks):
+                e1, mu1 = np.asarray(calc.get_property("eigenvalues", at)), calc.get_fermi_level()
+                Hb = d.blocks[calc.channel]
+                Sb = d.blocks[calc.overlap] if calc.overlap else {k: np.eye(*v.shape) * float(onsite(k)) for k, v in Hb.items()}
+                e0 = block_bands(BlockSum(sorted(Hb), d.numbers, orb), Hb, Sb, calc.kpts)
+                mu0 = float(smeared_occupations(jnp.asarray(e0), jnp.asarray(calc.weights), calc.electrons(d.numbers), calc.width,
+                                                calc.smearing, calc.degeneracy)[1])
+                w = (e0 > mu0 + a.window[0]) & (e0 < mu0 + a.window[1])
+                band.append(((e1 - mu1) - (e0 - mu0))[w]); fermi.append(mu1 - mu0)
+            blocks_out(i, at)
+        rms = lambda v: float(np.sqrt(np.mean(np.concatenate(v) ** 2))) if sum(len(x) for x in v) else float("nan")
+        mae = lambda v: float(np.mean(np.abs(np.concatenate(v)))) if sum(len(x) for x in v) else float("nan")
+        print("blocks (1e-3 of the data's unit: meV for H in eV)   RMSE        MAE        max")
+        for (c, part), v in err.items():
+            print(f"  {c:6s} {part:9s} {1e3 * rms(v):22.4f} {1e3 * mae(v):10.4f} {1e3 * max((np.abs(x).max() for x in v if len(x)), default=np.nan):10.3f}")
+        if band:
+            print(f"eigenvalues from the Fermi level: RMSE {1e3 * rms(band):.2f}, MAE {1e3 * mae(band):.2f}, max {1e3 * max(np.abs(x).max() for x in band if len(x)):.1f}; "
+                  f"Fermi level RMSE {1e3 * float(np.sqrt(np.mean(np.square(fermi)))):.2f} (1e-3 of the data's unit)")
+        return
+    configs = load_configs(a.data, energy_key=a.energy_key, force_key=a.force_key, virial_key=a.virial_key, stress_key=a.stress_key)
+    frames = None
+    if a.out:
+        from ase_extxyz.io import read_cextxyz
+        frames = list(read_cextxyz(a.data, index=":", create_calc=False))
+    print("structure  atoms   band energy / atom   Fermi level   max |F|")
+    for i, c in enumerate(configs):
+        at = Atoms(numbers=c.numbers, positions=c.positions, cell=c.cell, pbc=c.pbc)
+        at.calc = calc
+        E, F = float(at.get_potential_energy()), np.asarray(at.get_forces())
+        print(f"{i:9d} {len(at):6d} {E / len(at):20.6f} {calc.get_fermi_level():13.6f} {np.abs(F).max():9.4f}")
+        if frames is not None:
+            f = frames[i]
+            f.info[f"{p}band_energy"], f.info[f"{p}free_energy"], f.info[f"{p}fermi_level"] = E, float(calc.results["free_energy"]), calc.get_fermi_level()
+            f.arrays[f"{p}forces"] = F
+            if at.pbc.all():
+                f.info[f"{p}stress"] = voigt_6_to_full_3x3_stress(np.asarray(at.get_stress()))
+        blocks_out(i, at)
+    if frames is not None:
+        from ase_extxyz.io import write_cextxyz
+        write_cextxyz(a.out, frames)
+        print(f"wrote {a.out}")
+
+
 def cmd_eval(a):
     """Evaluate a fitted/exported model on a dataset.  Prints the per-config-type E/F/V
     RMSE table (fit/report.py) for the labels present, and with --out writes the input
@@ -348,7 +456,11 @@ def cmd_eval(a):
     Without a posterior or GP, every config is evaluated in batches (`batch.BatchCalculator`:
     configs padded into size buckets, neighbour lists built on the device, one compile per
     bucket); with one, config by config through its calculator.  A linear model is evaluated
-    exactly (lean, never splined: spline_tol=None)."""
+    exactly (lean, never splined: spline_tol=None).
+
+    An operator model (`operators.io`, a Hamiltonian): `_eval_operator`."""
+    if _is_operator(a.model):
+        return _eval_operator(a)
     from ase import Atoms
     from ase.stress import voigt_6_to_full_3x3_stress
     from .fit.data import VOIGT
@@ -901,6 +1013,16 @@ def _parser():
     ev.add_argument("--no-deriv-dtc", action="store_true",
                     help="gp_model.npz only: SoR-only forces_std, without the derivative-DTC term "
                          "(whose whole-cell (n, K, d, 3) arrays may not fit for a big cell)")
+    hm = ev.add_argument_group("operator (Hamiltonian) models: --data is a directory of reference blocks, or an extxyz file")
+    hm.add_argument("--kpts", type=int, nargs=3, default=[3, 3, 3], help="Gamma-centred k-point grid (default 3 3 3)")
+    hm.add_argument("--nelectrons", default=None,
+                    help="electrons the bands hold: a number per cell, or Z:n,Z:n per atom of each element (default: the atomic numbers)")
+    hm.add_argument("--width", type=float, default=0.1, help="smearing width in the model's energy unit (default 0.1)")
+    hm.add_argument("--smearing", choices=["fermi-dirac", "gaussian"], default="fermi-dirac")
+    hm.add_argument("--window", type=float, nargs=2, default=[-12.0, 5.0],
+                    help="eigenvalues scored: from LO to HI of the reference Fermi level (default -12 5)")
+    hm.add_argument("--blocks-out", default=None, help="directory for the predicted H and S blocks of each structure (DeepH layout)")
+    hm.add_argument("--threads", type=int, default=1, help="threads of the off-site evaluation on a CPU (default 1)")
     cal = sub.add_parser("calibrate", help="recalibrate the per-group conformal scales of an ARD posterior "
                                            "on a labelled set (per-group replace by default)")
     cal.add_argument("--model", required=True); cal.add_argument("--posterior", required=True)

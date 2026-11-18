@@ -380,6 +380,16 @@ class HamiltonianPredictor:
         self._k = {}                                   # slots of the device neighbour lists, by cutoff
         self._ns = None
 
+    @classmethod
+    def from_file(cls, path, threads=1):
+        """The predictor of a model file (`operators.io`) that holds an on-site and an off-site model."""
+        from ..operators import io
+        f = io.load(path)
+        if f.onsite is None or f.offsite is None:
+            raise ValueError(f"{path}: a Hamiltonian needs the on-site and the off-site model; the file has "
+                             f"{'no on-site' if f.onsite is None else 'no off-site'} model")
+        return cls(f.onsite, f.offsite, threads=threads)
+
     def _species_range(self):
         if self._ns is None:
             self._ns = jax.device_put(np.arange(len(self.orbitals.species), dtype=np.int32))
