@@ -21,6 +21,7 @@ import numpy as np
 from ase.calculators.calculator import Calculator, all_changes
 from ase.stress import full_3x3_to_voigt_6_stress
 
+from ..operators.maps import make_room
 from .operator import SMEARINGS, HamiltonianPredictor
 
 
@@ -85,6 +86,7 @@ class HamiltonianCalculator(Calculator):
         a = self.atoms
         if abs(a.cell.volume) < 1e-12:
             raise ValueError("HamiltonianCalculator needs a cell (put an isolated system in a box)")
+        make_room(58_000)                                # the band-energy program of a four-element model: ~50,000 regions
         out = self.predictor.band_energy(a.positions, np.asarray(a.cell), a.numbers, self.kpts, self.electrons(a.numbers),
                                          width=self.width, smearing=self.smearing, weights=self.weights, overlap=self.overlap,
                                          channel=self.channel, degeneracy=self.degeneracy, device=self.device, pbc=a.pbc,
@@ -101,6 +103,7 @@ class HamiltonianCalculator(Calculator):
 
     def _blocks(self, atoms):
         p = self.predictor
+        make_room(45_000)                                # a program per species pair (`operators.maps`)
         on = p.onsite(atoms.positions, np.asarray(atoms.cell), atoms.numbers, atoms.pbc)
         off = p.offsite(atoms.positions, np.asarray(atoms.cell), atoms.numbers, atoms.pbc)
         return {c: {**off[c], **on[c]} for c in p.channels}
