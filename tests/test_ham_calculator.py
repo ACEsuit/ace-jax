@@ -146,3 +146,55 @@ def test_calculator_from_a_model_file_and_aj_eval(models, tmp_path, capsys):  # 
     for f, (_, e, mu, F) in zip(read_cextxyz(str(tmp_path / "o.xyz"), index=":", create_calc=False), frames):
         assert abs(f.info["ace_band_energy"] - e) < 1e-6 and abs(f.info["ace_fermi_level"] - mu) < 1e-6      # the file's digits
         assert np.allclose(f.arrays["ace_forces"], F, atol=1e-6) and f.info["ace_stress"].shape == (3, 3)
+
+
+def test_aj_ham_fit_predict_bands(models, tmp_path, capsys):  # noqa: F811
+    """`aj ham fit` writes a model file from structures with blocks; fitted again to its own
+    predictions with the same settings it reproduces them (the validation table and the file's
+    record).  `aj ham predict` writes its blocks in the DeepH layout, and `aj ham bands` the bands
+    on a path and a grid, the reference's from the structure's blocks beside them."""
+    from ase_extxyz.io import write_cextxyz
+
+    from ace_jax.cli import main
+    from ace_jax.ham import cache
+    from ace_jax.operators import io
+    from ace_jax.operators.data import OperatorData
+    gen = HamiltonianCalculator(models, kpts=(1, 1, 1), nelectrons=40)
+    orb, frames = gen.predictor.orbitals, []
+    (tmp_path / "a").mkdir(); (tmp_path / "b").mkdir()
+    for i in range(3):
+        pos, cell, numbers = structure(i)
+        at = Atoms(numbers=numbers, positions=pos, cell=cell, pbc=True)
+        frames.append(at)
+        cache.save(str(tmp_path / "a" / f"{i}.npz"), OperatorData(cell, pos, numbers, orb, {"H": gen.get_hamiltonian(at), "S": gen.get_overlap(at)}))
+    basis = ["--site-rcut", "4.0", "--site-radials", "3", "--bond-radials", "3", "--coupled", "1", "1", "--env", "4", "2", "1", "1", "1"]
+    spec = ["--kpts", "2", "1", "2", "--nelectrons", "40", "--width", "0.2", "--window", "-50", "50"]
+    first = str(tmp_path / "first.npz")
+    main(["ham", "fit", "--data", str(tmp_path / "a"), "--out", first, *basis])
+    assert "wrote" in capsys.readouterr().out and io.load(first).meta["info"]["n_train"] == 3
+    own = HamiltonianCalculator(first, kpts=(1, 1, 1), nelectrons=40)
+    for i, at in enumerate(frames):
+        cache.save(str(tmp_path / "b" / f"{i}.npz"), OperatorData(np.asarray(at.cell), at.positions, at.numbers, orb,
+                                                                 {"H": own.get_hamiltonian(at), "S": own.get_overlap(at)}))
+    second = str(tmp_path / "second.npz")
+    main(["ham", "fit", "--data", str(tmp_path / "b"), "--out", second, "--validation", str(tmp_path / "b"), *basis, *spec])
+    out = capsys.readouterr().out
+    info = io.load(second).meta["info"]
+    assert "bands at a common zero" in out and max(v["max"] for v in info["validation"]["blocks"].values()) < 1e-4       # the ridge on designs with more columns than rows
+    assert info["validation"]["metrics"]["band_rmse"] < 1e-3 and info["prior"] == "none"
+    with pytest.raises(SystemExit):                                # a channel the data does not have
+        main(["ham", "fit", "--data", str(tmp_path / "b"), "--out", second, "--channels", "H_up"])
+    capsys.readouterr()
+    write_cextxyz(str(tmp_path / "s.xyz"), frames)
+    main(["ham", "predict", "--model", second, "--data", str(tmp_path / "s.xyz"), "--out", str(tmp_path / "pred")])
+    got = deeph.read(str(tmp_path / "pred" / "0002"), operators=(("H", "hamiltonians_pred.h5"), ("S", "overlaps_pred.h5")))
+    ref = cache.load(str(tmp_path / "b" / "2.npz"))[0]
+    assert all(np.allclose(got.blocks[c][k], v, atol=1e-4) for c in ("H", "S") for k, v in ref.blocks[c].items())
+    main(["ham", "bands", "--model", second, "--structure", str(tmp_path / "b"), "--index", "1", "--npoints", "12", "--out", str(tmp_path / "bands.npz"),
+          *spec])
+    b = np.load(tmp_path / "bands.npz")
+    assert b["bands"].shape == b["bands_ref"].shape and len(b["bands"]) == 12 and b["grid_bands"].shape[0] == 4
+    assert np.allclose(b["bands"], b["bands_ref"], atol=1e-3) and abs(b["fermi_level"] - b["fermi_level_ref"]) < 1e-3 and b["metric_band_rmse"] < 1e-3
+    pytest.importorskip("matplotlib")
+    main(["ham", "bands", "--model", second, "--structure", str(tmp_path / "s.xyz"), "--npoints", "12", "--plot", str(tmp_path / "bands.png"), *spec])
+    assert (tmp_path / "bands.png").stat().st_size > 1000

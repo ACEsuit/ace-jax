@@ -346,13 +346,6 @@ def _is_operator(path):
     return "meta_json" in z.files and json.loads(bytes(z["meta_json"]).decode()).get("kind") == "operator"
 
 
-def _electrons(text):
-    """--nelectrons: None, a number per cell, or Z:n,Z:n electrons per atom of each element."""
-    if text is None:
-        return None
-    return {int(z): float(n) for z, n in (x.split(":") for x in text.split(","))} if ":" in text else float(text)
-
-
 def _eval_operator(a):
     """`aj eval` of a Hamiltonian model file, through `HamiltonianCalculator`.
 
@@ -360,68 +353,25 @@ def _eval_operator(a):
     the DeepH layout): prints the block errors of every channel, on-site and off-site, and the
     electronic-structure errors of the model's eigenvalues (its H and its S) against the
     reference's on the --kpts grid, bands within --window of the reference Fermi level
-    (`ham.metrics`: band errors at a common zero and from own Fermi levels, Fermi level, band
-    energy, density of states; --metrics-out writes the per-structure records as JSON).
+    (`ham.cli.score`, `ham.metrics`: band errors at a common zero and from own Fermi levels, Fermi
+    level, band energy, density of states; --metrics-out writes the per-structure records as JSON).
     --data an extxyz file: the band energy, Fermi level, forces and stress of each structure;
     --out writes them back as <prefix>band_energy, <prefix>free_energy, <prefix>fermi_level
     (info), <prefix>forces (arrays) and <prefix>stress (info, periodic cells).
     --blocks-out DIR: the predicted H and S of structure i in DIR/<i>, DeepH layout."""
-    import glob
     from ase import Atoms
     from ase.stress import voigt_6_to_full_3x3_stress
-    from .ham import cache, deeph
-    from .ham.calculator import HamiltonianCalculator
-    from .ham import metrics as M
-    from .ham.operator import BlockSum, block_bands
-    calc = HamiltonianCalculator(a.model, kpts=tuple(a.kpts), nelectrons=_electrons(a.nelectrons), width=a.width, smearing=a.smearing,
-                                 threads=a.threads)
-    ch, orb = calc.predictor.channels, calc.predictor.orbitals
-    calc.overlap = "S" if "S" in ch else None
-    calc.channel = "H" if "H" in ch else next(c for c in ch if c != "S")
+    from .ham import cli as hc
+    calc = hc._calc(a, tuple(a.kpts))
     p = a.prefix
+    if os.path.isdir(a.data):
+        hc.score(calc, a.data, a.window, a.metrics_out, a.blocks_out)
+        return
 
     def blocks_out(i, at):
         if a.blocks_out:
             calc.write_results(os.path.join(a.blocks_out, f"{i:04d}"), at)
 
-    if os.path.isdir(a.data):
-        names = sorted(glob.glob(os.path.join(a.data, "*.npz"))) or sorted(d for d in glob.glob(os.path.join(a.data, "*")) if os.path.isdir(d))
-        if not names:
-            raise UsageError(f"{a.data}: no operator caches (*.npz) and no DeepH directories")
-        onsite = lambda k: k[:3] == (0, 0, 0) and k[3] == k[4]
-        err, per = {}, []
-        print(f"{len(names)} reference structures; eigenvalues on {len(calc.kpts)} k-points, {a.window[0]:g} to {a.window[1]:g} from the Fermi level")
-        for i, name in enumerate(names):
-            d = cache.load(name)[0] if name.endswith(".npz") else deeph.read(name)
-            if d.basis != orb:
-                raise UsageError(f"{name}: its orbital basis is not the model's")
-            at = Atoms(numbers=d.numbers, positions=d.positions, cell=d.cell, pbc=True)
-            at.calc = calc
-            pred = calc._blocks(at)
-            for c in ch:
-                if c in d.blocks:
-                    for part, sel in (("on-site", onsite), ("off-site", lambda k: not onsite(k))):
-                        err.setdefault((c, part), []).append(np.concatenate([(pred[c][k] - v).ravel() for k, v in d.blocks[c].items()
-                                                                              if sel(k) and k in pred[c]] or [np.zeros(0)]))
-            if calc.channel in d.blocks and (calc.overlap is None or calc.overlap in d.blocks):
-                e1 = np.asarray(calc.get_property("eigenvalues", at))
-                Hb = d.blocks[calc.channel]
-                Sb = d.blocks[calc.overlap] if calc.overlap else {k: np.eye(*v.shape) * float(onsite(k)) for k, v in Hb.items()}
-                e0 = block_bands(BlockSum(sorted(Hb), d.numbers, orb), Hb, Sb, calc.kpts)
-                per.append(dict(name=os.path.basename(name), **M.spectrum_metrics(
-                    e0, e1, calc.electrons(d.numbers), len(d.numbers), calc.weights, calc.width, calc.smearing, calc.degeneracy, tuple(a.window))))
-            blocks_out(i, at)
-        rms = lambda v: float(np.sqrt(np.mean(np.concatenate(v) ** 2))) if sum(len(x) for x in v) else float("nan")
-        mae = lambda v: float(np.mean(np.abs(np.concatenate(v)))) if sum(len(x) for x in v) else float("nan")
-        print("blocks (1e-3 of the data's unit: meV for H in eV)   RMSE        MAE        max")
-        for (c, part), v in err.items():
-            print(f"  {c:6s} {part:9s} {1e3 * rms(v):22.4f} {1e3 * mae(v):10.4f} {1e3 * max((np.abs(x).max() for x in v if len(x)), default=np.nan):10.3f}")
-        if per:
-            print("\n".join(M.format_summary(M.summary(per), unit="(1e-3 of the data's unit)")))
-            if a.metrics_out:
-                with open(a.metrics_out, "w") as f:
-                    json.dump(dict(summary=M.summary(per), structures=per), f, indent=1)
-        return
     configs = load_configs(a.data, energy_key=a.energy_key, force_key=a.force_key, virial_key=a.virial_key, stress_key=a.stress_key)
     frames = None
     if a.out:
@@ -1098,6 +1048,8 @@ def _parser():
     nat.add_argument("--gpu-flags", default=None,
                      help="the CUDA kernel's nvcc flags (default \"-O3 -arch=sm_XY\" for this GPU, or "
                           "ACEJAX_FFI_GPU_FLAGS)")
+    from .ham import cli as ham_cli
+    ham_cli.add_parser(sub)
     con = sub.add_parser("basis", help="author a new ACE basis: a frozen model (seeded radial init) saved as .npz")
     add_basis_args(con, fit=False)
     con.add_argument("--out", required=True)
@@ -1189,11 +1141,12 @@ def main(argv=None):
     import sys
 
     from .basis.coupling import BasisUnavailable
+    from .ham import cli as ham_cli
     a = _parse(argv)
     try:
         {"eval": cmd_eval, "basis": cmd_basis, "calibrate": cmd_calibrate, "export": cmd_export,
-         "native": cmd_native}.get(a.cmd, run)(a)
-    except (BasisUnavailable, UsageError) as e:       # a user-facing condition, not a crash
+         "native": cmd_native, "ham": ham_cli.run}.get(a.cmd, run)(a)
+    except (BasisUnavailable, UsageError, ham_cli.UsageError) as e:       # a user-facing condition, not a crash
         print(f"aj {a.cmd}: error: {e}", file=sys.stderr)
         raise SystemExit(2) from None
     return 0
