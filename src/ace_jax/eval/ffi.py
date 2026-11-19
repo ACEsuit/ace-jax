@@ -587,6 +587,8 @@ def analytic_plan(model, runs):
     polynomial one (`radial_kind` "analytic", `rnl_basis` "poly": R_c = env(x) sum_q W_cq P_q(x), x the Agnesi
     transform), or None.  `runs`: `plan(model, gpu=True)`'s, each of one degree l.  ints: per species pair and
     degree the first entry of each q (NZ^2 (L + 1) (nq + 1)), then each entry's first A (of its run's 2l + 1);
+    then the same per centre species (the A pass sums a warp's lanes together, so its entries cannot depend on
+    the neighbour: their weights, last in reals, are per neighbour species);
     reals: per pair the transform's 7 and the envelope's 5 parameters; per pair the folded pair radial's
     transform (7), its envelope's cutoff, r0 and power and its kind (0 "ace1_poly1sr", 1 "poly1sr"), then 0;
     the recursion's A, B, C (nq each); the pair radial's (npq each) and its coefficients per pair; the entries'
@@ -618,6 +620,16 @@ def analytic_plan(model, runs):
             ptr.append(off + np.r_[0, np.cumsum(np.bincount(q, minlength=nq))])
             ents.append(runs[u, 0][n[o]]); vals.append(Wp[runs[u, 1]][n[o], q[o]])
             off += len(o)
+    dptr, dents, dvals, off = [], [], [], 0                 # pass 1: per centre species, weights per neighbour's
+    W4 = W[..., :nq]
+    for zc in range(nz):
+        for l in range(L + 1):
+            u = np.flatnonzero(deg == l)
+            n, q = np.nonzero(np.abs(W4[zc][:, runs[u, 1]]).sum(0))
+            o = np.lexsort((n, q))
+            dptr.append(off + np.r_[0, np.cumsum(np.bincount(q, minlength=nq))])
+            dents.append(runs[u, 0][n[o]]); dvals.append(W4[zc][:, runs[u, 1][n[o]], q[o]].T.ravel())
+            off += len(o)
     par = np.concatenate([np.asarray(model.rnl_transform, np.float64).reshape(nz * nz, 7),
                           np.asarray(model.rnl_envelope, np.float64).reshape(nz * nz, 5)], 1)
     abc = np.concatenate([np.asarray(a, np.float64)[:nq] for a in (model.polys_A, model.polys_B, model.polys_C)])
@@ -630,8 +642,10 @@ def analytic_plan(model, runs):
     ppar = np.concatenate([np.asarray(model.pair_transform, np.float64).reshape(nz * nz, 7), penv], 1)
     pabc = np.concatenate([np.asarray(a, np.float64)[:npq]
                            for a in (model.pair_polys_A, model.pair_polys_B, model.pair_polys_C)])
-    return (np.concatenate([np.concatenate(ptr), np.concatenate(ents)]).astype(np.int32),
-            np.concatenate([par.ravel(), ppar.ravel(), abc, pabc, pc.ravel(), np.concatenate(vals)]), nq, npq)
+    return (np.concatenate([np.concatenate(ptr), np.concatenate(ents), np.concatenate(dptr),
+                            np.concatenate(dents)]).astype(np.int32),
+            np.concatenate([par.ravel(), ppar.ravel(), abc, pabc, pc.ravel(), np.concatenate(vals),
+                            np.concatenate(dvals)]), nq, npq)
 
 
 def choose_form(model, form, n_nodes):

@@ -271,7 +271,9 @@ __global__ void __launch_bounds__(T)
 template <typename R>
 struct AnLane {                                           // one neighbour's state
   const R *wA, *Ys, *gz, *gp, *gm, *pA, *pB, *pC, *wv, *qA, *qc;   // qA: the pair radial's recursion, qc its sums
-  const int32_t *qp, *ent;
+  const int32_t *qp, *ent, *dqp, *dent;                   // dqp, dent, dw: pass 1's entries, per centre species
+  const R *dw;
+  int zn, nz;
   R x, dx, env, denv, ir, hat[3];
   int nq, npq, L, st, solid;
 };
@@ -311,6 +313,8 @@ __device__ __forceinline__ void an_setup(const Model<R> &m, AnLane<R> &a) {
   a.pA = m.ar + 24 * np; a.pB = a.pA + m.nq; a.pC = a.pB + m.nq;
   a.qA = a.pC + m.nq; a.qc = a.qA + 3 * m.npq; a.wv = a.qc + np * m.npq;
   a.ent = m.ai + np * (m.L + 1) * (m.nq + 1);
+  const int tot = a.ent[-1];                              // pass 3's entries; then pass 1's lists and weights
+  a.dqp = a.ent + tot; a.dent = a.dqp + m.nz * (m.L + 1) * (m.nq + 1); a.dw = a.wv + tot; a.nz = m.nz;
   a.nq = m.nq; a.npq = m.npq; a.L = m.L; a.solid = m.solid;
 }
 
@@ -361,22 +365,24 @@ __device__ __forceinline__ void an_pair(const Model<R> &m, const AnLane<R> &a, i
 
 // Pass 1 for an analytic tensor radial, a lane per neighbour and a warp per block (as ace_forces_lane): per
 // degree the recursion once, each env P_q W times the lane's harmonics summed over the warp into the A of the
-// radial columns that read it.  The live lists, E0 and the pair energy as ace_density.
+// radial columns that read it.  The entries are the centre species' (dqp, the same for every lane: the warp sums
+// together), their W the lane's neighbour species' (zero where its radial does not read P_q).  The live lists,
+// E0 and the pair energy as ace_density.
 template <int LL, typename R>
 __device__ __forceinline__ void an_density(const AnLane<R> &a, R *As) {
   constexpr int K = 2 * LL + 1;
-  const int32_t *qp = a.qp + LL * (a.nq + 1);
+  const int32_t *qp = a.dqp + LL * (a.nq + 1);
   R P1 = 0, P2 = 0;
   for (int k = 0; k < a.nq && qp[k] < qp[a.nq]; ++k) {
     const R t = a.pA[k] * a.x + a.pB[k];
     const R P = k == 0 ? a.pA[0] : k == 1 ? t : t * P1 + a.pC[k] * P2;
     for (int e = qp[k]; e < qp[k + 1]; ++e) {
-      const R wP = a.wv[e] * a.env * P;
+      const R wP = a.dw[e * a.nz + a.zn] * a.env * P;
       R s[K];
       for (int m = 0; m < K; ++m) s[m] = wP * a.Ys[(LL * LL + m) * a.st];
       for (int o = kChunk / 2; o > 0; o /= 2)
         for (int m = 0; m < K; ++m) s[m] += SHFL_XOR(s[m], o);
-      if (threadIdx.x < K) As[a.ent[e] + threadIdx.x] += s[threadIdx.x];   // lane m adds the sum of m
+      if (threadIdx.x < K) As[a.dent[e] + threadIdx.x] += s[threadIdx.x];   // lane m adds the sum of m
     }
     P2 = P1; P1 = P;
   }
@@ -434,6 +440,8 @@ __global__ void __launch_bounds__(kChunk)
     for (int k = t; k < nl; k += T) list[k] = live[k];
     if (t == 0) list[K] = nl;
     R e = 0;
+    const int32_t *dq0 = a.dqp;
+    a.dqp = dq0 + zc * (L + 1) * (nq + 1);
     for (int s0 = 0; s0 < nl; s0 += T) {
       const int s = s0 + t;
       const bool has = s < nl;
@@ -453,7 +461,7 @@ __global__ void __launch_bounds__(kChunk)
       const R r = sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]), ir = 1 / r;
       const int pz = zc * m.nz + zn;
       const bool in = has && r < m.rc[pz];
-      a.qp = m.ai + pz * (L + 1) * (nq + 1);
+      a.zn = zn;
       an_radial(m.ar + 12 * pz, r, in, a);
       R V, dV;
       an_pair(m, a, pz, r, has, V, dV);
@@ -469,6 +477,7 @@ __global__ void __launch_bounds__(kChunk)
       if constexpr (LM >= 7) an_density<7, R>(a, As);
       if constexpr (LM >= 8) an_density<8, R>(a, As);
     }
+    a.dqp = dq0;
     __syncthreads();
     for (int q = t; q < na; q += T) Ag[static_cast<int64_t>(i) * na + q] = As[q];
     for (int o = kChunk / 2; o > 0; o /= 2) e += SHFL_XOR(e, o);   // a fixed order: energies do not vary

@@ -196,7 +196,7 @@ def test_gpu_plan_emulated_equals_the_reference(name, T):
         np.testing.assert_allclose(d1[new], d0[0], atol=1e-11 * np.abs(d0).max())
 
 
-@pytest.mark.parametrize("elements,order,degree", [(("Si",), 3, 8), (("Si", "Ge"), 3, 6), (("Si",), 4, 10)])
+@pytest.mark.parametrize("elements,order,degree", [(("Si",), 3, 8), (("Si", "Ge"), 3, 6), (("Si",), 4, 12)])
 def test_gpu_analytic_radial_matches_the_model(backend_kernel, monkeypatch, elements, order, degree):  # noqa: F811
     """The CUDA kernel with the tensor and pair radials evaluated analytically (`ffi.RADIAL`, a lane per
     neighbour) against the JAX model without a radial table, for bases `build_basis` makes (polynomial radials)
