@@ -6,7 +6,10 @@ ten test structures:
 <timings.json>: {"machine": text, "ace": {model tag: ms per atom}, "MACE-H": ms or {network size: ms},
 "DeepH-E3": the same}, of one machine (`model_time.py`, `maceh_time.py`).  Network sizes: "full"
 (the authors' gold network; runs `gold_<code>_n<N>`) and the smaller ones of
-`sulis/train_gold_size.sh` (runs `gold_<code>_n<N>_<size>`), drawn where a scored run exists."""
+`sulis/train_gold_size.sh`, or ACEhamiltonians.jl's basis sizes (`aceh_gold.jl`; runs
+`gold_<code>_n<N>_<size>`), drawn where a scored run exists.  ace-jax's points are named by
+architecture: 2c the two-centre features, site(n, l) the site-coupled group, env(n, l, nb, lb)
+the bond environment."""
 import json
 import sys
 
@@ -19,14 +22,18 @@ grid, other, timings, fig = sys.argv[1:5]
 metric = dict(a.split("=") for a in sys.argv[5:]).get("metric", "aligned_rmse")
 NAME = {"aligned_rmse": "Band RMSE from own Fermi levels / meV", "band_rmse_median": "Band RMSE at a common zero, median structure / meV",
         "band_energy_rmse": "Band-energy RMSE / meV per atom", "fermi_rmse": "Fermi-level RMSE / meV", "dos": "DoS Wasserstein distance / meV"}
-ACE, MACEH, DEEPH, MUTED, INK = "#2a78d6", "#eb6834", "#1baf7a", "#8a8f98", "#0b0b0b"
+ACE, MACEH, DEEPH, ACEH, MUTED, INK = "#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#8a8f98", "#0b0b0b"
+OTHERS = (("MACE-H", MACEH), ("DeepH-E3", DEEPH), ("ACEhamiltonians", ACEH))
 T = json.load(open(timings))
 tag = lambda r: f"site_{r['site'][0]}_{r['site'][1]}_env_" + ("none" if not r["env"] else "_".join(str(float(v)) if i == 0 else str(int(v)) for i, v in enumerate(r["env"]))) \
     + (f"_nbond_{r['nbond']}_nsite_{r['nsite']}" if r["nbond"] != 12 else "")
-ace = {}
+ace, arch = {}, {}
 for line in open(grid):
     r = json.loads(line)
     ace.setdefault(tag(r), {})[r["n_train"]] = 1e3 * r["metrics"][metric]
+    e = r["env"]                                          # the architecture, as the figure names it
+    arch[tag(r)] = " + ".join(["2c"] + ([f"site({r['site'][0]},{r['site'][1]})"] if r["site"][0] else [])
+                              + ([f"env({int(e[1])},{int(e[2])},{int(e[3])},{int(e[4])})"] if e else [])) + (f", {r['nbond']}/{r['nsite']} radials" if r["nbond"] != 12 else "")
 oth, small = {}, {}
 cost = lambda code, size="full": T[code][size] if isinstance(T[code], dict) else T[code]
 for line in open(other):
@@ -47,23 +54,27 @@ for code, col in (("MACE-H", MACEH), ("DeepH-E3", DEEPH)):
         a.annotate(code, (n[-1], oth[code][n[-1]]), xytext=(6, 0), textcoords="offset points", va="center", fontsize=8, color=INK)
 a.set_xscale("log", base=2); a.set_yscale("log"); a.set_xlabel("Training structures (64 atoms each)"); a.set_ylabel(NAME.get(metric, metric))
 a.set_xticks([1, 2, 4, 8, 16, 32, 64, 152]); a.set_xticklabels(["1", "2", "4", "8", "16", "32", "64", "152"])
-nb = max(n for c in oth.values() for n in c) if oth else 32            # cost panel: every code at its largest common training set
+nb = 32                                                 # cost panel: every code at 32 training structures
 na = nb if all(nb in v for v in ace.values()) else max(next(iter(ace.values())))
 xs = [T["ace"][t] for t in order]
 b.plot(xs, [ace[t][na] for t in order], color=ACE, lw=2, marker="o", ms=5)
-b.annotate(f"ace-jax, {len(order)} model sizes", (xs[-1], ace[order[-1]][na]), xytext=(6, 0), textcoords="offset points", va="center", fontsize=8, color=INK)
-for code, col, side in (("MACE-H", MACEH, -1), ("DeepH-E3", DEEPH, 1)):         # every training-set size at the full network's cost
-    if code in T and oth.get(code):
-        ns, x = sorted(oth[code]), cost(code)
-        b.plot([x] * len(ns), [oth[code][n] for n in ns], color=col, marker="s", ms=6, ls="-", lw=1)
-        for n in ns:
-            b.annotate(str(n), (x, oth[code][n]), xytext=(7 * side, 0), textcoords="offset points", ha="right" if side < 0 else "left",
-                       va="center", fontsize=7, color=INK)
-        b.annotate(code, (x, max(oth[code].values())), xytext=(0, 9), textcoords="offset points", ha="right" if side < 0 else "left", fontsize=8, color=INK)
-        for n in sorted({n for _, n in small.get(code, {})}):                   # smaller networks: the code's own cost curve at n
-            pts = sorted([(cost(code, sz), v) for (sz, m), v in small[code].items() if m == n] + ([(x, oth[code][n])] if n in oth[code] else []))
-            b.plot([q[0] for q in pts], [q[1] for q in pts], color=col, marker="s", ms=6, ls="--", lw=1.5, mfc="white")
-b.set_xscale("log"); b.set_xlabel(f"Block prediction, {T.get('machine', 'one CPU core')} / ms per atom\n(ace-jax: {na} training structures; others: the number beside each point)")
+for i, t in enumerate(order):                           # each point's architecture, sides alternating where points crowd
+    left = i >= 3 and i % 2 == 1
+    b.annotate(arch[t], (T["ace"][t], ace[t][na]), xytext=(-6 if left else 6, 0), textcoords="offset points", ha="right" if left else "left",
+               va="center", fontsize=6.5, color=INK)
+b.annotate("ace-jax", (xs[0], ace[order[0]][na]), xytext=(0, 9), textcoords="offset points", fontsize=8, color=INK)
+for code, col in OTHERS:                                # the other codes: every network or basis size scored at nb, joined in cost order
+    pts = [(cost(code), oth[code][nb], "")] if code in T and nb in oth.get(code, {}) else []
+    pts += [(cost(code, sz), v, sz) for (sz, m), v in small.get(code, {}).items() if m == nb and code in T and sz in T[code]]
+    pts.sort()
+    if pts:
+        b.plot([q[0] for q in pts], [q[1] for q in pts], color=col, marker="s", ms=6, ls="-", lw=1.5)
+        for x, y, sz in pts:
+            if sz:
+                b.annotate(sz, (x, y), xytext=(6, 0), textcoords="offset points", va="center", fontsize=6.5, color=INK)
+        top = max(pts, key=lambda q: q[1])
+        b.annotate(code + (".jl" if code == "ACEhamiltonians" else ""), top[:2], xytext=(0, 9), textcoords="offset points", ha="center", fontsize=8, color=INK)
+b.set_xscale("log"); b.set_xlabel(f"Block prediction / ms per atom\n({T.get('machine', 'one CPU core')}; {nb} training structures)")
 from matplotlib.ticker import FuncFormatter, NullFormatter
 a.set_yticks([1, 2, 5, 10, 20, 50, 100]); a.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}")); a.yaxis.set_minor_formatter(NullFormatter())
 b.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
