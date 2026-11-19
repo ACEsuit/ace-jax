@@ -14,6 +14,11 @@
   errors: for bulk gold with the default basis and 4 training structures, the band error decreases from
   3.0 meV to 2.1 meV. A model file from 0.7.0 gives the same predictions as before; fit the model again
   to get the correction.
+- **`--prior evidence`, `loo` and `press` cannot give a weaker prior than `--prior none`.** For a pair of
+  species with few bonds in the training set, the fit can go through the data exactly, and the prior
+  that the evidence selected was then many orders of magnitude weaker than the ridge of a fit with no
+  prior. Coefficients of 1e13 were the result (Ti-Ti blocks of a Ti-doped half-Heusler), with no message.
+  The fit now adds the ridge to the selected prior.
 - A fit of a Hamiltonian model on a CPU releases compiled programs also while it assembles the rows of
   large structures (see 0.7.0, "Hamiltonian models of several elements on a CPU").
 
