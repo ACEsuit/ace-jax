@@ -49,13 +49,18 @@ na = nb if all(nb in v for v in ace.values()) else max(next(iter(ace.values())))
 xs = [T["ace"][t] for t in order]
 b.plot(xs, [ace[t][na] for t in order], color=ACE, lw=2, marker="o", ms=5)
 b.annotate(f"ace-jax, {len(order)} model sizes", (xs[-1], ace[order[-1]][na]), xytext=(6, 0), textcoords="offset points", va="center", fontsize=8, color=INK)
-for code, col in (("MACE-H", MACEH), ("DeepH-E3", DEEPH)):
-    if code in T and nb in oth.get(code, {}):
-        b.plot([T[code]], [oth[code][nb]], color=col, marker="s", ms=7, ls="")
-        b.annotate(code, (T[code], oth[code][nb]), xytext=(-7, 0), textcoords="offset points", ha="right", va="center", fontsize=8, color=INK)
-b.set_xscale("log"); b.set_xlabel(f"Block prediction, one CPU core / ms per atom ({nb} training structures)")
+for code, col, side in (("MACE-H", MACEH, -1), ("DeepH-E3", DEEPH, 1)):         # every training-set size at the code's one cost
+    if code in T and oth.get(code):
+        ns = sorted(oth[code])
+        b.plot([T[code]] * len(ns), [oth[code][n] for n in ns], color=col, marker="s", ms=6, ls="-", lw=1)
+        for n in ns:
+            b.annotate(str(n), (T[code], oth[code][n]), xytext=(7 * side, 0), textcoords="offset points", ha="right" if side < 0 else "left",
+                       va="center", fontsize=7, color=INK)
+        b.annotate(code, (T[code], max(oth[code].values())), xytext=(0, 9), textcoords="offset points", ha="right" if side < 0 else "left", fontsize=8, color=INK)
+b.set_xscale("log"); b.set_xlabel(f"Block prediction, one CPU core / ms per atom\n(ace-jax: {na} training structures; others: the number beside each point)")
 from matplotlib.ticker import FuncFormatter, NullFormatter
 a.set_yticks([1, 2, 5, 10, 20, 50, 100]); a.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}")); a.yaxis.set_minor_formatter(NullFormatter())
+b.set_xlim(1, 600)
 b.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
 lo, hi = a.get_ylim(); a.set_ylim(max(lo, 0.5), hi)
 for ax in (a, b):
