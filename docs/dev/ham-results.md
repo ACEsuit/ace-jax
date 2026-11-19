@@ -838,3 +838,23 @@ Order 2 on-site with the evidence, completing the earlier line: order-2 width 10
 ## `aj ham` (2026-11-19)
 
 `ham/cli.py`: `aj ham fit` (blocks to a model file; basis and prior as options, defaults the gold recipe; `--validation` scored as `aj eval`), `aj ham predict` (DeepH layout), `aj ham bands` (path bands, grid DoS, figure, errors against the structure's own blocks). `aj eval` calls the same `score`. Not yet: a user page, the skill file, `aj ham fit` on gold through the command line.
+
+## The bond midpoint: a singularity of the environment features, and its cure (2026-11-19)
+
+Found on NbFeSb (symmetry-equivalent bonds of an ideal lattice differed by up to 6 meV) and confirmed: the bond-environment features were spherical harmonics of the position x of an environment atom from the bond midpoint, and a harmonic of l > 0 has no value at x = 0. Moving an atom 1e-9 A off the midpoint along x and along y changed the feature vector by 3.3 at a norm of 2.8. ACEhamiltonians.jl notes the same (`BondState`) and moved its origin to the first atom.
+
+Cure (`BondBasis.env_core` = a, 1 A): rho = sqrt(x^2 + a^2); radial variable rho - a; regular solid harmonics of x / rho (`eval.harmonics.regular_solid_harmonics`, the recurrence in z and r^2, exact at the origin). The midpoint stays the origin, so bond reversal stays exact. Files of 0.7.0 load with a = 0.
+
+Bulk gold, 10 test structures, all bonds, H only (`deeph_fit.py`), band RMSE from own Fermi levels:
+
+| Model | Training structures | 0.7.0: H MAE / bands | With the cure: H MAE / bands |
+|---|---|---|---|
+| default, damping factor on the spherical harmonics (first attempt) | 4 | 0.352 / 2.98 meV | 0.304 / 2.15 |
+| default, solid harmonics | 4 | 0.352 / 2.98 | 0.294 / 2.10 |
+| default, solid harmonics | 32 | 0.349 / 2.92 | 0.292 / 2.15 |
+| largest, solid harmonics | 32 | 0.152 / 1.30 | 0.132 / 1.27 |
+
+- The default model gains 27 %: in a close-packed crystal the atom near the midpoint of a second-neighbour bond is displaced only by the thermal motion, so the old features varied wildly on ordinary training data. The largest model gains little in bands (its error is at the floor of the on-site blocks).
+- Perfect fcc supercell, spread of the block norm over symmetry-equivalent bonds: 2.5 meV at (0,2,2) and 1.7 meV at (0,0,4) (an atom at the midpoint) with the 0.7.0 model, 0 on the ten other vector classes; 0 everywhere after the refit.
+- `aj ham fit` (H and S, default basis, 32 structures, CPU, no wrapper): 2.14 meV on the 4x4x4 grid, 2.04 meV on 7x7x7 at 1000 K; H off-site MAE 0.28 meV. The fit took 398 s on 16 threads of a CPU (70 s on the GPU before); it is the first full fit on a CPU with the memory-map guard in the library.
+- MACE-H at half size, 32 structures, converged (2,294 epochs, lestrade): H MAE 0.421 meV, bands 4.57 meV, 126 ms per atom on one core: better in bands than the full-size run that hit its time limit (5.32 meV).

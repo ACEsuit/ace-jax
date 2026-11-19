@@ -174,8 +174,8 @@ the 10 test structures of the dataset.
     ```
 
 The fit takes approximately 70 seconds on one GPU. On the validation set the
-band error from own Fermi levels is 2.9 meV, and the off-site blocks of H have
-a mean absolute error of 0.34 meV.
+band error from own Fermi levels is 2.1 meV, and the off-site blocks of H have
+a mean absolute error of 0.28 meV.
 
 ![Bands on the high-symmetry path and density of states of a 64-atom gold cell: the model is on the DFT reference in the full range](../assets/ham/gold_bands.png)
 
@@ -193,8 +193,8 @@ authors published for this dataset. Their training was on one A100 GPU.
 
 | Model | H error (MAE) | Band error (RMSE, own Fermi levels) | Prediction on one CPU core | Prediction on a GPU | Fit or training time |
 |---|---|---|---|---|---|
-| ace-jax, default basis | 0.35 meV | 2.9 meV | 14 ms for each atom | 0.6 ms for each atom | 70 s |
-| ace-jax, largest basis of the benchmark | 0.15 meV | 1.3 meV | 18 ms | 0.6 ms | approximately 7 minutes |
+| ace-jax, default basis | 0.29 meV | 2.1 meV | 14 ms for each atom | 0.6 ms for each atom | 70 s |
+| ace-jax, largest basis of the benchmark | 0.13 meV | 1.3 meV | 18 ms | 0.6 ms | approximately 7 minutes |
 | MACE-H | 0.38 meV | 5.3 meV | 258 ms | 3.5 ms | more than 14 hours |
 | DeepH-E3 | 0.47 meV | 8.4 meV | 264 ms | 3.6 ms | 12.5 hours |
 
@@ -205,7 +205,9 @@ GPU is an RTX 4000 Ada in float32. ace-jax on the CPU is in float64.
 !!! note
     The MACE-H training with 32 structures stopped at its time limit of
     14 hours. The table shows its best model at that time. With 16 structures
-    its training was complete, and its band error was 6.1 meV.
+    its training was complete, and its band error was 6.1 meV. A MACE-H network
+    of half the size, with 32 structures and complete training, has a band error
+    of 4.6 meV and a prediction time of 126 ms for each atom on one CPU core.
 
 The next figure shows the error of each band on the path, for the test
 structure of the first figure.
