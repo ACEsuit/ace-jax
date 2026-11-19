@@ -7,7 +7,9 @@ import sys
 import threading
 from ctypes import c_int32, c_int64, c_void_p
 
-ABI_VERSION = 1
+ABI_VERSION = 2          # the ABI this package is built with
+MIN_ABI = 1              # etc_couple (v1) is unchanged in v2, so an older library still serves couple_raw
+_ABI = None              # the loaded library's ABI
 _EXT = {"darwin": "dylib", "win32": "dll"}.get(sys.platform, "so")
 _LIBDIR = "bin" if sys.platform == "win32" else "lib"      # Windows bundles keep the DLLs in bin/
 _PKG = pathlib.Path(__file__).resolve().parent
@@ -56,7 +58,7 @@ def _win_dll_dirs(root):
 
 
 def lib():
-    global _LIB
+    global _LIB, _ABI
     if _LIB is not None:
         return _LIB
     with LOCK:
@@ -74,13 +76,19 @@ def lib():
             raise CouplingLibError(f"cannot load {p}: {e}") from e
         h.etc_abi_version.restype = c_int32
         h.etc_max_order.restype = c_int32
-        if h.etc_abi_version() != ABI_VERSION:
-            raise CouplingLibError(f"{p}: ABI {h.etc_abi_version()} != expected {ABI_VERSION}")
+        abi = h.etc_abi_version()
+        if not MIN_ABI <= abi <= ABI_VERSION:
+            raise CouplingLibError(f"{p}: ABI {abi}, expected {MIN_ABI}..{ABI_VERSION}")
         h.etc_couple.restype = c_int32
         h.etc_couple.argtypes = ([c_int64, c_void_p, c_void_p, c_void_p,
                                   c_int64, c_void_p, c_void_p,
                                   c_int64, c_void_p, c_void_p,
                                   c_void_p] + [c_void_p] * 10)
+        if abi >= 2:
+            h.etc_max_L.restype = c_int32
+            h.etc_couple_equivariant.restype = c_int32
+            h.etc_couple_equivariant.argtypes = [c_int64, c_int64] + h.etc_couple.argtypes + [c_void_p]
+        _ABI = abi
         _LIB = h
         return _LIB
 

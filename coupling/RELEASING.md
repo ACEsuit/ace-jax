@@ -19,12 +19,18 @@ library. ace-jax's dependency marker already limits the install to these platfor
 
 ## Each release
 
+0. **Regenerate the oracles if ET or the shim changed.** `reference/reference.jl` (ABI v1) and
+   `reference/reference_equivariant.jl` (ABI v2), each with the command in its header; the
+   cases come from `coupling/tools/gen_cases.py`.
 1. **Pick the version.** Bump `version` in `coupling/python/pyproject.toml`,
    `__version__` in `coupling/python/src/ace_jax_coupling/__init__.py` and
-   `COUPLING_LIB_VERSION` in ace-jax, together with ace-jax's `ace-jax-coupling==`
-   pin, whenever the coupling output can change (a new EquivariantTensors rev, a
-   changed solver). The version is the cache's backend id, so a bump turns stale
-   cache entries into misses.
+   `COUPLING_LIB_VERSION` in ace-jax, whenever the coupling output can change (a new
+   EquivariantTensors rev, a changed solver) or the ABI grows. The version is the
+   cache's backend id, so a bump turns stale cache entries into misses. Leave
+   ace-jax's `ace-jax-coupling==` pin and `uv.lock` for step 8: they can name a
+   version only once it is on PyPI. Until then
+   `tests/test_coupling_cache.py::test_backend_id_matches_dependency_pin` fails
+   (the wheel workflow deselects it), so do steps 1 to 8 on one branch.
 2. **Moving Julia** (even a patch release) means changing together the
    Manifests' `julia_version` (re-resolve both), the Linux tarball `V=` and the
    macOS `setup-julia` version in `coupling-wheels.yml`. `build.jl` refuses to build
@@ -48,3 +54,5 @@ library. ace-jax's dependency marker already limits the install to these platfor
    re-uploaded, so a broken release needs a new version.
 7. **Check the release.** Run coupling-index-check with index = `pypi` and the new
    version.
+8. **Move the pin.** Set ace-jax's `ace-jax-coupling==<version>` in `pyproject.toml`
+   and run `uv lock`.
