@@ -46,6 +46,10 @@ jobs:
           cmake --build pace_ref/build --target unit_ref tab_eval -j
           pace_ref/build/unit_ref | uv run python pace_ref/json_to_npz.py
       - name: python-ace fixtures
+        # python-ace's bundled yaml-cpp uses uint16_t without <cstdint>, which GCC 15 (ubuntu-26.04,
+        # ubuntu-latest from 2026-11) no longer provides through other headers
+        env:
+          CXXFLAGS: "-include cstdint"
         run: |
           uv venv pace_ref/.venv --python 3.11
           uv pip install --python pace_ref/.venv/bin/python numpy ase pyyaml pytest "git+https://github.com/ICAMS/python-ace" -e .
