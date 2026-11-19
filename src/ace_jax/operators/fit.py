@@ -187,6 +187,7 @@ def _fit(designs, n_chunks, rows, nc, ridge, device=False, gamma=None, select=No
             g = None if groups is None else groups[i]
             if g != g0:
                 close(); g0 = g
+            make_room(25_000)                            # the row and merge programs of a new shape (`operators.maps`)
             for d, (A, Y, rows_d) in rows(i).items():
                 yy[d] += (Y ** 2).sum(0)
                 n[d] += rows_d
