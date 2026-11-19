@@ -57,13 +57,16 @@ def collect(pred, gold, out, flip=1):
         for k in sorted(f["test"]):
             g = f[f"test/{k}"]
             name = g.attrs["name"]
+            name = name.decode() if isinstance(name, bytes) else str(name)
             d = deeph.read(os.path.join(gold, "test", name), operators=("H",))
             ss = signs(d, flip)
             up = np.triu(np.ones_like(ss))                         # the s1 <= s2 part, by orbitals
             o = np.cumsum([0] + [2 * l + 1 for l in d.basis.ls(int(d.numbers[0]))])
             for a in range(len(o) - 1):
                 up[o[a]:o[a + 1], o[a]:o[a + 1]] = 1.0
-            keys = [tuple(int(v) for v in key) for key in g["bonds"][()]]
+            bonds = g["bonds"][()]
+            bonds = bonds.T if bonds.shape[0] == 5 and bonds.shape[1] != 5 else bonds      # HDF5.jl writes its axes reversed
+            keys = [tuple(int(v) for v in key) for key in bonds]
             P = dict(zip(keys, g["pred_off"][()]))
             H = {key: v * up + (P[(-key[0], -key[1], -key[2], key[4], key[3])] * up).T * (1 - up) for key, v in P.items()}
             for i, v in enumerate(g["pred_on"][()]):

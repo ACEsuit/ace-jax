@@ -71,7 +71,7 @@ def _bloch_blocks_impl(B, idx, R, seg, kpts, n_orb):
     def one(k):
         M = jnp.zeros(n_orb * n_orb, cdtype)
         for b, i, r, g in zip(B, idx, R, seg):
-            pair = jax.ops.segment_sum(jnp.exp(2j * jnp.pi * (r @ k)).astype(cdtype)[:, None, None] * b, g, num_segments=i.shape[0], indices_are_sorted=True)
+            pair = jax.ops.segment_sum(jnp.exp(2j * jnp.pi * (r @ k)).astype(cdtype)[:, None, None] * b, g, num_segments=i.shape[0])      # not indices_are_sorted: under vmap it crashes XLA's GPU compiler (jaxlib 0.10)
             M = M.at[i.reshape(-1)].set(pair.reshape(-1), unique_indices=True)
         return M.reshape(n_orb, n_orb)
 

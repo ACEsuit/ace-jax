@@ -126,7 +126,7 @@ def test_calculator_from_a_model_file_and_aj_eval(models, tmp_path, capsys):  # 
         at = Atoms(numbers=numbers, positions=pos, cell=cell, pbc=True)
         a, b = at.copy(), at.copy()
         a.calc, b.calc = ref, calc
-        assert a.get_potential_energy() == b.get_potential_energy() and np.array_equal(a.get_forces(), b.get_forces())
+        assert abs(a.get_potential_energy() - b.get_potential_energy()) < 1e-11 and np.allclose(a.get_forces(), b.get_forces(), atol=1e-10)   # bit-equal on a CPU; a GPU's eigensolver is not
         H, S = ref.get_hamiltonian(at), ref.get_overlap(at)
         cache.save(str(tmp_path / "ref" / f"{i}.npz"), OperatorData(cell, pos, numbers, ref.predictor.orbitals,
                                                                    {"H": {k: v + shift * S[k] for k, v in H.items()}, "S": S}))
