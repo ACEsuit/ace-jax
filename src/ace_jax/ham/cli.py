@@ -95,7 +95,7 @@ def score(calc, data, window, metrics_out=None, blocks_out=None):
     from .operator import BlockSum, block_bands
     ch, orb = calc.predictor.channels, calc.predictor.orbitals
     names = block_names(data)
-    err, per = {}, []
+    err, per, bad = {}, [], []
     print(f"{len(names)} reference structures; eigenvalues on {len(calc.kpts)} k-points, {window[0]:g} to {window[1]:g} from the Fermi level")
     for i, (name, at, d) in enumerate(s for n in names for s in structures(n)):
         if d.basis != orb:
@@ -109,11 +109,16 @@ def score(calc, data, window, metrics_out=None, blocks_out=None):
                                                                           if sel(k) and k in pred[c]] or [np.zeros(0)]))
         if calc.channel in d.blocks and (calc.overlap is None or calc.overlap in d.blocks):
             e1 = np.asarray(calc.get_property("eigenvalues", at))
-            Hb = d.blocks[calc.channel]
-            Sb = d.blocks[calc.overlap] if calc.overlap else {k: np.eye(*v.shape) * float(onsite(k)) for k, v in Hb.items()}
-            e0 = block_bands(BlockSum(sorted(Hb), d.numbers, orb), Hb, Sb, calc.kpts)
-            per.append(dict(name=name, **M.spectrum_metrics(
-                e0, e1, calc.electrons(d.numbers), len(d.numbers), calc.weights, calc.width, calc.smearing, calc.degeneracy, tuple(window))))
+            if not np.isfinite(e1).all():                # the eigensolver's answer to an overlap that is not positive definite
+                print(f"  {name}: no eigenvalues: the predicted {calc.overlap or 'H'} gives a generalised eigenproblem that is not "
+                      f"positive definite; no band metrics for this structure", flush=True)
+                bad.append(name)
+            else:
+                Hb = d.blocks[calc.channel]
+                Sb = d.blocks[calc.overlap] if calc.overlap else {k: np.eye(*v.shape) * float(onsite(k)) for k, v in Hb.items()}
+                e0 = block_bands(BlockSum(sorted(Hb), d.numbers, orb), Hb, Sb, calc.kpts)
+                per.append(dict(name=name, **M.spectrum_metrics(
+                    e0, e1, calc.electrons(d.numbers), len(d.numbers), calc.weights, calc.width, calc.smearing, calc.degeneracy, tuple(window))))
         if blocks_out:
             calc.write_results(os.path.join(blocks_out, f"{i:04d}"), at)
     cat = lambda v: np.concatenate(v) if sum(len(x) for x in v) else np.full(1, np.nan)
@@ -122,6 +127,8 @@ def score(calc, data, window, metrics_out=None, blocks_out=None):
     for (c, part), t in table.items():
         print(f"  {c:6s} {part:9s} {1e3 * t['rmse']:22.4f} {1e3 * t['mae']:10.4f} {1e3 * t['max']:10.3f}")
     summary = M.summary(per) if per else None
+    if summary is not None and bad:
+        summary["no_eigenvalues"] = bad
     if per:
         print("\n".join(M.format_summary(summary, unit="(1e-3 of the data's unit)")))
         if metrics_out:
@@ -186,8 +193,8 @@ def cmd_fit(a):
         rows = np.array([r[0] for r in rep.values()], float)
         rms = np.array([np.broadcast_to(np.asarray(r[2], float), (len(ch),)) for r in rep.values()])
         resid[part] = [float(v) for v in np.sqrt((rows[:, None] * rms ** 2).sum(0) / rows.sum())]
-        print(f"  {part:8s} training residual of the L parts, rms (1e-3 of the data's unit): " + ", ".join(f"{c} {1e3 * v:.4f}" for c, v in zip(ch, resid[part])))
-    print(f"fitted {n_coef} coefficients in {fit_s:.1f} s")
+        print(f"  {part:8s} training residual of the L parts, rms (1e-3 of the data's unit): " + ", ".join(f"{c} {1e3 * v:.4f}" for c, v in zip(ch, resid[part])), flush=True)
+    print(f"fitted {n_coef} coefficients in {fit_s:.1f} s", flush=True)
     info = dict(command="aj ham fit", data=os.path.abspath(a.data), n_train=len(train), structures=[os.path.basename(n) for n in names],
                 bonds_per_structure=a.bonds, seed=a.seed, prior=a.prior, ridge=a.ridge, fit_s=round(fit_s, 1), n_coef=n_coef, nelectrons=a.nelectrons,
                 training_residual=resid)
