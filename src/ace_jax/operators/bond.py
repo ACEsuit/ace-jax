@@ -50,7 +50,13 @@ class BondBasis(NamedTuple):
     largest harmonic of the environment about the midpoint; n_ebond, l_ebond: radial functions
     and largest bond harmonic it is coupled with; env_emb: None (one channel per element) or the
     (elements, channels) embedding of the environment atoms' species as nested tuples, rows in the
-    order of `site.elements`."""
+    order of `site.elements`.  env_core (angstrom): the harmonics of degree l of an environment
+    atom at distance x from the midpoint are scaled by (x^2 / (x^2 + env_core^2))^(l/2), `core`:
+    1 away from the midpoint and ~ x^l at it, so that the features are smooth there.  0 switches
+    it off: the form of ace-jax 0.7.0, whose features jump when an atom crosses the midpoint (a
+    harmonic of l > 0 has no value at x = 0), which made symmetry-equivalent bonds of a perfect
+    lattice differ (an atom at the midpoint of a second-neighbour bond; ACEhamiltonians.jl met the
+    same and moved its origin to the first atom).  Files written by 0.7.0 load with 0."""
 
     site: SiteBasis
     rcut_bond: float
@@ -63,6 +69,7 @@ class BondBasis(NamedTuple):
     n_ebond: int = 0
     l_ebond: int = 0
     env_emb: tuple = None
+    env_core: float = 1.0
 
 
 class BondGraph(NamedTuple):
@@ -142,6 +149,15 @@ def env_layout(basis, L, p):
             if (-1) ** (l + lam) == p and abs(l - lam) <= L <= l + lam]
 
 
+def core(xp, x2, l_env, a):
+    """(..., (l_env+1)^2): the factor (x^2 / (x^2 + a^2))^(l/2) of each harmonic (l, m) at squared
+    distance x2 from the midpoint (`BondBasis.env_core`); xp: numpy or jax.numpy.  a = 0: ones."""
+    ls = np.repeat(np.arange(l_env + 1), 2 * np.arange(l_env + 1) + 1)
+    if not a:
+        return xp.ones((*x2.shape, len(ls)), x2.dtype)
+    return (x2 / (x2 + a * a))[..., None] ** xp.asarray(0.5 * ls, x2.dtype)
+
+
 def _env_side(basis, env, atoms, r):
     """(n_bonds, channels * n_env, (l_env+1)^2), channel-major: the half of A^env pooled over the
     neighbours of the bond's first atom `atoms`, for bond vectors `r` (the partner atom itself is
@@ -155,8 +171,9 @@ def _env_side(basis, env, atoms, r):
     x = d - 0.5 * r[:, None, :]                                        # relative to the midpoint
     R = radial(np.linalg.norm(x, axis=-1), basis.r_env + 0.5 * basis.rcut_bond, basis.n_env)
     Y = np.asarray(real_spherical_harmonics(x.reshape(-1, 3), max(basis.l_env, 1))).reshape(*x.shape[:2], -1)
+    Y = Y[..., :(basis.l_env + 1) ** 2] * core(np, (x * x).sum(-1), basis.l_env, basis.env_core)
     ch = env_embedding(basis)[z[atoms]]                                # (e, K, channels)
-    return np.einsum("ek,ekc,ekn,eky->ecny", w, ch, R, Y[..., :(basis.l_env + 1) ** 2]).reshape(len(atoms), -1, (basis.l_env + 1) ** 2)
+    return np.einsum("ek,ekc,ekn,eky->ecny", w, ch, R, Y).reshape(len(atoms), -1, (basis.l_env + 1) ** 2)
 
 
 def layout(basis, L, p):

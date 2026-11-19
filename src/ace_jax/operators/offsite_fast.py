@@ -192,7 +192,7 @@ def _canonical(pack, Fa, ga, Aenv, dj, n_cpl, l_cpl):
 
 
 @highest
-def _env_side(e_rij, e_live, e_ch, rvec, mask, r_env, rmax, n_env, l_env):
+def _env_side(e_rij, e_live, e_ch, rvec, mask, r_env, rmax, n_env, l_env, env_core):
     """(n, K, channels n_env, (l_env+1)^2): for each bond slot, the half of A^env pooled over the neighbours
     of its first atom (`bond._env_side` on the dense layouts).  One atom at a time: its
     (bonds x environment atoms) intermediates fit the cache, where all atoms at once is a pass
@@ -207,7 +207,7 @@ def _env_side(e_rij, e_live, e_ch, rvec, mask, r_env, rmax, n_env, l_env):
         w = jnp.where(partner, 0.0, e[None, :]) * m[:, None]
         x = d[None, :, :] - 0.5 * r[:, None, :]                         # about the midpoint
         R = _radial(jnp.clip(jnp.sqrt(jnp.sum(x * x, axis=-1)) / rmax, 0.0, 1.0), n_env)
-        Yx = real_spherical_harmonics(x, max(l_env, 1))[..., :nlm]
+        Yx = real_spherical_harmonics(x, max(l_env, 1))[..., :nlm] * B.core(jnp, jnp.sum(x * x, axis=-1), l_env, env_core)
         return jnp.einsum("Ken,ec,Key->Kcny", w[..., None] * R, ch, Yx).reshape(r.shape[0], -1, nlm)
 
     return jax.lax.map(one, (e_rij, e_live, e_ch, rvec, mask))
@@ -216,7 +216,7 @@ def _env_side(e_rij, e_live, e_ch, rvec, mask, r_env, rmax, n_env, l_env):
 @highest
 def _geo(rows, rvec, mask, env, rcut, shape_args):
     """The bond geometry of the rows of one layout: (phi0, U, Y, phi2, side)."""
-    n_bond, n_cpl, l_cpl, lmax, n_env, l_env, n_ebond, l_ebond, r_env, env_emb = shape_args
+    n_bond, n_cpl, l_cpl, lmax, n_env, l_env, n_ebond, l_ebond, r_env, env_emb, env_core = shape_args
     x = jnp.clip(jnp.sqrt(jnp.sum(rvec * rvec, axis=-1)) / rcut, 0.0, 1.0)
     Y = real_spherical_harmonics(rvec, max(lmax, 1))
     U = _radial(x, n_cpl)[..., :, None] * Y[..., None, :(l_cpl + 1) ** 2] * mask[..., None, None]
@@ -225,7 +225,7 @@ def _geo(rows, rvec, mask, env, rcut, shape_args):
         e_rij, e_count, e_z = env
         e_live = jnp.arange(e_rij.shape[1])[None, :] < e_count[:, None]
         e_ch = jnp.asarray(env_emb, rvec.dtype)[e_z[rows]]               # (rows, Ke, channels)
-        side = _env_side(e_rij[rows], e_live[rows], e_ch, rvec, mask, r_env, r_env + 0.5 * rcut, n_env, l_env)
+        side = _env_side(e_rij[rows], e_live[rows], e_ch, rvec, mask, r_env, r_env + 0.5 * rcut, n_env, l_env, env_core)
         phi2 = _radial(x, n_ebond) * mask[..., None]
     return _radial(x, n_bond) * mask[..., None], U, Y, phi2, side
 
@@ -438,7 +438,7 @@ class OffsitePredictor:
     def static(self):
         b = self.model.bond
         emb = tuple(tuple(float(v) for v in row) for row in B.env_embedding(b)) if b.n_env else ()
-        return (b.n_bond, b.n_cpl, b.l_cpl, self.lmax, b.n_env, b.l_env, b.n_ebond, b.l_ebond, b.r_env, emb)
+        return (b.n_bond, b.n_cpl, b.l_cpl, self.lmax, b.n_env, b.l_env, b.n_ebond, b.l_ebond, b.r_env, emb, float(b.env_core))
 
     def dense(self, positions, cell, numbers, pbc=True):
         m, basis = self.model, self.model.bond

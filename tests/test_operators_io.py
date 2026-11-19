@@ -114,3 +114,20 @@ def test_make_room_drops_compiled_programs_near_the_map_limit(tmp_path, monkeypa
     monkeypatch.setattr(maps.jax, "default_backend", lambda: "gpu")
     monkeypatch.setattr(maps, "MAPS_FILE", str(used))
     assert not maps.make_room(800) and cleared == [1]         # only the CPU runtime maps per kernel
+
+
+def test_a_file_without_env_core_loads_as_written_by_0_7_0(tmp_path):
+    """`BondBasis.env_core` is stored; a file that lacks it (ace-jax 0.7.0) loads with env_core = 0,
+    the environment harmonics it was fitted with."""
+    sb = site("table")
+    on, off = models(bond.BondBasis(site=sb, rcut_bond=5.0, n_bond=4, n_cpl=2, l_cpl=2, r_env=4.5, n_env=3, l_env=2, n_ebond=2, l_ebond=2))
+    assert off.bond.env_core == 1.0
+    path = tmp_path / "m.npz"
+    io.save(path, on, off)
+    assert io.load(path).offsite.bond.env_core == 1.0
+    z = dict(np.load(path))
+    meta = json.loads(bytes(z["meta_json"]).decode())
+    del meta["bond"]["env_core"]
+    z["meta_json"] = np.frombuffer(json.dumps(meta).encode(), np.uint8)
+    np.savez(tmp_path / "old.npz", **z)
+    assert io.load(tmp_path / "old.npz").offsite.bond.env_core == 0.0
