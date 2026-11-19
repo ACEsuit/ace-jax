@@ -583,14 +583,20 @@ RADIAL = os.environ.get("ACEJAX_FFI_RADIAL") or None
 
 
 def analytic_plan(model, runs):
-    """(ints, reals, nq) of the GPU kernel's analytic radial for a lean model whose tensor radial is the
+    """(ints, reals, nq, npq) of the GPU kernel's analytic radial for a lean model whose tensor radial is the
     polynomial one (`radial_kind` "analytic", `rnl_basis` "poly": R_c = env(x) sum_q W_cq P_q(x), x the Agnesi
     transform), or None.  `runs`: `plan(model, gpu=True)`'s, each of one degree l.  ints: per species pair and
     degree the first entry of each q (NZ^2 (L + 1) (nq + 1)), then each entry's first A (of its run's 2l + 1);
-    reals: per pair the transform's 7 and the envelope's 5 parameters, the recursion's A, B, C (nq each), the
-    entries' W.  nq stops at the last polynomial any column reads.  The pair radial stays in the table (its
-    columns after n_rnl).  None too above degree `ANALYTIC_LMAX` or where a run is not a whole degree."""
-    if model.radial_kind != "analytic" or getattr(model, "rnl_basis", "poly") != "poly":
+    reals: per pair the transform's 7 and the envelope's 5 parameters; per pair the folded pair radial's
+    transform (7), its envelope's cutoff, r0 and power and its kind (0 "ace1_poly1sr", 1 "poly1sr"), then 0;
+    the recursion's A, B, C (nq each); the pair radial's (npq each) and its coefficients per pair; the entries'
+    W.  nq stops at the last polynomial any column reads.  The pair radial is analytic too: at o3d8 it and the
+    tensor radial give forces of 600 eV/A that cancel to 2, and so do their errors in one table, which the
+    table's pair radial beside an exact tensor radial would lose (1e-7 eV/A).  None for another radial or pair
+    radial kind, above degree `ANALYTIC_LMAX`, or where a run is not a whole degree."""
+    if (model.radial_kind != "analytic" or getattr(model, "rnl_basis", "poly") != "poly"
+            or model.pair_radial_kind != "analytic" or model.pair_Wnlq.shape[2] != 1
+            or model.pair_envelope_kind not in ("ace1_poly1sr", "poly1sr")):
         return None
     W = np.asarray(model.rnl_Wnlq, np.float64)             # (NZ, NZ, n_rnl, n_q)
     nz, _, n_rnl, _ = W.shape
@@ -615,8 +621,17 @@ def analytic_plan(model, runs):
     par = np.concatenate([np.asarray(model.rnl_transform, np.float64).reshape(nz * nz, 7),
                           np.asarray(model.rnl_envelope, np.float64).reshape(nz * nz, 5)], 1)
     abc = np.concatenate([np.asarray(a, np.float64)[:nq] for a in (model.polys_A, model.polys_B, model.polys_C)])
+    pc = np.asarray(model.pair_Wnlq, np.float64).reshape(nz * nz, -1)      # folded: (pair, q)
+    npq = pc.shape[1]
+    pe = np.asarray(model.pair_envelope, np.float64).reshape(nz * nz, -1)
+    ace1 = model.pair_envelope_kind == "ace1_poly1sr"       # (rcut, r0, p), or (rcut, p)
+    penv = np.stack([pe[:, 0], pe[:, 1] if ace1 else pe[:, 0], pe[:, 2] if ace1 else pe[:, 1],
+                     np.full(nz * nz, 0.0 if ace1 else 1.0), np.zeros(nz * nz)], 1)
+    ppar = np.concatenate([np.asarray(model.pair_transform, np.float64).reshape(nz * nz, 7), penv], 1)
+    pabc = np.concatenate([np.asarray(a, np.float64)[:npq]
+                           for a in (model.pair_polys_A, model.pair_polys_B, model.pair_polys_C)])
     return (np.concatenate([np.concatenate(ptr), np.concatenate(ents)]).astype(np.int32),
-            np.concatenate([par.ravel(), abc, np.concatenate(vals)]), nq)
+            np.concatenate([par.ravel(), ppar.ravel(), abc, pabc, pc.ravel(), np.concatenate(vals)]), nq, npq)
 
 
 def choose_form(model, form, n_nodes):
@@ -681,7 +696,7 @@ def kernel_inputs(model, gpu=False, precision=None, form=None):
             raise ValueError(f"ffi.RADIAL is 'table' or 'analytic', got {RADIAL!r}")
         an = analytic_plan(model, runs) if RADIAL == "analytic" else None   # where the model has one
         radial = (i32(an[0]), jnp.asarray(an[1], model.E0.dtype)) if an else (i32(np.zeros(1)), jnp.zeros(1, model.E0.dtype))
-        attrs["nq"] = np.int64(an[2] if an else 0)
+        attrs["nq"], attrs["npq"] = np.int64(an[2] if an else 0), np.int64(an[3] if an else 0)
     if not gpu:
         attrs["form"] = np.int64(0)
         which, cp = choose_form(model, form, len(factor))

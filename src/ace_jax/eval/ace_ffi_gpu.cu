@@ -56,7 +56,7 @@ struct Model {                                            // 32-bit sizes save r
   const int32_t *run, *grp, *fac, *lev, *pull;
   const int32_t *ai;                                      // the analytic radial (ffi.analytic_plan), nq > 0
   const R *ar;
-  int nq;
+  int nq, npq;
   int nz, ncoef, F, n_rnl, n_runs, N, n_a, n_lev, n_st, st_lev, n_lc, n, L, solid;
   int local;                                              // the table in radial.spline_local's form
   R x0, ih, rc2;                                          // ih = 1 / h
@@ -261,20 +261,6 @@ __global__ void __launch_bounds__(T)
   }
 }
 
-// The four table rows r reads on species pair pz's table, and their weights (as `table`); r < the cutoff.
-template <typename R>
-__device__ __forceinline__ const R *table_rows(const Model<R> &m, int pz, R r, R *w, R *dw) {
-  const R k = (r - m.x0) * m.ih + 1, sixth = R(1) / 6;
-  int ix = static_cast<int>(floor(k));
-  ix = ix < 1 ? 1 : (ix > m.n - 1 ? m.n - 1 : ix);
-  const R t = k - ix, s = 1 - t;
-  w[0] = s * s * s * sixth; w[1] = m.local ? R(1) : (4 - 6 * t * t + 3 * t * t * t) * sixth;
-  w[2] = (4 - 6 * s * s + 3 * s * s * s) * sixth; w[3] = t * t * t * sixth;
-  dw[0] = R(-0.5) * s * s * m.ih; dw[1] = m.local ? R(0) : (R(1.5) * t * t - 2 * t) * m.ih;
-  dw[2] = (2 * s - R(1.5) * s * s) * m.ih; dw[3] = R(0.5) * t * t * m.ih;
-  return m.tab + (static_cast<int64_t>(pz) * m.ncoef + (m.local ? 4 : 1) * (ix - 1)) * m.F;
-}
-
 // Pass 3 for an analytic tensor radial (ffi.analytic_plan: R_c = env(x) sum_q W_cq P_q(x), radial.py's Agnesi
 // transform, polynomial recursion and envelope), a lane per neighbour and a warp per block: nothing is read
 // per pair but the pair radial's table rows.  The lane puts its harmonics in its column of Ys and, per degree
@@ -284,10 +270,10 @@ __device__ __forceinline__ const R *table_rows(const Model<R> &m, int pz, R r, R
 // same sums as ace_forces, in another order.
 template <typename R>
 struct AnLane {                                           // one neighbour's state
-  const R *wA, *Ys, *gz, *gp, *gm, *pA, *pB, *pC, *wv;
+  const R *wA, *Ys, *gz, *gp, *gm, *pA, *pB, *pC, *wv, *qA, *qc;   // qA: the pair radial's recursion, qc its sums
   const int32_t *qp, *ent;
   R x, dx, env, denv, ir, hat[3];
-  int nq, L, st, solid;
+  int nq, npq, L, st, solid;
 };
 
 // x(r) and dx/dr of radial.agnesi_normalized and the envelope env_poly2sx(x) with its d/dx (zero unless `in`),
@@ -314,6 +300,63 @@ __device__ __forceinline__ void an_radial(const R *par, R r, bool in, AnLane<R> 
     a.env = sc * ea * (a.x - x1) * eb * (x2 - a.x);
     a.denv = sc * (p1 * ea * eb * (x2 - a.x) - p2 * ea * (a.x - x1) * eb);
   }
+}
+
+// The plan's reals: per pair the tensor radial's 12 parameters, then the pair radial's 12 (its transform's 7,
+// the envelope's cutoff, r0 and power, and its kind: 0 env_ace1_poly1sr, 1 env_poly1sr), the two recursions'
+// A, B, C, the pair radial's coefficients per pair, the W entries.
+template <typename R>
+__device__ __forceinline__ void an_setup(const Model<R> &m, AnLane<R> &a) {
+  const int np = m.nz * m.nz;
+  a.pA = m.ar + 24 * np; a.pB = a.pA + m.nq; a.pC = a.pB + m.nq;
+  a.qA = a.pC + m.nq; a.qc = a.qA + 3 * m.npq; a.wv = a.qc + np * m.npq;
+  a.ent = m.ai + np * (m.L + 1) * (m.nq + 1);
+  a.nq = m.nq; a.npq = m.npq; a.L = m.L; a.solid = m.solid;
+}
+
+// The folded pair radial V(r) = env(r) sum_q c_q P_q(x(r)) of pair pz and dV/dr, as radial.py (the model's
+// pair energy per neighbour): never from the table, whose error the tensor radial's would no longer cancel.
+template <typename R>
+__device__ __forceinline__ void an_pair(const Model<R> &m, const AnLane<R> &a, int pz, R r, bool has, R &V, R &dV) {
+  const R *par = m.ar + 12 * (m.nz * m.nz + pz);
+  const R p = par[0], q = par[1], aa = par[2], rin = par[3], r0 = par[4], yin = par[5], ycut = par[6];
+  const R rc = par[7], e0 = par[8], ep = par[9];
+  V = dV = 0;
+  if (!has || !(r < rc)) return;
+  R y = 1, dx = 0;
+  if (r > rin) {
+    const R is = 1 / (r0 - rin), s1 = (r - rin) * is, sq = powi(s1, q), sd = powi(s1, q - p);
+    const R den = 1 / (1 + sd), g = aa * sq * den, dg = aa * (q * sq - (q - p) * sq * sd * den) * den / s1;
+    y = 1 / (1 + g);
+    dx = -2 * dg * y * y * is / (ycut - yin);
+  }
+  R x = -1 + 2 * (y - yin) / (ycut - yin);
+  if (x <= -1 || x >= 1) {
+    x = x <= -1 ? R(-1) : R(1);
+    dx = 0;
+  }
+  R env, denv;                                            // in r
+  if (par[10] == 0) {                                     // s^-p - sc^-p + p sc^(-p-1) (s - sc), s = r / r0
+    const R s = r / e0, sc = rc / e0, sp = 1 / powi(s, ep), scp = 1 / powi(sc, ep);
+    env = sp - scp + ep * scp / sc * (s - sc);
+    denv = ep * (scp / sc - sp / s) / e0;
+  } else {                                                // (s^-p - 1)(1 - s), s = r / rc
+    const R s = r / rc, sp = 1 / powi(s, ep);
+    env = (sp - 1) * (1 - s);
+    denv = (-ep * sp / s * (1 - s) - (sp - 1)) / rc;
+  }
+  const R *A = a.qA, *B = A + a.npq, *C = B + a.npq, *c = a.qc + pz * a.npq;
+  R S = 0, dS = 0, P1 = 0, P2 = 0, D1 = 0, D2 = 0;
+  for (int k = 0; k < a.npq; ++k) {
+    const R t = A[k] * x + B[k];
+    const R P = k == 0 ? A[0] : k == 1 ? t : t * P1 + C[k] * P2;
+    const R D = k == 0 ? R(0) : k == 1 ? A[1] : A[k] * P1 + t * D1 + C[k] * D2;
+    S += c[k] * P;
+    dS += c[k] * D;
+    P2 = P1; P1 = P; D2 = D1; D1 = D;
+  }
+  V = env * S;
+  dV = denv * S + env * dS * dx;
 }
 
 // Pass 1 for an analytic tensor radial, a lane per neighbour and a warp per block (as ace_forces_lane): per
@@ -351,9 +394,8 @@ __global__ void __launch_bounds__(kChunk)
   int *flag = reinterpret_cast<int *>(As + na + nY * T), *live = flag + K;
   AnLane<R> a;
   a.Ys = Ys;
-  a.pA = m.ar + 12 * np; a.pB = a.pA + nq; a.pC = a.pB + nq; a.wv = a.pC + nq;
-  a.ent = m.ai + np * (L + 1) * (nq + 1);
-  a.nq = nq; a.L = L; a.st = T; a.solid = m.solid;
+  a.st = T;
+  an_setup(m, a);
   constants<R>(L, norm, ca, cb, nullptr, nullptr, nullptr);
   for (int i = blockIdx.x; i < rows && i < atoms; i += gridDim.x) {
     for (int k = t; k < K; k += T) {
@@ -413,11 +455,9 @@ __global__ void __launch_bounds__(kChunk)
       const bool in = has && r < m.rc[pz];
       a.qp = m.ai + pz * (L + 1) * (nq + 1);
       an_radial(m.ar + 12 * pz, r, in, a);
-      if (in && m.n_rnl < F) {                            // the folded pair radial, from the table
-        R w[4], dw[4];
-        const R *c0 = table_rows(m, pz, r, w, dw), *c1 = c0 + F, *c2 = c1 + F, *c3 = c2 + F;
-        for (int c = m.n_rnl; c < F; ++c) e += w[0] * c0[c] + w[1] * c1[c] + w[2] * c2[c] + w[3] * c3[c];
-      }
+      R V, dV;
+      an_pair(m, a, pz, r, has, V, dV);
+      e += V;
       for (int mm = 0; mm <= L; ++mm) harmonics(L, m.solid, mm, norm, ca, cb, v, r, ir, Ys, T);
       an_density<0, R>(a, As);
       if constexpr (LM >= 1) an_density<1, R>(a, As);
@@ -499,9 +539,8 @@ __global__ void __launch_bounds__(kChunk)
   R *gm = gp + nY, *wA = gm + nY, *Ys = wA + na + lane;   // Ys: the lane's column
   AnLane<R> a;
   a.wA = wA; a.Ys = Ys; a.gz = gz; a.gp = gp; a.gm = gm;
-  a.pA = m.ar + 12 * np; a.pB = a.pA + nq; a.pC = a.pB + nq; a.wv = a.pC + nq;
-  a.ent = m.ai + np * (L + 1) * (nq + 1);
-  a.nq = nq; a.L = L; a.st = T; a.solid = m.solid;
+  a.st = T;
+  an_setup(m, a);
   constants(L, norm, ca, cb, gz, gp, gm);
   for (int i = blockIdx.x; i < rows && i < atoms; i += gridDim.x) {
     const int32_t *list = lists + static_cast<int64_t>(i) * (K + 1);
@@ -535,12 +574,8 @@ __global__ void __launch_bounds__(kChunk)
       a.qp = m.ai + pz * (L + 1) * (nq + 1);
       an_radial(m.ar + 12 * pz, r, in, a);
       for (int mm = 0; mm <= L; ++mm) harmonics(L, m.solid, mm, norm, ca, cb, v, r, ir, Ys, T);
-      R sc = 0, g[3] = {0, 0, 0};
-      if (in && m.n_rnl < F) {                            // the folded pair radial, from the table
-        R w[4], dw[4];
-        const R *c0 = table_rows(m, pz, r, w, dw), *c1 = c0 + F, *c2 = c1 + F, *c3 = c2 + F;
-        for (int c = m.n_rnl; c < F; ++c) sc += dw[0] * c0[c] + dw[1] * c1[c] + dw[2] * c2[c] + dw[3] * c3[c];
-      }
+      R sc = 0, g[3] = {0, 0, 0}, V;
+      an_pair(m, a, pz, r, has, V, sc);
       an_degree<0, R>(a, sc, g);
       if constexpr (LM >= 1) an_degree<1, R>(a, sc, g);
       if constexpr (LM >= 2) an_degree<2, R>(a, sc, g);
@@ -1118,7 +1153,7 @@ struct Consts {
   ffi::Buffer<ffi::S32> ai;
   ffi::AnyBuffer ar;
   double x0, h;
-  int64_t n, n_rnl, lmax, solid, n_leaf, n_st, tile, lv, threads, form, nq;
+  int64_t n, n_rnl, lmax, solid, n_leaf, n_st, tile, lv, threads, form, nq, npq;
 };
 
 // Both entry points: x the positions (atoms, 3), or (E) rij (rows, K, 3); out the forces (atoms, 3), or (E)
@@ -1229,11 +1264,11 @@ ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBu
     const Model<R> m{c.rtab.typed_data<R>(), c.rcut.typed_data<R>(), nullptr, c.e0.typed_data<R>(),
                      nullptr, c.runs.typed_data(), c.groups.typed_data(), c.factor.typed_data(),
                      c.levels.typed_data(), c.pull.typed_data(), c.ai.typed_data(), c.ar.typed_data<R>(),
-                     i32(c.nq), nz, ncoef, F, i32(c.n_rnl), i32(n_runs), N,
+                     i32(c.nq), i32(c.npq), nz, ncoef, F, i32(c.n_rnl), i32(n_runs), N,
                      n_a, n_lev, i32(kept), std::max(n_lev - 2, 0), i32(c.lc.dimensions()[1]),
                      i32(c.n), i32(lmax), i32(c.solid), local, R(c.x0), R(1.0 / c.h), R(rc2)};
     const Model<Rd> md{nullptr, nullptr, c.ct.typed_data<Rd>(), nullptr,   // the readout: all the DAG reads
-                       c.lc.typed_data<Rd>(), m.run, m.grp, m.fac, m.lev, m.pull, nullptr, nullptr, 0, nz, ncoef, F,
+                       c.lc.typed_data<Rd>(), m.run, m.grp, m.fac, m.lev, m.pull, nullptr, nullptr, 0, 0, nz, ncoef, F,
                        m.n_rnl, m.n_runs, N,
                        n_a, n_lev, m.n_st, m.st_lev, m.n_lc, m.n, m.L, m.solid, local, Rd(c.x0), Rd(1.0 / c.h),
                        Rd(rc2)};
@@ -1315,10 +1350,10 @@ ffi::Error AceDirectGpuImpl(gpuStream_t stream, ffi::ScratchAllocator scratch, f
                             ffi::Buffer<ffi::S32> pull, ffi::AnyBuffer lc, ffi::Buffer<ffi::S32> ai,
                             ffi::AnyBuffer ar, double x0, double h,
                             int64_t n, int64_t n_rnl, int64_t lmax, int64_t solid, int64_t n_leaf,
-                            int64_t n_st, int64_t tile, int64_t lv, int64_t threads, int64_t form, int64_t nq, double rc2, ffi::Result<ffi::AnyBuffer> e,
+                            int64_t n_st, int64_t tile, int64_t lv, int64_t threads, int64_t form, int64_t nq, int64_t npq, double rc2, ffi::Result<ffi::AnyBuffer> e,
                             ffi::Result<ffi::AnyBuffer> f) {
   const Consts c{rtab, rcut, runs, groups, factor, ct, e0, levels, pull, lc, ai, ar,
-                 x0, h, n, n_rnl, lmax, solid, n_leaf, n_st, tile, lv, threads, form, nq};
+                 x0, h, n, n_rnl, lmax, solid, n_leaf, n_st, tile, lv, threads, form, nq, npq};
   return Launch<false>(stream, scratch, pos, species.typed_data(), nbr.typed_data(), num.typed_data(),
                        weight.untyped_data(), nullptr, nullptr, pos.dimensions()[0], nbr.dimensions()[0],
                        nbr.dimensions()[1], c, rc2,
@@ -1336,10 +1371,10 @@ ffi::Error AceEdgesGpuImpl(gpuStream_t stream, ffi::ScratchAllocator scratch, ff
                            ffi::Buffer<ffi::S32> pull, ffi::AnyBuffer lc, ffi::Buffer<ffi::S32> ai,
                            ffi::AnyBuffer ar, double x0, double h, int64_t n,
                            int64_t n_rnl, int64_t lmax, int64_t solid, int64_t n_leaf, int64_t n_st,
-                           int64_t tile, int64_t lv, int64_t threads, int64_t form, int64_t nq, ffi::Result<ffi::AnyBuffer> e,
+                           int64_t tile, int64_t lv, int64_t threads, int64_t form, int64_t nq, int64_t npq, ffi::Result<ffi::AnyBuffer> e,
                            ffi::Result<ffi::AnyBuffer> g) {
   const Consts c{rtab, rcut, runs, groups, factor, ct, e0, levels, pull, lc, ai, ar,
-                 x0, h, n, n_rnl, lmax, solid, n_leaf, n_st, tile, lv, threads, form, nq};
+                 x0, h, n, n_rnl, lmax, solid, n_leaf, n_st, tile, lv, threads, form, nq, npq};
   const int64_t rows = rij.dimensions()[0], K = rij.dimensions()[1];
   return Launch<true>(stream, scratch, rij, zi.typed_data(), nullptr, nullptr, nullptr, zj.typed_data(),
                       mask.typed_data(), rows, K, rows, c, 0.0,
@@ -1384,6 +1419,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(AceDirectGpu, AceDirectGpuImpl,
                                   .Attr<int64_t>("threads")
                                   .Attr<int64_t>("form")            // 0: the DAG; 1: the coupled form
                                   .Attr<int64_t>("nq")              // the analytic radial's polynomials; 0: the table
+                                  .Attr<int64_t>("npq")             // and its pair radial's
                                   .Attr<double>("rc2")
                                   .Ret<ffi::AnyBuffer>()            // atom energies (atoms,)
                                   .Ret<ffi::AnyBuffer>());          // -sum_i w_i grad e_i (atoms, 3)
@@ -1421,5 +1457,6 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(AceEdgesGpu, AceEdgesGpuImpl,
                                   .Attr<int64_t>("threads")
                                   .Attr<int64_t>("form")            // 0: the DAG; 1: the coupled form
                                   .Attr<int64_t>("nq")              // the analytic radial's polynomials; 0: the table
+                                  .Attr<int64_t>("npq")             // and its pair radial's
                                   .Ret<ffi::AnyBuffer>()            // site energies (rows,)
                                   .Ret<ffi::AnyBuffer>());          // dE_i / drij (rows, K, 3)

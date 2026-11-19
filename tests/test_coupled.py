@@ -9,10 +9,10 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 
 from ace_jax.eval import coupled, ffi, load
-from ace_jax.eval.model import lean
+from ace_jax.eval.model import fold_readout, lean
 from conftest import FIXTURE_DIR as FIXTURES
 from ace_jax.eval.api import with_dtype
-from test_ffi import cluster, device, kernel, matrix_inputs  # noqa: F401  (the compiled kernels)
+from test_ffi import backend_kernel, cluster, device, kernel, matrix_inputs  # noqa: F401  (the compiled kernels)
 
 NAMES = ["si_fitted", "si_ace_model", "sige_nofit", "ace_cantor5_small", "si_m710"]
 
@@ -196,30 +196,36 @@ def test_gpu_plan_emulated_equals_the_reference(name, T):
         np.testing.assert_allclose(d1[new], d0[0], atol=1e-11 * np.abs(d0).max())
 
 
-@pytest.mark.parametrize("device", ["gpu"], indirect=True)
-@pytest.mark.parametrize("dtype", ["float64", "float32"])
-@pytest.mark.parametrize("name", NAMES)
-def test_gpu_analytic_radial_matches_the_table(device, monkeypatch, name, dtype):  # noqa: F811
-    """The CUDA kernel with the tensor radial evaluated analytically (`ffi.RADIAL`) against the same kernel on
-    the radial table, which approximates it to ~1e-9 (forces ~1e-8 of the largest)."""
-    m, meta = _lean(name)
-    if ffi.analytic_plan(m, ffi.plan(m, gpu=True)[0]) is None:
-        pytest.skip(f"{name}: the tensor radial is not the polynomial one")
-    m = with_dtype(m, dtype)
-    rcut = float(meta["rcut"])
-    at = cluster(meta)
-    els = [int(z) for z in meta["elements"]]
-    out = []
-    with jax.default_device(jax.devices(device)[0]):
-        pos, z, graph = matrix_inputs(at, rcut + 1.0, [els.index(int(n)) for n in at.numbers])
-        for radial in (None, "analytic"):
-            monkeypatch.setattr(ffi, "RADIAL", radial)
-            attrs, _ = ffi.kernel_inputs(m, True)
-            assert (attrs["nq"] > 0) == (radial == "analytic")
-            efn, ffn = ffi.lammps_fns(m, len(els), list(range(len(els))), rcut, True)
-            out.append([np.asarray(a) for a in (efn(pos.astype(dtype), z, graph), ffn(pos.astype(dtype), z, graph))])
-    (e0, f0), (e1, f1) = out
-    print(f"\n  max|de| {np.abs(e1 - e0).max():.1e}  max|dF|/max|F| {np.abs(f1 - f0).max() / np.abs(f0).max():.1e}")
-    te, tf = (1e-8, 1e-6) if dtype == "float64" else (1e-4, 1e-3)
-    assert np.abs(e1 - e0).max() <= te * max(np.abs(e0).max(), 1.0)
-    assert np.abs(f1 - f0).max() <= tf * np.abs(f0).max()
+@pytest.mark.parametrize("elements,order,degree", [(("Si",), 3, 8), (("Si", "Ge"), 3, 6), (("Si",), 4, 10)])
+def test_gpu_analytic_radial_matches_the_model(backend_kernel, monkeypatch, elements, order, degree):  # noqa: F811
+    """The CUDA kernel with the tensor and pair radials evaluated analytically (`ffi.RADIAL`, a lane per
+    neighbour) against the JAX model without a radial table, for bases `build_basis` makes (polynomial radials)
+    with a random readout: energy, forces and stress to roundoff, where the table kernel is good to ~1e-8.
+    One and two elements; few A (the analytic A pass too) and more (the table's)."""
+    import dataclasses
+
+    from ase.build import bulk
+
+    from ace_jax.basis.model import BasisSpec, build_basis
+    from ace_jax.calc.point import ACECalculator
+    from conftest import require_coupling_lib
+    if backend_kernel != "gpu":
+        pytest.skip("the analytic radial is the CUDA kernel's")
+    require_coupling_lib()
+    model, meta = build_basis(BasisSpec(order=order, max_degree=degree, elements=elements, rcut=5.0)).eval_pair()
+    WB = jnp.asarray(np.random.default_rng(0).normal(scale=0.05, size=model.WB.shape))
+    model = fold_readout(dataclasses.replace(model, WB=WB, folded=False))
+    at = bulk("Si", "diamond", a=5.43, cubic=True).repeat(2)
+    at.numbers = np.asarray([int(z) for z in meta["elements"]])[np.arange(len(at)) % len(elements)]
+    at.rattle(0.08, seed=1)
+    monkeypatch.setattr(ffi, "RADIAL", "analytic")
+    monkeypatch.setattr(ffi, "FORM", "coupled")
+    k, j = ACECalculator(model, meta, ffi=True), ACECalculator(model, meta)
+    assert dict(k.eval_model.attrs)["nq"] > 0 and j.ffi is None
+    a1, a2 = at.copy(), at.copy()
+    a1.calc, a2.calc = k, j
+    F2 = a2.get_forces()
+    print(f"\n  n_a {int(k.eval_model.consts[5].shape[1])}  max|dF| {np.abs(a1.get_forces() - F2).max():.1e} of {np.abs(F2).max():.2f}")
+    assert a1.get_potential_energy() == pytest.approx(a2.get_potential_energy(), rel=1e-11, abs=1e-10)
+    np.testing.assert_allclose(a1.get_forces(), F2, atol=2e-10 * max(1.0, np.abs(F2).max()))
+    np.testing.assert_allclose(a1.get_stress(), a2.get_stress(), atol=1e-11)

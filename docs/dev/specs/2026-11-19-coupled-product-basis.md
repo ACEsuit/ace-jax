@@ -209,3 +209,23 @@ Symmetrix's `symmetrix/ace/kk` on a Sulis A100-PCIE-40GB (job 2295321, gpu011; L
 32,768 Si atoms, three runs each), µs/atom-step, float64 then its float32 mode: o4d20 0.121-0.124 and
 0.092-0.095; o4d16 0.0556 and 0.047; o3d8 0.0165 and 0.0166. These reproduce its own Perlmutter figures (0.116,
 0.0555, 0.0180). That job was cancelled by mistake before the ace-jax legs; 2295397 repeats all three.
+
+## LAMMPS on one Sulis A100 (job 2295397, gpu-devel, A100-PCIE-40GB, 32,768 Si atoms), µs/atom-step
+
+| model | Symmetrix float64 / its float32 mode | main float64 / float32 | this tree float64 / float32 |
+|---|---|---|---|
+| o4d20 | 0.120-0.123 / 0.092-0.094 | 0.745 / 0.447 | 0.283 / 0.180 |
+| o4d16 | 0.056 / 0.045-0.047 | 0.190 / 0.133 | 0.124 / 0.096 |
+| o3d8 | 0.0165 / 0.0166 | 0.0425 / 0.0448 | (parity gate failed: below) |
+
+This tree: `ACEJAX_FFI_FORM=coupled ACEJAX_FFI_RADIAL=analytic` at e17b7ef. So 2.6x on main at o4d20 and 1.5x at
+o4d16, and Symmetrix is 2.3x and 2.2x ahead where it was 6.2x and 3.4x.
+
+The o3d8 gate (64 atoms against the JAX model, 1e-8) failed with max |dF| 3.6e-7: the tensor radial was analytic
+and the pair radial still the table's. At o3d8 the two give forces of ~600 eV/A each that cancel to ~2, and in
+one table their errors cancel too (the all-table kernel: 1e-8); an exact tensor radial beside the table's pair
+radial does not (1e-7). Fixed after e17b7ef: the pair radial is analytic in the lane kernels too (`an_pair`:
+Agnesi transform, recursion, `env_ace1_poly1sr` / `env_poly1sr`), and `analytic_plan` is None unless both
+radials are analytic. Against the JAX model without a table, 64 rattled Si atoms, max |dF| in eV/A, table kernel
+then analytic: o3d8 9.9e-9, 1.6e-11; o4d12 2.4e-9, 2.0e-12; o4d16 3.3e-9, 1.0e-12. Job 2295415 repeats the
+ace-jax legs with this.
