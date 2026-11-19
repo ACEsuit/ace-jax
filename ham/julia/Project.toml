@@ -1,0 +1,10 @@
+[deps]
+Configurations = "5218b696-f38b-4ac9-8b61-a12ec717816d"
+Quoll = "9d051eb3-b680-40d1-9fd2-1a9acedfca1f"
+
+[sources]
+Quoll = {url = "https://github.com/maurergroup/Quoll.jl", rev = "f26de2834ba1d565998ae4f16d95c05f2398161d"}
+
+[compat]
+Configurations = "=0.17.6"
+julia = "1.13"
