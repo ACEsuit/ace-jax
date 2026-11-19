@@ -149,6 +149,72 @@ If the structure has blocks, the command also calculates the bands of the
 reference and prints the errors of the model. The figure then shows the two
 sets of bands together. `--plot` needs matplotlib.
 
+## Example: bulk gold
+
+This example uses the bulk gold dataset of the MACE-H publication
+([Zenodo 10.5281/zenodo.15223696](https://doi.org/10.5281/zenodo.15223696)).
+The dataset has 64-atom cells from FHI-aims with 9 orbitals for each atom, in
+the DeepH layout. The fit uses 32 training structures. The validation set is
+the 10 test structures of the dataset.
+
+1. Fit the model with the default basis.
+
+    ```bash
+    aj ham fit --data train/ --validation test/ --out gold.npz \
+        --nelectrons 79:11 --kpts 4 4 4
+    ```
+
+2. Draw the bands and the density of states of one test structure.
+
+    ```bash
+    aj ham bands --model gold.npz --structure test/ --index 0 --kpts 4 4 4 \
+        --plot-window -1.5 4 --plot gold_bands.png
+    ```
+
+The fit takes approximately 70 seconds on one GPU. On the validation set the
+band error from own Fermi levels is 2.9 meV, and the off-site blocks of H have
+a mean absolute error of 0.34 meV.
+
+![Bands on the high-symmetry path and density of states of a 64-atom gold cell: the model is on the DFT reference in the full range](../assets/ham/gold_bands.png)
+
+The figure shows the bands of the model on the bands of the DFT reference.
+The cell has 64 atoms, thus the bands are folded. Below −1.5 eV the d bands
+are too dense for a figure of this size. The density of states and the errors
+that the command prints include these bands.
+
+### Comparison with MACE-H and DeepH-E3
+
+The table compares ace-jax with MACE-H and DeepH-E3. Each code used the same
+32 training structures, and the same program calculated the errors on the same
+10 test structures. The two networks have the configuration that the MACE-H
+authors published for this dataset. Their training was on one A100 GPU.
+
+| Model | H error (MAE) | Band error (RMSE, own Fermi levels) | Prediction on one CPU core | Prediction on a GPU | Fit or training time |
+|---|---|---|---|---|---|
+| ace-jax, default basis | 0.35 meV | 2.9 meV | 14 ms for each atom | 0.6 ms for each atom | 70 s |
+| ace-jax, largest basis of the benchmark | 0.15 meV | 1.3 meV | 18 ms | 0.6 ms | approximately 7 minutes |
+| MACE-H | 0.38 meV | 5.3 meV | 258 ms | 3.5 ms | more than 14 hours |
+| DeepH-E3 | 0.47 meV | 8.4 meV | 264 ms | 3.6 ms | 12.5 hours |
+
+The prediction times are for the blocks of H only. They do not include the
+calculation of the eigenvalues. The CPU is one core of a Xeon Gold 6130. The
+GPU is an RTX 4000 Ada in float32. ace-jax on the CPU is in float64.
+
+!!! note
+    The MACE-H training with 32 structures stopped at its time limit of
+    14 hours. The table shows its best model at that time. With 16 structures
+    its training was complete, and its band error was 6.1 meV.
+
+The next figure shows the error of each band on the path, for the test
+structure of the first figure.
+
+![Band errors against DFT on the high-symmetry path for ace-jax, MACE-H and DeepH-E3, on one axis: the spread is smallest for ace-jax](../assets/ham/gold_band_errors.png)
+
+For each code, the mean of the errors is not zero. This is a shift of all the
+eigenvalues of a structure together, through the error of the Fermi level.
+The shift is different for each structure. It does not change the shape of the
+bands, but it changes the band energy.
+
 ## Use the model from Python
 
 `HamiltonianCalculator` is an ASE calculator.
