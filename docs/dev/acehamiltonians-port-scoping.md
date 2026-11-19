@@ -171,7 +171,7 @@ Item 1 takes days. Items 2–3 depend on Quoll's maintainers accepting the chang
 
 Size: about 1–1.5 weeks, most of it the trim fixes, whose extent is not known until the compile is tried. The risk is in step 1 (§11).
 
-**Revision 2's pin-bump costs are settled.** The library already builds from ET `main` after v0.5.1: its parity against the ACEpotentials fixtures (which pin ET 0.4.3) is per nnll block span, with a different per-row normalisation (`docs/dev/coupling-etshim-spec.md`, "ET version vs the ACEpotentials fixtures"). The committed cache and `ACEJAX_COUPLING_CACHE_ONLY=1` replaced `juliapkg.json` hashing and `ACEJAX_NO_JULIA`. Nothing about ET versions remains to be decided for potentials.
+**Revision 2's pin-bump costs are settled.** The library already builds from ET `main` after v0.5.1: its parity against the ACEpotentials fixtures (which pin ET 0.4.3) is per nnll block span, with a different per-row normalisation (`docs/dev/coupling-etshim-spec.md`, "ET version vs the ACEpotentials fixtures"). The committed cache and `ACEJAX_COUPLING_CACHE_ONLY=1` replaced `juliapkg.json` hashing and the former no-backend environment switch. Nothing about ET versions remains to be decided for potentials.
 
 **Julia versions now.** `coupling-wheels.yml` uses Julia 1.13.1 (exact; `build.jl` checks it against the Manifests). `julia-parity.yml` and `prior-parity.yml` stay on 1.11 for the ACEpotentials reference project. Quoll needs ≥ 1.12, so the ingestion project of §2 uses 1.13 too, to keep two Julia versions in CI rather than three.
 
