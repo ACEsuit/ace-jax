@@ -72,8 +72,12 @@ def structures(path, index=None):
 
 
 def _calc(a, kpts):
+    """The calculator of a.model with the command's options; --nelectrons defaults to the one
+    the model file records (`aj ham fit --nelectrons`), else the atomic numbers."""
+    from ..operators import io
     from .calculator import HamiltonianCalculator
-    calc = HamiltonianCalculator(a.model, kpts=kpts, nelectrons=electrons(a.nelectrons), width=a.width, smearing=a.smearing, threads=a.threads)
+    nel = a.nelectrons if a.nelectrons is not None else io.load(a.model).meta["info"].get("nelectrons")
+    calc = HamiltonianCalculator(a.model, kpts=kpts, nelectrons=electrons(nel), width=a.width, smearing=a.smearing, threads=a.threads)
     ch = calc.predictor.channels
     calc.overlap = "S" if "S" in ch else None
     calc.channel = getattr(a, "channel", None) or ("H" if "H" in ch else next(c for c in ch if c != "S"))
@@ -185,7 +189,7 @@ def cmd_fit(a):
         print(f"  {part:8s} training residual of the L parts, rms (1e-3 of the data's unit): " + ", ".join(f"{c} {1e3 * v:.4f}" for c, v in zip(ch, resid[part])))
     print(f"fitted {n_coef} coefficients in {fit_s:.1f} s")
     info = dict(command="aj ham fit", data=os.path.abspath(a.data), n_train=len(train), structures=[os.path.basename(n) for n in names],
-                bonds_per_structure=a.bonds, seed=a.seed, prior=a.prior, ridge=a.ridge, fit_s=round(fit_s, 1), n_coef=n_coef,
+                bonds_per_structure=a.bonds, seed=a.seed, prior=a.prior, ridge=a.ridge, fit_s=round(fit_s, 1), n_coef=n_coef, nelectrons=a.nelectrons,
                 training_residual=resid)
     if a.validation:
         from .calculator import HamiltonianCalculator
@@ -332,7 +336,8 @@ def cmd_bands(a):
 def _add_spectrum_args(p, kpts):
     p.add_argument("--kpts", type=int, nargs=3, default=kpts, help=f"Gamma-centred k-point grid (default {' '.join(map(str, kpts))})")
     p.add_argument("--nelectrons", default=None,
-                   help="electrons the bands hold: a number per cell, or Z:n,Z:n per atom of each element (default: the atomic numbers)")
+                   help="electrons the bands hold: a number per cell, or Z:n,Z:n per atom of each element (default: what the model "
+                        "file records from its fit, else the atomic numbers)")
     p.add_argument("--width", type=float, default=0.1, help="smearing width in the model's energy unit (default 0.1)")
     p.add_argument("--smearing", choices=["fermi-dirac", "gaussian"], default="fermi-dirac")
     p.add_argument("--window", type=float, nargs=2, default=[-12.0, 5.0],

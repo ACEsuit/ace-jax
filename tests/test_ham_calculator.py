@@ -191,8 +191,9 @@ def test_aj_ham_fit_predict_bands(models, tmp_path, capsys):  # noqa: F811
     ref = cache.load(str(tmp_path / "b" / "2.npz"))[0]
     assert all(np.allclose(got.blocks[c][k], v, atol=1e-4) for c in ("H", "S") for k, v in ref.blocks[c].items())
     main(["ham", "bands", "--model", second, "--structure", str(tmp_path / "b"), "--index", "1", "--npoints", "12", "--out", str(tmp_path / "bands.npz"),
-          *spec])
+          *[x for x in spec if x not in ("--nelectrons", "40")]])        # the electron count: the one the fit recorded
     b = np.load(tmp_path / "bands.npz")
+    assert info["nelectrons"] == "40" and b["nelectrons"] == 40
     assert b["bands"].shape == b["bands_ref"].shape and len(b["bands"]) == 12 and b["grid_bands"].shape[0] == 4
     assert np.allclose(b["bands"], b["bands_ref"], atol=1e-3) and abs(b["fermi_level"] - b["fermi_level_ref"]) < 1e-3 and b["metric_band_rmse"] < 1e-3
     pytest.importorskip("matplotlib")

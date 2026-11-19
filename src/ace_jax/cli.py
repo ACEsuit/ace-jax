@@ -967,7 +967,8 @@ def _parser():
     hm = ev.add_argument_group("operator (Hamiltonian) models: --data is a directory of reference blocks, or an extxyz file")
     hm.add_argument("--kpts", type=int, nargs=3, default=[3, 3, 3], help="Gamma-centred k-point grid (default 3 3 3)")
     hm.add_argument("--nelectrons", default=None,
-                    help="electrons the bands hold: a number per cell, or Z:n,Z:n per atom of each element (default: the atomic numbers)")
+                    help="electrons the bands hold: a number per cell, or Z:n,Z:n per atom of each element (default: what the model "
+                         "file records from its fit, else the atomic numbers)")
     hm.add_argument("--width", type=float, default=0.1, help="smearing width in the model's energy unit (default 0.1)")
     hm.add_argument("--smearing", choices=["fermi-dirac", "gaussian"], default="fermi-dirac")
     hm.add_argument("--window", type=float, nargs=2, default=[-12.0, 5.0],

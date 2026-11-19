@@ -62,6 +62,10 @@ number for the cell, or `Z:n` pairs for the electrons of each atom of each
 element. The default is the atomic number, which is correct for an
 all-electron basis.
 
+The model file records the `--nelectrons` of the fit. `aj eval`,
+`aj ham predict` and `aj ham bands` use this value if you do not give the
+option.
+
 ### The basis
 
 The default basis is accurate for a metal with s, p and d orbitals. Change it
@@ -134,7 +138,7 @@ with `hamiltonians_pred.h5` and `overlaps_pred.h5`.
 
 ```bash
 aj ham bands --model gold.npz --structure validation/ --index 0 \
-    --nelectrons 79:11 --out bands.npz --plot bands.png
+    --out bands.npz --plot bands.png
 ```
 
 The command calculates the bands on the high-symmetry path of the cell and the
