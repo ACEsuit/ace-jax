@@ -352,6 +352,7 @@ COUPLED_SPLIT = 1.25                                  # a task above this x the 
 COUPLED_THREADS = None                                # the GPU pass's threads per block: None by size
 COUPLED_SHARED = 90 << 10                             # bytes of z, g and pieces of one row a GPU block may take
 COUPLED_GAIN = 0.8                                    # auto: coupled when its operations are below this x the DAG's
+RECOUPLE = True                                       # `coupled.build`: candidates of every pairing (o4d20: X 1,879 -> 1,274)
 ILP_SECONDS = 0.0                                     # `coupled.build`'s integer program (greedy alone: within ~5 %)
 _COUPLED = {}                                         # spec digest -> coupled.Plan or the NoPlan
 
@@ -372,12 +373,12 @@ def coupled_of(model):
     hh = hashlib.sha256()
     for a in (ar, ay, *specs):
         hh.update(str(a.shape).encode()); hh.update(np.ascontiguousarray(a).tobytes())
-    key = (hh.hexdigest(), ILP_SECONDS)
+    key = (hh.hexdigest(), ILP_SECONDS, RECOUPLE)
     if key not in _COUPLED:
         if len(_COUPLED) > 16:
             _COUPLED.clear()
         try:
-            _COUPLED[key] = coupled.build(ar, ay, specs, ilp_seconds=ILP_SECONDS)
+            _COUPLED[key] = coupled.build(ar, ay, specs, ilp_seconds=ILP_SECONDS, recouple=RECOUPLE)
         except coupled.NoPlan as e:
             _COUPLED[key] = e
     if isinstance(_COUPLED[key], coupled.NoPlan):

@@ -229,3 +229,38 @@ Agnesi transform, recursion, `env_ace1_poly1sr` / `env_poly1sr`), and `analytic_
 radials are analytic. Against the JAX model without a table, 64 rattled Si atoms, max |dF| in eV/A, table kernel
 then analytic: o3d8 9.9e-9, 1.6e-11; o4d12 2.4e-9, 2.0e-12; o4d16 3.3e-9, 1.0e-12. Job 2295415 repeats the
 ace-jax legs with this.
+
+## Recoupling over all pairings, and the second Sulis run (2026-11-19, night)
+
+Symmetrix's update of the day (ef51f70: o4d20 0.116 -> 0.102 µs/atom-step) re-expresses each multiset over the
+candidates of all three pairings and every L, choosing those that share X blocks. `coupled.build(recouple=True)`
+(now `ffi.RECOUPLE`, the default) does the same in the plan: per multiset the candidates of every pairing, ordered
+by the cost of the X blocks no other multiset reads yet, the independent ones kept, three sweeps. Exact as before.
+
+| model | X before, after | CG terms before, after |
+|---|---|---|
+| o4d12 | 103, 78 | 230, 220 |
+| o4d16 | 485, 378 | 1,419, 1,300 |
+| o4d20 | 1,879, 1,274 | 7,166, 5,832 |
+
+(Symmetrix's two o4d20 candidates: X 1,530 and 1,468.) C++ kernel, one thread, o4d20: product basis 14.8 ->
+12.4 µs/site, the kernel 33.7 -> 30.1 µs/atom (2.84x its DAG). A100 `ace_coupled`: o4d20 float64 4.74 -> 4.15 ms,
+float32 2.93 -> 2.42; o4d16 float64 1.32 -> 1.23.
+
+Sulis job 2295415 (one A100-PCIE-40GB, LAMMPS, 32,768 Si atoms; this tree before recoupling, with the analytic
+pair radial), µs/atom-step, float64 / float32, this tree then main:
+
+| model | this tree | main |
+|---|---|---|
+| o4d20 | 0.283 / 0.181 | 0.742 / 0.448 |
+| o4d16 | 0.1245 / 0.095 | 0.190 / 0.1325 |
+| o4d12 | 0.063 / 0.046 | 0.0665 / 0.0515 |
+| o3d8 | (gate) | 0.0423 / 0.0429 |
+
+- o3d8's gate still fails, now at max |dF| 1.28e-8 against its 1e-8: the gate's reference is the JAX model with
+  the radial table, which is itself 1e-8 from the model (main's bundle, on the same table, passes at 1.3e-9); the
+  analytic kernel is 1.6e-11 from the model. The gate needs the reference without a table for an analytic bundle.
+- LAMMPS steps cost more than the kernels: o4d16 is 4.1 ms a step where the three kernels are 2.9 ms, o4d12 2.1 ms,
+  and main's o3d8 1.39 ms where its kernels are 0.94. Symmetrix's whole o3d8 step is 0.54 ms. For the small models
+  the next gain is in the path around the kernel (lammps-jax's neighbour matrix and call, `ace_count` /
+  `ace_fill`), not in it.

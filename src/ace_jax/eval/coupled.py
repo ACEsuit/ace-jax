@@ -212,10 +212,15 @@ def _independent(B, tol=1e-9):
     return keep
 
 
-def build(ar, ay, specs, cost=PAIR_COST, ilp_seconds=0.0):
+def build(ar, ay, specs, cost=PAIR_COST, ilp_seconds=0.0, recouple=False):
     """The coupled `Plan` of the product basis `specs` (per order an (n_v, k) array of A indices, their rows the
     columns of ctilde in order) over A with radial column ar and harmonic ay.  Raises `NoPlan` for an order above
-    4, an A block that is not whole, or more than 2^15 A."""
+    4, an A block that is not whole, or more than 2^15 A.
+
+    recouple: a multiset's invariants are taken from the candidates of all its pairings and every L (more than
+    its invariants: 3,171 of o4d20's 3,258 order-4 multisets have a choice), the independent ones whose X blocks
+    others already read first, in three sweeps; else from the one pairing `choose_pairings` gives it.  The idea
+    and its first measurements are Symmetrix's (2026-11-19); o4d20: X 1,879 -> 1,274, CG terms 7,166 -> 5,832."""
     from scipy.sparse import coo_matrix
     specs = [np.asarray(s, np.int64) for s in specs]
     n_a = len(np.asarray(ar))
@@ -254,9 +259,9 @@ def build(ar, ay, specs, cost=PAIR_COST, ilp_seconds=0.0):
 
     def T(a, b, L):
         return real_cg(int(bl[a]), int(bl[b]), L)
-    lin, quad, pr, pc, pv = [], [], [], [], []
-    for it, (k, g, cols, keys) in enumerate(items):
-        cands = []                                     # (weight's place, monomial keys, values)
+    def candidates(k, g, pairings):
+        """(weight's place, monomial keys, values) of multiset g's invariants under each of `pairings`."""
+        cands = []
         if k == 1:
             if bl[g[0]] != 0:
                 raise NoPlan("a linear term with l > 0")
@@ -265,39 +270,74 @@ def build(ar, ay, specs, cost=PAIR_COST, ilp_seconds=0.0):
             if bl[g[0]] != bl[g[1]]:
                 raise NoPlan("an order-2 term of two l")
             cands.append((("quad", g[0], g[1]), _key(np.stack([M_[g[0]], M_[g[1]]], 1)), np.ones(len(M_[g[0]]))))
-        elif choice[it] is None:
-            raise NoPlan(f"no coupling for the blocks {g}")
         elif k == 3:
-            i, j, n = choice[it]
-            a, b = sorted((g[i], g[j]))
-            t = T(a, b, int(bl[g[n]]))
-            q = np.stack(np.broadcast_arrays(M_[a][:, None, None], M_[b][None, :, None], M_[g[n]][None, None, :]), -1)
-            cands.append((("x", (a, b, int(bl[g[n]])), g[n]), _key(q).ravel(), t.ravel()))
+            for i, j, n in pairings:
+                a, b = sorted((g[i], g[j]))
+                t = T(a, b, int(bl[g[n]]))
+                q = np.stack(np.broadcast_arrays(M_[a][:, None, None], M_[b][None, :, None],
+                                                 M_[g[n]][None, None, :]), -1)
+                cands.append((("x", (a, b, int(bl[g[n]])), g[n]), _key(q).ravel(), t.ravel()))
         else:
-            (i, j), (m, n) = choice[it]
-            p, q = tuple(sorted((g[i], g[j]))), tuple(sorted((g[m], g[n])))
-            if q < p:
-                p, q = q, p
-            idx = _key(np.stack(np.broadcast_arrays(M_[p[0]][:, None, None, None], M_[p[1]][None, :, None, None],
-                                                    M_[q[0]][None, None, :, None], M_[q[1]][None, None, None, :]),
-                                -1)).ravel()
-            lo = max(abs(bl[p[0]] - bl[p[1]]), abs(bl[q[0]] - bl[q[1]]))
-            top = min(bl[p[0]] + bl[p[1]], bl[q[0]] + bl[q[1]])
-            for L in range(int(lo), int(top) + 1):
-                if (p[0] == p[1] or q[0] == q[1]) and L % 2:
-                    continue
-                cands.append((("xx", p + (L,), q + (L,)), idx,
-                              np.einsum("ijM,knM->ijkn", T(*p, L), T(*q, L)).ravel()))
+            for (i, j), (m, n) in pairings:
+                p, q = tuple(sorted((g[i], g[j]))), tuple(sorted((g[m], g[n])))
+                if q < p:
+                    p, q = q, p
+                idx = _key(np.stack(np.broadcast_arrays(
+                    M_[p[0]][:, None, None, None], M_[p[1]][None, :, None, None],
+                    M_[q[0]][None, None, :, None], M_[q[1]][None, None, None, :]), -1)).ravel()
+                lo = max(abs(bl[p[0]] - bl[p[1]]), abs(bl[q[0]] - bl[q[1]]))
+                top = min(bl[p[0]] + bl[p[1]], bl[q[0]] + bl[q[1]])
+                for L in range(int(lo), int(top) + 1):
+                    if (p[0] == p[1] or q[0] == q[1]) and L % 2:
+                        continue
+                    cands.append((("xx", p + (L,), q + (L,)), idx,
+                                  np.einsum("ijM,knM->ijkn", T(*p, L), T(*q, L)).ravel()))
+        return cands
+
+    def needs(where):                                  # the X blocks a candidate reads
+        return [where[1]] if where[0] == "x" else [where[1], where[2]] if where[0] == "xx" else []
+
+    # Per multiset: its candidates (with `recouple`, of every pairing, more than its invariants: the choice
+    # among them is what shares X blocks), their expansions B over its monomials, and the independent ones kept.
+    work = []
+    for it, (k, g, cols, keys) in enumerate(items):
+        if k >= 3 and choice[it] is None:
+            raise NoPlan(f"no coupling for the blocks {g}")
+        pairings = [lab for lab, _ in _options(g, bl)] if recouple and k >= 3 else [choice.get(it)]
+        cands = candidates(k, g, pairings)
         tk, tinv = np.unique(keys, return_inverse=True)
         rows = np.unique(np.concatenate([tk] + [c[1] for c in cands]))
         B = np.zeros((len(rows), len(cands)))
         for c, (_, ck, cv) in enumerate(cands):
             np.add.at(B[:, c], np.searchsorted(rows, ck), cv)
         B[np.abs(B) < 1e-13] = 0.0
-        keep = _independent(B)
+        work.append([cands, B, np.searchsorted(rows, tk), tinv, None])
+    wx, wc = cost
+    xcost = {}
+
+    def cx(x):
+        if x not in xcost:
+            xcost[x] = wx * (2 * x[2] + 1) + wc * _nnz(int(bl[x[0]]), int(bl[x[1]]), x[2])
+        return xcost[x]
+    use = {}
+    for _ in range(3 if recouple else 1):              # each multiset in turn, given what the others read
+        for wk in work:
+            cands, B = wk[0], wk[1]
+            if wk[4] is not None:
+                for c in wk[4]:
+                    for x in needs(cands[c][0]):
+                        use[x] -= 1
+            order = sorted(range(len(cands)), key=lambda c: sum(cx(x) for x in set(needs(cands[c][0]))
+                                                                 if not use.get(x)))
+            wk[4] = [order[j] for j in _independent(B[:, order])]
+            for c in wk[4]:
+                for x in needs(cands[c][0]):
+                    use[x] = use.get(x, 0) + 1
+    lin, quad, pr, pc, pv = [], [], [], [], []
+    for (k, g, cols, keys), (cands, B, trow, tinv, keep) in zip(items, work):
         if not keep:
             raise NoPlan(f"no invariant for the blocks {g}")
-        pinv = np.linalg.pinv(B[:, keep])[:, np.searchsorted(rows, tk)]   # (kept, target monomials)
+        pinv = np.linalg.pinv(B[:, keep])[:, trow]         # (kept, target monomials)
         for c, row in zip(keep, pinv):
             where = cands[c][0]
             if where[0] == "lin":
