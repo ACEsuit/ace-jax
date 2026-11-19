@@ -14,6 +14,8 @@ needed**, and nothing is downloaded at runtime.
 - `ACEJAX_COUPLING_LIB=<bundle>/lib/libetcouple.<so|dylib>` points the package
   at a locally built library (development).
 
-API: `couple_raw(mb_spec, Rnl_spec, Ylm_spec) -> RawCoupling` (0-based index
+API: `couple_raw(mb_spec, Rnl_spec, Ylm_spec) -> RawCoupling` (the invariant, L = 0, coupling) and
+`couple_equivariant_raw(L, parity, mb_spec, Rnl_spec, Ylm_spec) -> RawEquivariantCoupling`
+(L = 0 to 6, parity +1 or -1; from 0.3.0) (0-based index
 arrays; see ace-jax `docs/dev/coupling-etshim-spec.md`). Licences of the bundled
 components: `THIRD_PARTY_NOTICES.md`.

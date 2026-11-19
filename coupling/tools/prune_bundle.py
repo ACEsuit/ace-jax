@@ -1,5 +1,6 @@
 """Copy a libetcouple bundle keeping only the shared libraries the runtime
-actually loads (traced while running every case in cases.json) plus all
+actually loads (traced while running every case in cases.json and
+cases_equivariant.json) plus all
 non-library files.  Symlinked names that were loaded become regular files
 (wheels cannot carry symlinks).
     python coupling/tools/prune_bundle.py coupling/build/bundle coupling/build/pruned"""
@@ -32,11 +33,18 @@ sys.path.insert(0, sys.argv[1])
 import ace_jax_coupling as ajc
 for c in json.load(open(sys.argv[2])).values():
     ajc.couple_raw(c["mb"], c["R"], c["Y"])
+for c in json.load(open(sys.argv[2].replace("cases.json", "cases_equivariant.json"))).values():
+    for L in range(c["Lmax"] + 1):                 # ABI v2: every L of the static table, both parities
+        for parity in (1, -1):
+            try:
+                ajc.couple_equivariant_raw(L, parity, c["mb"], c["R"], c["Y"])
+            except ValueError:
+                pass
 print("traced-ok")
 """, """
 import ctypes, os, sys
 h = ctypes.CDLL(os.environ["ACEJAX_COUPLING_LIB"], mode=os.RTLD_NOW | os.RTLD_LOCAL)
-assert h.etc_abi_version() == 1
+assert h.etc_abi_version() == 2
 print("traced-ok")
 """]
 
@@ -58,6 +66,13 @@ import ace_jax_coupling as ajc
 from ace_jax_coupling import _loader
 for c in json.load(open(sys.argv[2])).values():
     ajc.couple_raw(c["mb"], c["R"], c["Y"])
+for c in json.load(open(sys.argv[2].replace("cases.json", "cases_equivariant.json"))).values():
+    for L in range(c["Lmax"] + 1):                 # ABI v2: every L of the static table, both parities
+        for parity in (1, -1):
+            try:
+                ajc.couple_equivariant_raw(L, parity, c["mb"], c["R"], c["Y"])
+            except ValueError:
+                pass
 for p in _loader._loaded_images(): print("MOD", p)
 print("traced-ok")
 """, """
@@ -67,7 +82,7 @@ _l = importlib.util.module_from_spec(spec); spec.loader.exec_module(_l)
 lib = pathlib.Path(os.environ["ACEJAX_COUPLING_LIB"])
 _l._win_dll_dirs(lib.parent.parent)                 # exactly as the package loads it
 h = ctypes.CDLL(str(lib))
-assert h.etc_abi_version() == 1
+assert h.etc_abi_version() == 2
 for p in _l._loaded_images(): print("MOD", p)
 print("traced-ok")
 """]

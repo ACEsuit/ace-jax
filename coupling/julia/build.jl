@@ -47,7 +47,8 @@ if Sys.isapple()
 end
 
 src = TOML.parsefile(joinpath(LIBPROJ, "Project.toml"))["sources"]["EquivariantTensors"]
-info = Dict("abi" => 1, "max_order" => 8, "et_repo" => src["url"], "et_rev" => src["rev"],
+info = Dict("abi" => 2, "max_order" => 8, "max_L" => 6, "et_repo" => get(src, "url", get(src, "path", "")),
+            "et_rev" => get(src, "rev", "local"),      # a [sources] path is a development build
             "julia" => string(VERSION), "juliac" => string(pkgversion(JuliaC)),
             "platform" => "$(Sys.KERNEL)-$(Sys.ARCH)", "cpu_target" => "generic")
 open(joinpath(bundle, "build_info.json"), "w") do io

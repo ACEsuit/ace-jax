@@ -37,5 +37,33 @@ def main():
     OUT.write_text(json.dumps(cases, separators=(",", ":")))
 
 
+def _all_bodies(maxn, maxl, order):
+    """Sorted bodies of (n, l) channels up to `order`, of either sum(l) parity."""
+    ch = [(n, l) for l in range(maxl + 1) for n in range(1, maxn + 1)]
+    out = []
+
+    def rec(bb, s):
+        if bb:
+            out.append(list(bb))
+        if len(bb) == order:
+            return
+        for i in range(s, len(ch)):
+            rec(bb + [ch[i]], i)
+    rec([], 0)
+    return out, ch, ylm_spec(maxl)
+
+
+def equivariant():
+    """cases_equivariant.json: specs for etc_couple_equivariant, each with the
+    largest L its reference covers.  n1l2_o4 has degenerate blocks."""
+    cases = {}
+    for name, (maxn, maxl, order, Lmax) in {"n2l2_o3": (2, 2, 3, 6), "n1l2_o4": (1, 2, 4, 4),
+                                            "n1l3_o2": (1, 3, 2, 6)}.items():
+        cases[name] = {**_case(*_all_bodies(maxn, maxl, order)), "Lmax": Lmax}
+        print(f"{name:18s} n_mb={len(cases[name]['mb']):5d}")
+    OUT.with_name("cases_equivariant.json").write_text(json.dumps(cases, separators=(",", ":")))
+
+
 if __name__ == "__main__":
+    equivariant()
     main()

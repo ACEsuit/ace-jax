@@ -111,7 +111,7 @@ def _caps(caps, order):
     return nm, lm
 
 
-def build_spec(NZ, order, totaldegree, wL=1.5, tol=1e-9, caps=None, keep=None):
+def build_spec(NZ, order, totaldegree, wL=1.5, tol=1e-9, caps=None, keep=None, admit=None):
     """From-scratch reproduction of ACEpotentials' ace1_model basis selection
     (Models.oneparticle_spec + sparse_AA_spec, src/models/{smoothness_priors,utils}.jl):
     the many-body mb_spec (list of (n,l) bodies), the one-particle Rnl_spec (n,l),
@@ -133,7 +133,12 @@ def build_spec(NZ, order, totaldegree, wL=1.5, tol=1e-9, caps=None, keep=None):
     afterwards (a body is grown from its own elements, and dropping A entries leaves the remaining
     levels sorted, so the pruning is unchanged), but the search never enters the rejected elements.
     build_embedding_spec's z' = 1 channel keeps 1/S of the radial indices, so this cuts the search
-    for order-nu bodies by ~S^nu.  Rnl_spec and Ylm_spec ignore it."""
+    for order-nu bodies by ~S^nu.  Rnl_spec and Ylm_spec ignore it.
+
+    admit: optional predicate on a body (a tuple of (n, l, m)), replacing the test that it couples
+    to an L = 0 invariant (`rpe_admissible` and `_couples_to_zero`).  Equivariant bases (L > 0, either
+    parity: `coupling.couple_equivariant`) pass `lambda bb: True` and let the coupling find which
+    bodies carry a function of each symmetry."""
     import math
     md = totaldegree
     maxn1 = math.ceil(md * NZ)                                    # oneparticle_spec bounds
@@ -158,8 +163,10 @@ def build_spec(NZ, order, totaldegree, wL=1.5, tol=1e-9, caps=None, keep=None):
         return cp is None or any(capped(bb, nu) for nu in range(len(bb), order + 1))
 
     def emit(bb):
-        if len(bb) == 0 or not capped(bb, len(bb)) or not rpe_admissible(bb) \
-                or not _couples_to_zero([b[1] for b in bb]):
+        if len(bb) == 0 or not capped(bb, len(bb)):
+            return
+        if not (admit(tuple(bb)) if admit is not None
+                else rpe_admissible(bb) and _couples_to_zero([b[1] for b in bb])):
             return
         nl = tuple((b[0], b[1]) for b in bb)
         if nl not in seen:
@@ -198,7 +205,7 @@ class EmbeddingSpec(NamedTuple):
     kidx: np.ndarray          # radial i -> channel k
 
 
-def build_embedding_spec(S, order, totaldegree, widths, wL=1.5, maxl=None, block_rule="ace1"):
+def build_embedding_spec(S, order, totaldegree, widths, wL=1.5, maxl=None, block_rule="ace1", admit=None):
     """The basis spec of `ace_embedding_model` for S elements.
 
     block_rule="ace1" (default) admits the (n', l) blocks the categorical
@@ -209,14 +216,14 @@ def build_embedding_spec(S, order, totaldegree, widths, wL=1.5, maxl=None, block
     folded into the radial index, n = (n'-1) d + k, and the many-body spec is
     channel-diagonal: every factor of a body shares one k, order nu drawing on
     its own d_nu = widths[nu-1] channels.  Bodies are grouped by order (ET
-    mis-couples an ungrouped spec)."""
+    mis-couples an ungrouped spec).  admit: `build_spec`'s (equivariant bases)."""
     if block_rule not in ("ace1", "symmetric"):
         raise ValueError(f"block_rule = {block_rule!r}; expected 'ace1' or 'symmetric'")
     if len(widths) != order:
         raise ValueError(f"need one width per correlation order: {len(widths)} != {order}")
     NZf = S if block_rule == "ace1" else 1
     ok = lambda n, l: (n - 1) % NZf == 0 and (maxl is None or l <= maxl)
-    mb_f, Rnl_f, _ = build_spec(NZf, order, totaldegree, wL, keep=ok)  # z' = 1 bodies only: ~S^nu less search
+    mb_f, Rnl_f, _ = build_spec(NZf, order, totaldegree, wL, keep=ok, admit=admit)  # z' = 1 bodies only: ~S^nu less search
     unfold = lambda n: (n - 1) // NZf + 1
     r1 = [(unfold(n), l) for n, l in Rnl_f if ok(n, l)]                 # (l, n') order
     mb1 = [[(unfold(n), l) for n, l in b] for b in mb_f]

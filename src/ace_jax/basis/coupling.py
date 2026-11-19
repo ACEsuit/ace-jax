@@ -7,6 +7,11 @@ EquivariantTensors (no Julia at runtime), a core dependency on supported
 platforms; the import is lazy, so a refit or a cache hit never loads it and an
 unsupported platform raises `BasisUnavailable` only when a new shape is built.
 
+`couple_equivariant(L, parity, ...)` is the same for an L-vector of reflection
+parity (-1)^sum(l) (the library's ABI v2), and `couple_equivariant_set` puts
+several (L, parity) on one shared A list and AA evaluation order, which is what
+a matrix-valued model evaluates.
+
 `couple_cached(...)` wraps `couple` with a per-shape disk cache: the coupling
 depends only on the three integer specs, so a new shape runs the shim once and
 every later authoring of the same shape reconstructs the `Coupling` from the
@@ -72,7 +77,7 @@ def subspace_residual(A, B):
     return float(np.abs(Qa @ Qa.T - Qb @ Qb.T).max())
 
 
-COUPLING_LIB_VERSION = "0.2.0"   # == the core dependency pin (test_backend_id_matches_dependency_pin)
+COUPLING_LIB_VERSION = "0.3.0"   # == the core dependency pin (test_backend_id_matches_dependency_pin)
 
 
 def backend_id():
@@ -175,6 +180,141 @@ def align_columns(cpl, Rnl_spec, Ylm_spec):
     return cpl._replace(A2B=A2B, aa_sig=tuple(cpl.aa_sig[j] for j in perm))
 
 
+# --------------------------------------------------------- equivariant (L > 0)
+
+class A2B3(NamedTuple):
+    """Sparse (n_B, 2L+1, n_AA) coupling as COO: entry k is the m-th component
+    (`ms[k]`, the index of Y_L's m = ms[k] - L) of B function `rows[k]` on AA
+    product `cols[k]`.  Sparse because a dense one is 2L+1 times an already
+    large matrix; `dense()` is for tests and small bases."""
+
+    shape: tuple
+    rows: object
+    ms: object
+    cols: object
+    vals: object
+
+    def dense(self):
+        import numpy as np
+        out = np.zeros(self.shape, np.float64)
+        out[self.rows, self.ms, self.cols] = self.vals
+        return out
+
+
+class EquivariantCoupling(NamedTuple):
+    """`Coupling` for an L-vector of parity (-1)^sum(l): `A2B` is an `A2B3`, the
+    other fields as in `Coupling`.  Empty (n_B = 0, no columns) when the basis
+    has no function of that symmetry."""
+
+    L: int
+    parity: int
+    A2B: A2B3
+    aa_sig: tuple
+    aspec: tuple
+    aa_specs: tuple
+    nnll_spec: tuple
+
+
+class EquivariantSet(NamedTuple):
+    """Several (L, parity) couplings on ONE A list (`aspec`) and one AA
+    evaluation order (`aa_specs`, `aa_sig`): `A2B[(L, parity)]` is an `A2B3`
+    whose columns index that shared order, `nnll[(L, parity)]` its per-row
+    bodies.  A model then forms A and AA once for all L."""
+
+    aspec: tuple
+    aa_specs: tuple
+    aa_sig: tuple
+    A2B: dict
+    nnll: dict
+
+
+def _empty_equivariant(L, parity):
+    import numpy as np
+    z = np.zeros(0, np.int64)
+    return EquivariantCoupling(L, parity, A2B3((0, 2 * L + 1, 0), z, z, z, np.zeros(0, np.float64)), (), (), (), ())
+
+
+def _sig_key(s):
+    return tuple(sorted(tuple(int(v) for v in t) for t in s))
+
+
+def couple_equivariant(L, parity, mb_spec, Rnl_spec, Ylm_spec):
+    """The (L, parity) real-basis coupling of `mb_spec`: B_m = sum_k A2B[b, m, k] AA_k
+    transforms as the real Y_L (component m is Y_L's m - L) and takes the factor
+    `parity` = (-1)^sum(l) under inversion.  (L, (-1)^L) are the true tensors, the
+    other parity the pseudo-tensors.  Columns are in the AA evaluation order of
+    this call's own `aa_specs`; use `couple_equivariant_set` for a shared one."""
+    import numpy as np
+    lib = _lib()
+    if not hasattr(lib, "couple_equivariant_raw"):
+        raise BasisUnavailable(f"ace-jax-coupling {lib.__version__} has no equivariant couplings (needs >= 0.3.0)")
+    try:
+        raw = lib.couple_equivariant_raw(L, parity, mb_spec, Rnl_spec, Ylm_spec)
+    except ValueError as e:
+        if "NO_INVARIANTS" in str(e):
+            return _empty_equivariant(L, parity)
+        raise
+    so = raw.aa_sig_off
+    aa_sig = tuple(tuple((int(n), int(l), int(m)) for n, l, m in raw.aa_sig[so[k]:so[k + 1]])
+                   for k in range(len(so) - 1))
+    aspec = tuple((int(r), int(y)) for r, y in raw.aspec)
+    ao = raw.aa_off
+    rows = [raw.aa_idx[ao[k]:ao[k + 1]] for k in range(len(ao) - 1)]
+    aa_specs = tuple(np.asarray([r for r in rows if len(r) == k], np.int64).reshape(-1, k)
+                     for k in range(1, max(len(r) for r in rows) + 1))
+    no = raw.nnll_off
+    nnll_spec = tuple(tuple((int(n), int(l)) for n, l in raw.nnll[no[i]:no[i + 1]])
+                      for i in range(len(no) - 1))
+    # library columns are in ET's 𝔸spec order; move them to the evaluation order (see align_columns)
+    col = {_sig_key(sg): j for j, sg in enumerate(aa_sig)}
+    ev = [_sig_key((*Rnl_spec[aspec[a][0]], Ylm_spec[aspec[a][1]][1]) for a in r) for g in aa_specs for r in g]
+    if len(col) != len(aa_sig) or set(ev) != set(col) or len(ev) != len(col):
+        raise ValueError("coupling: the AA evaluation columns (aa_specs) and the A2B column "
+                         "signatures (aa_sig) are not the same set of products")
+    new_of_old = np.empty(len(ev), np.int64)
+    new_of_old[[col[sg] for sg in ev]] = np.arange(len(ev))
+    a2b = A2B3((raw.A2B_shape[0], 2 * L + 1, raw.A2B_shape[1]), raw.A2B_rows, raw.A2B_m,
+               new_of_old[raw.A2B_cols], raw.A2B_vals)
+    return EquivariantCoupling(L, parity, a2b, tuple(aa_sig[col[sg]] for sg in ev), aspec, aa_specs, nnll_spec)
+
+
+def couple_equivariant_set(lps, mb_spec, Rnl_spec, Ylm_spec, cache_dir=None):
+    """`EquivariantSet` of the (L, parity) pairs `lps` for one `mb_spec`.
+
+    Each pair's coupling has its own A functions and AA products (which (n, l, m)
+    occur depends on L and parity).  The set takes the union, by (n, l, m)
+    identity: A sorted by (Rnl index, Ylm index); AA grouped by order, in
+    first-seen order over `lps` within an order."""
+    import numpy as np
+    parts = {(int(L), int(p)): couple_equivariant_cached(L, p, mb_spec, Rnl_spec, Ylm_spec, cache_dir=cache_dir)
+             for L, p in lps}
+    aspec = tuple(sorted({a for c in parts.values() for a in c.aspec}))
+    a_of = {a: i for i, a in enumerate(aspec)}
+    groups, where = {}, {}                           # order -> [A-index rows]; row -> (order, position)
+    for c in parts.values():
+        for g in c.aa_specs:
+            for r in np.asarray(g):
+                row = tuple(sorted(a_of[c.aspec[a]] for a in r))
+                if row not in where:
+                    rows = groups.setdefault(len(row), [])
+                    where[row] = (len(row), len(rows))
+                    rows.append(row)
+    orders = range(1, max(groups, default=0) + 1)
+    start = dict(zip(orders, np.cumsum([0] + [len(groups.get(k, ())) for k in orders])[:-1]))
+    aa_specs = tuple(np.asarray(groups.get(k, []), np.int64).reshape(-1, k) for k in orders)
+    n_aa = sum(len(g) for g in aa_specs)
+    aa_sig = tuple(tuple((*Rnl_spec[aspec[a][0]], Ylm_spec[aspec[a][1]][1]) for a in r) for g in aa_specs for r in g)
+    A2B, nnll = {}, {}
+    for lp, c in parts.items():
+        own = [tuple(sorted(a_of[c.aspec[a]] for a in r)) for g in c.aa_specs for r in np.asarray(g)]
+        to = np.asarray([start[where[r][0]] + where[r][1] for r in own], np.int64)
+        m = c.A2B
+        A2B[lp] = A2B3((m.shape[0], m.shape[1], n_aa), m.rows, m.ms,
+                       to[m.cols] if len(to) else np.zeros(0, np.int64), m.vals)
+        nnll[lp] = c.nnll_spec
+    return EquivariantSet(aspec, aa_specs, aa_sig, A2B, nnll)
+
+
 # --------------------------------------------------------------------- cache
 
 _CACHE_SCHEMA = 1   # also hashed into coupling_key: bumping it moves every key; the "backend" stamp invalidates entries
@@ -188,6 +328,19 @@ def coupling_key(mb_spec, Rnl_spec, Ylm_spec):
     key order inside the blob."""
     blob = json.dumps(
         {"schema": _CACHE_SCHEMA,
+         "mb": [[list(b) for b in bb] for bb in mb_spec],
+         "rnl": [list(s) for s in Rnl_spec],
+         "ylm": [list(s) for s in Ylm_spec]},
+        separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(blob.encode()).hexdigest()
+
+
+def equivariant_key(L, parity, mb_spec, Rnl_spec, Ylm_spec):
+    """`coupling_key` for an (L, parity) coupling.  The extra fields make it
+    differ from every `coupling_key`, (0, +1) included, so an L = 0 entry of
+    one layout is never read as the other."""
+    blob = json.dumps(
+        {"schema": _CACHE_SCHEMA, "kind": "equivariant", "L": int(L), "parity": int(parity),
          "mb": [[list(b) for b in bb] for bb in mb_spec],
          "rnl": [list(s) for s in Rnl_spec],
          "ylm": [list(s) for s in Ylm_spec]},
@@ -211,25 +364,9 @@ def _entry_path(cache_dir, key):
     return pathlib.Path(cache_dir) / f"cpl-{key[:16]}.npz"
 
 
-def _write_entry(path, cpl, key, mb_spec, Rnl_spec, Ylm_spec):
-    """Atomically write one cache entry (tmp + os.replace, same dir)."""
+def _publish(path, entry):
+    """Atomically write the arrays `entry` as the npz `path` (tmp + os.replace, same dir)."""
     import numpy as np
-    entry = {
-        "A2B": np.asarray(cpl.A2B, np.float64),
-        **{f"aa_spec_{k+1}": np.asarray(g, np.int64)
-           for k, g in enumerate(cpl.aa_specs)},
-        "meta_json": np.frombuffer(json.dumps({
-            "schema": _CACHE_SCHEMA,
-            "key": key,
-            "mb": [[list(b) for b in bb] for bb in mb_spec],
-            "rnl": [list(s) for s in Rnl_spec],
-            "ylm": [list(s) for s in Ylm_spec],
-            "aspec": [[r, y] for r, y in cpl.aspec],
-            "aa_sig": [[list(t) for t in sig] for sig in cpl.aa_sig],
-            "nnll_spec": [[list(b) for b in bb] for bb in cpl.nnll_spec],
-            "backend": backend_id(),
-        }).encode(), np.uint8),
-    }
     path.parent.mkdir(parents=True, exist_ok=True)
     # unique tmp per writer: two processes missing the cache on the same key
     # at once must not truncate each other's half-written file
@@ -247,6 +384,28 @@ def _write_entry(path, cpl, key, mb_spec, Rnl_spec, Ylm_spec):
         os.replace(tmp, path)
     finally:
         pathlib.Path(tmp).unlink(missing_ok=True)
+
+
+def _write_entry(path, cpl, key, mb_spec, Rnl_spec, Ylm_spec):
+    """Atomically write one cache entry."""
+    import numpy as np
+    entry = {
+        "A2B": np.asarray(cpl.A2B, np.float64),
+        **{f"aa_spec_{k+1}": np.asarray(g, np.int64)
+           for k, g in enumerate(cpl.aa_specs)},
+        "meta_json": np.frombuffer(json.dumps({
+            "schema": _CACHE_SCHEMA,
+            "key": key,
+            "mb": [[list(b) for b in bb] for bb in mb_spec],
+            "rnl": [list(s) for s in Rnl_spec],
+            "ylm": [list(s) for s in Ylm_spec],
+            "aspec": [[r, y] for r, y in cpl.aspec],
+            "aa_sig": [[list(t) for t in sig] for sig in cpl.aa_sig],
+            "nnll_spec": [[list(b) for b in bb] for bb in cpl.nnll_spec],
+            "backend": backend_id(),
+        }).encode(), np.uint8),
+    }
+    _publish(path, entry)
 
 
 def _read_entry(path, key):
@@ -307,3 +466,65 @@ def couple_cached(mb_spec, Rnl_spec, Ylm_spec, cache_dir=None):
     except OSError:
         pass
     return cpl
+
+
+def _write_equivariant(path, c, key):
+    import numpy as np
+    m = c.A2B
+    _publish(path, {
+        "rows": np.asarray(m.rows, np.int64), "ms": np.asarray(m.ms, np.int64),
+        "cols": np.asarray(m.cols, np.int64), "vals": np.asarray(m.vals, np.float64),
+        **{f"aa_spec_{k+1}": np.asarray(g, np.int64) for k, g in enumerate(c.aa_specs)},
+        "meta_json": np.frombuffer(json.dumps({
+            "schema": _CACHE_SCHEMA, "key": key, "L": c.L, "parity": c.parity, "shape": list(m.shape),
+            "aspec": [[r, y] for r, y in c.aspec],
+            "aa_sig": [[list(t) for t in sig] for sig in c.aa_sig],
+            "nnll_spec": [[list(b) for b in bb] for bb in c.nnll_spec],
+            "backend": backend_id(),
+        }).encode(), np.uint8)})
+
+
+def _read_equivariant(path, key, L, parity):
+    """An `EquivariantCoupling` from a cache file, or None on any mismatch or damage (a miss)."""
+    import numpy as np
+    try:
+        z = np.load(path)
+        meta = json.loads(bytes(z["meta_json"]).decode())
+        if not (meta.get("schema") == _CACHE_SCHEMA and meta.get("key") == key and meta.get("backend") == backend_id()
+                and meta.get("L") == L and meta.get("parity") == parity):
+            return None
+        n_orders = sum(1 for f in z.files if f.startswith("aa_spec_"))
+        return EquivariantCoupling(
+            L, parity,
+            A2B3(tuple(int(v) for v in meta["shape"]), np.asarray(z["rows"], np.int64), np.asarray(z["ms"], np.int64),
+                 np.asarray(z["cols"], np.int64), np.asarray(z["vals"], np.float64)),
+            aa_sig=tuple(tuple(tuple(int(v) for v in t) for t in sig) for sig in meta["aa_sig"]),
+            aspec=tuple((int(r), int(y)) for r, y in meta["aspec"]),
+            aa_specs=tuple(np.asarray(z[f"aa_spec_{k+1}"], np.int64) for k in range(n_orders)),
+            nnll_spec=tuple(tuple((int(b[0]), int(b[1])) for b in bb) for bb in meta["nnll_spec"]))
+    except Exception as e:                                  # as _read_entry: any unreadable entry is a miss
+        warnings.warn(f"coupling cache: unreadable entry {path.name} "  # noqa: B028
+                      f"({type(e).__name__}: {e}); recomputing")
+        return None
+
+
+def couple_equivariant_cached(L, parity, mb_spec, Rnl_spec, Ylm_spec, cache_dir=None):
+    """`couple_equivariant` with the per-shape disk cache of `couple_cached`
+    (files `cple-<key>.npz`, keyed on L and parity as well as the specs)."""
+    L, parity = int(L), int(parity)
+    if cache_dir is None:
+        cache_dir = default_cache_dir()
+    if cache_dir is None or (isinstance(cache_dir, str) and cache_dir.lower() == "none"):
+        return couple_equivariant(L, parity, mb_spec, Rnl_spec, Ylm_spec)
+    key = equivariant_key(L, parity, mb_spec, Rnl_spec, Ylm_spec)
+    path = pathlib.Path(cache_dir) / f"cple-{key[:16]}.npz"
+    if path.exists():
+        c = _read_equivariant(path, key, L, parity)
+        if c is not None:
+            return c
+    c = couple_equivariant(L, parity, mb_spec, Rnl_spec, Ylm_spec)
+    try:
+        _write_equivariant(path, c, key)
+    except OSError:
+        pass
+    return c
