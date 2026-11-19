@@ -206,8 +206,8 @@ def _env_side(e_rij, e_live, e_ch, rvec, mask, r_env, rmax, n_env, l_env, env_co
         partner = jnp.sum((d[None, :, :] - r[:, None, :]) ** 2, axis=-1) < 1e-8                # (K, Ke)
         w = jnp.where(partner, 0.0, e[None, :]) * m[:, None]
         x = d[None, :, :] - 0.5 * r[:, None, :]                         # about the midpoint
-        R = _radial(jnp.clip(jnp.sqrt(jnp.sum(x * x, axis=-1)) / rmax, 0.0, 1.0), n_env)
-        Yx = real_spherical_harmonics(x, max(l_env, 1))[..., :nlm] * B.core(jnp, jnp.sum(x * x, axis=-1), l_env, env_core)
+        t, Yx = B.env_point(jnp, x, rmax, l_env, env_core)
+        R = _radial(jnp.clip(t, 0.0, 1.0), n_env)
         return jnp.einsum("Ken,ec,Key->Kcny", w[..., None] * R, ch, Yx).reshape(r.shape[0], -1, nlm)
 
     return jax.lax.map(one, (e_rij, e_live, e_ch, rvec, mask))

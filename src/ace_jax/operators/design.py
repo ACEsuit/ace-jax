@@ -26,10 +26,9 @@ def _env_half(basis, emb, e_rij, e_count, e_z, atoms, r):
     live = (jnp.arange(K)[None, :] < e_count[atoms][:, None]) & ~partner
     w = jnp.where(live & (dist < basis.r_env), (1 - jnp.clip(dist / basis.r_env, 0, 1) ** 2) ** 2, 0.0)
     x = d - 0.5 * r[:, None, :]
-    R = _radial(jnp.clip(jnp.sqrt(jnp.sum(x * x, axis=-1)) / (basis.r_env + 0.5 * basis.rcut_bond), 0.0, 1.0), basis.n_env)
+    t, Y = B.env_point(jnp, x, basis.r_env + 0.5 * basis.rcut_bond, basis.l_env, basis.env_core)
+    R = _radial(jnp.clip(t, 0.0, 1.0), basis.n_env)
     nlm = (basis.l_env + 1) ** 2
-    Y = real_spherical_harmonics(x.reshape(-1, 3), max(basis.l_env, 1)).reshape(*x.shape[:2], -1)[..., :nlm]
-    Y = Y * B.core(jnp, jnp.sum(x * x, axis=-1), basis.l_env, basis.env_core)
     return jnp.einsum("ek,ekc,ekn,eky->ecny", w, emb[e_z[atoms]], R, Y).reshape(r.shape[0], -1, nlm)
 
 
