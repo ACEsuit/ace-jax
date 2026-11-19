@@ -93,3 +93,24 @@ def test_one_model_and_refusals(tmp_path):
     np.savez(tmp_path / "p.npz", meta_json=np.frombuffer(json.dumps({"schema_version": 1}).encode(), np.uint8))
     with pytest.raises(ValueError, match="not an operator model"):
         io.load(tmp_path / "p.npz")
+
+
+def test_make_room_drops_compiled_programs_near_the_map_limit(tmp_path, monkeypatch):
+    """`operators.maps.make_room`: nothing while enough memory regions are left, `jax.clear_caches`
+    when fewer than asked for are (the kernel's vm.max_map_count; XLA's CPU runtime maps a few per
+    compiled kernel), and nothing where the counts cannot be read."""
+    from ace_jax.operators import maps
+    limit, used = tmp_path / "limit", tmp_path / "maps"
+    limit.write_text("1000\n"); used.write_text("x\n" * 300)
+    monkeypatch.setattr(maps, "LIMIT_FILE", str(limit)); monkeypatch.setattr(maps, "MAPS_FILE", str(used))
+    cleared = []
+    monkeypatch.setattr(maps.jax, "clear_caches", lambda: cleared.append(1))
+    monkeypatch.setattr(maps.jax, "default_backend", lambda: "cpu")
+    assert maps.counts() == (300, 1000)
+    assert not maps.make_room(600) and not cleared            # 700 left
+    assert maps.make_room(800) and cleared == [1]             # fewer than 800 left
+    monkeypatch.setattr(maps, "MAPS_FILE", str(tmp_path / "missing"))
+    assert maps.counts() is None and not maps.make_room(10 ** 9)
+    monkeypatch.setattr(maps.jax, "default_backend", lambda: "gpu")
+    monkeypatch.setattr(maps, "MAPS_FILE", str(used))
+    assert not maps.make_room(800) and cleared == [1]         # only the CPU runtime maps per kernel

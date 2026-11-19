@@ -24,6 +24,7 @@ from ..fit.linear import loo
 from ..fit.linear import multistart
 from ..fit.linear import objective as lo
 from ..fit.linear import stats as ls
+from .maps import make_room
 from .onsite import OnsiteModel, _features, design, parts_of, shell_pairs, site_graph
 
 
@@ -238,6 +239,7 @@ def _solve(designs, acc, yy, n, nc, ridge, gamma=None, select=None, blocks=None)
                 report[key] = (n[d], 0, np.sqrt(yy[d][q * nc:(q + 1) * nc] / n[d]))
             continue
         R, c = acc[d]
+        make_room(40_000 if select else 25_000)          # every design shape is a program of its own (`operators.maps`)
         fac = ls.Factor(R, c, jnp.asarray(yy[d]), jnp.asarray(float(n[d])), jnp.zeros(()))
         hyper = None
         if select == "evidence":
