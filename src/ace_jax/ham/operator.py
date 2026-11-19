@@ -59,22 +59,26 @@ _eigvals_k = jax.jit(jax.vmap(_eigvals_impl))             # a batch of k-points 
 
 
 @highest
-def _bloch_blocks_impl(B, idx, R, kpts, n_orb):
+def _bloch_blocks_impl(B, idx, R, seg, kpts, n_orb):
     """(n_k, n_orb, n_orb): the Bloch sums of stacked blocks at every k of `kpts` at once.  B: one
-    (m, n_a, n_b) array per block shape, idx: their flat positions (m, n_a, n_b) in the n_orb^2
-    matrix, R: their cells (m, 3)."""
+    (m, n_a, n_b) array per block shape, ordered by atom pair; seg (m,): the pair of each block;
+    idx: the flat positions (pairs, n_a, n_b) of each pair in the n_orb^2 matrix; R: the blocks'
+    cells (m, 3).  The images of a pair are summed first, so every element of the matrix is
+    written once and in the order of its rows: scattering every block into the matrix made a
+    cache miss of each element, 8 times the time per element at 9,000 orbitals on a CPU."""
     cdtype = jnp.result_type(kpts.dtype, jnp.complex64)
 
     def one(k):
         M = jnp.zeros(n_orb * n_orb, cdtype)
-        for b, i, r in zip(B, idx, R):
-            M = M.at[i.reshape(-1)].add((jnp.exp(2j * jnp.pi * (r @ k)).astype(cdtype)[:, None, None] * b).reshape(-1))
+        for b, i, r, g in zip(B, idx, R, seg):
+            pair = jax.ops.segment_sum(jnp.exp(2j * jnp.pi * (r @ k)).astype(cdtype)[:, None, None] * b, g, num_segments=i.shape[0], indices_are_sorted=True)
+            M = M.at[i.reshape(-1)].set(pair.reshape(-1), unique_indices=True)
         return M.reshape(n_orb, n_orb)
 
     return jax.vmap(one)(kpts)
 
 
-_bloch_blocks = jax.jit(_bloch_blocks_impl, static_argnums=4)
+_bloch_blocks = jax.jit(_bloch_blocks_impl, static_argnums=5)
 
 
 class BlockSum:
@@ -87,24 +91,30 @@ class BlockSum:
         norb = np.array([basis.n_orb(int(z)) for z in numbers])
         off = np.concatenate([[0], np.cumsum(norb)])
         self.n_orb = int(off[-1])
+        if self.n_orb ** 2 >= 2 ** 31 and not jax.config.jax_enable_x64:
+            raise ValueError(f"BlockSum: {self.n_orb} orbitals need 64-bit indices (jax_enable_x64)")
+        itype = jnp.int32 if self.n_orb ** 2 < 2 ** 31 else jnp.int64
         groups = {}
         for key in keys:
             groups.setdefault((int(norb[key[3]]), int(norb[key[4]])), []).append(key)
-        self.groups = [(shape, ks) for shape, ks in sorted(groups.items())]
-        self.idx, self.R = [], []
+        self.groups = [(shape, sorted(ks, key=lambda k: (k[3], k[4], k[:3]))) for shape, ks in sorted(groups.items())]    # by atom pair
+        self.idx, self.R, self.seg = [], [], []
         for (na, nb), ks in self.groups:
             a = np.asarray(ks)
-            rows, cols = off[a[:, 3]], off[a[:, 4]]
-            self.idx.append(jnp.asarray((rows[:, None, None] + np.arange(na)[:, None]) * self.n_orb + cols[:, None, None] + np.arange(nb), jnp.int32))
+            pairs, seg = np.unique(a[:, 3:], axis=0, return_inverse=True)                    # in the order of the blocks
+            rows, cols = off[pairs[:, 0]], off[pairs[:, 1]]
+            self.idx.append(jnp.asarray((rows[:, None, None] + np.arange(na)[:, None]) * self.n_orb + cols[:, None, None] + np.arange(nb), itype))
             self.R.append(jnp.asarray(a[:, :3], float))
+            self.seg.append(jnp.asarray(seg.ravel(), jnp.int32))
 
     def matrices(self, blocks, kpts, chunk=64):
-        """(n_k, n_orb, n_orb) complex Hermitian Bloch matrices at the fractional k-points."""
+        """(n_k, n_orb, n_orb) complex Bloch matrices at the fractional k-points: Hermitian to roundoff
+        when the blocks hold both orientations of every pair (they are not symmetrised here: that
+        pass over the matrix cost four times the sum itself at 9,000 orbitals; `eigvals` does it)."""
         B = [jnp.asarray(np.stack([blocks[k] for k in ks])) for _, ks in self.groups]
         kpts = jnp.asarray(np.atleast_2d(kpts), B[0].dtype if B else float)
-        out = [_bloch_blocks(B, self.idx, self.R, kpts[i:i + chunk], self.n_orb) for i in range(0, len(kpts), chunk)]
-        M = jnp.concatenate(out)
-        return 0.5 * (M + jnp.swapaxes(M.conj(), 1, 2))
+        out = [_bloch_blocks(B, self.idx, self.R, self.seg, kpts[i:i + chunk], self.n_orb) for i in range(0, len(kpts), chunk)]
+        return out[0] if len(out) == 1 else jnp.concatenate(out)
 
 
 def block_bands(bs, H, S, kpts, chunk=48):
@@ -117,7 +127,7 @@ def block_bands(bs, H, S, kpts, chunk=48):
     out = []
     for i in range(0, len(kpts), chunk):
         k = jnp.asarray(kpts[i:i + chunk], Hb[0].dtype)
-        out.append(np.asarray(_eigvals_k(_bloch_blocks(Hb, bs.idx, bs.R, k, bs.n_orb), _bloch_blocks(Sb, bs.idx, bs.R, k, bs.n_orb))))
+        out.append(np.asarray(_eigvals_k(_bloch_blocks(Hb, bs.idx, bs.R, bs.seg, k, bs.n_orb), _bloch_blocks(Sb, bs.idx, bs.R, bs.seg, k, bs.n_orb))))
     return np.concatenate(out)
 
 

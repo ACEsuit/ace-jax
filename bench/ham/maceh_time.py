@@ -87,4 +87,5 @@ for _ in range(min(3, repeats)):                             # the network alone
     fs.append(time.perf_counter() - t0)
 print(f"{'MACE-H' if pkg == 'maceh' else 'DeepH-E3'} {device} {c.torch_dtype} threads {torch.get_num_threads()}: {n_atoms} atoms, {n_edges / n_atoms:.0f} edges per atom, "
       f"{nparam} parameters, output {tuple(H.shape)}; {1e3 * t:.1f} ms per structure, {1e6 * t / n_atoms:.0f} us per atom, "
-      f"{1e6 * t / n_edges:.1f} us per block; network alone {1e6 * min(fs) / n_atoms:.0f} us per atom")
+      f"{1e6 * t / n_edges:.1f} us per block; network alone {1e6 * min(fs) / n_atoms:.0f} us per atom"
+      + (f"; peak device memory {torch.cuda.max_memory_allocated() / 2 ** 30:.2f} GiB" if device == "cuda" else ""))

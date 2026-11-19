@@ -6,7 +6,9 @@ Always, from the structure's own H and S blocks (the same for any code's predict
 sums H(k) and S(k) at a general k-point (`ham.operator.BlockSum`, on the device JAX runs on) and
 the generalised Hermitian eigenvalues, by LAPACK through SciPy on a CPU and by
 `ham.operator.eigvals` on a GPU.  HAM_X64=0: float32 (prediction and Bloch sums; the eigensolver
-too on a GPU).  One JSON record per run; the smallest of `repeats` after a first call."""
+too on a GPU).  One JSON record per run; the smallest of `repeats` after a first call.  On a GPU the record
+also holds the peak device memory after each step (`*_peak_bytes`, XLA's allocator statistics;
+they need XLA_PYTHON_CLIENT_PREALLOCATE=false to mean what the program used)."""
 import json
 import os
 import sys
@@ -36,6 +38,7 @@ def best(f):
 
 d = deeph.read(src)
 gpu = jax.default_backend() != "cpu"
+peak = lambda: int((jax.devices()[0].memory_stats() or {}).get("peak_bytes_in_use", 0)) if gpu else 0
 rec = dict(atoms=len(d.numbers), orbitals=int(sum(d.basis.n_orb(int(z)) for z in d.numbers)), blocks=len(d.blocks["H"]), backend=jax.default_backend(),
            precision="float64" if X64 else "float32", threads=threads)
 if "model" in kw:
@@ -43,6 +46,7 @@ if "model" in kw:
     args = (d.positions, d.cell, d.numbers)
     rec["predict_s"], _ = best(lambda: jax.block_until_ready((p.onsite(*args), p.offsite(*args))))
     rec["model"] = os.path.basename(kw["model"])
+    rec["predict_peak_bytes"] = peak()
 bs = BlockSum(sorted(d.blocks["H"]), d.numbers, d.basis)
 k = np.array([[0.13, 0.27, -0.4]])
 dt = np.float64 if X64 else np.float32
@@ -51,6 +55,7 @@ S = {key: v.astype(dt) for key, v in d.blocks["S"].items()}
 t_h, Hk = best(lambda: jax.block_until_ready(bs.matrices(H, k)))
 t_s, Sk = best(lambda: jax.block_until_ready(bs.matrices(S, k)))
 rec["bloch_s"] = t_h + t_s
+rec["bloch_peak_bytes"] = peak()
 if gpu:
     rec["eig_s"], e = best(lambda: np.asarray(eigvals(Hk, Sk)))
 else:
@@ -61,6 +66,7 @@ else:
     else:
         rec["eig_s"], e = best(lambda: eigh(h, s, eigvals_only=True))
 rec["e_min"] = float(np.min(e))
+rec["eig_peak_bytes"] = peak()
 print(json.dumps(rec), flush=True)
 with open(out, "a") as f:
     f.write(json.dumps(rec) + "\n")

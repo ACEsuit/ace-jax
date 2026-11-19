@@ -1,7 +1,8 @@
 """Time against system size from positions to the bands at one k-point: block prediction by each
 code, Bloch sums and the eigensolver (`size_time.py`, `maceh_time.py` on `tile_deeph.py`
 supercells).  Top: seconds per structure against atoms, with N and N^3 guides; bottom: the share
-of each step, one panel per code.
+of each step, one panel per code.  Records with peak device memory (a GPU) add a panel of it:
+each code's prediction, and ace-jax's whole call through the eigensolver.
     python bench/ham/size_plot.py <size_time.jsonl> <figure.png> <title> [<code>=<maceh_time log of "N <line>" rows> ...]"""
 import json
 import re
@@ -23,18 +24,25 @@ for line in open(src):
     rows[r["atoms"]] = r                                 # the last run of a size
 N = np.array(sorted(rows))
 pred = {"ace-jax": np.array([rows[n].get("predict_s", np.nan) for n in N])}
+mem = {"ace-jax": np.array([rows[n].get("predict_peak_bytes", 0) / 2 ** 30 for n in N])}
+mem_all = np.array([rows[n].get("eig_peak_bytes", 0) / 2 ** 30 for n in N])
 for arg in sys.argv[4:]:
     code, path = arg.split("=")
-    t = {}
+    t, g = {}, {}
     for line in open(path):
         m = re.match(r"(\d+) .* ([\d.]+) ms per structure", line)
         if m:
             t[int(m.group(1))] = float(m.group(2)) / 1e3
+        m = re.match(r"(\d+) .*peak device memory ([\d.]+) GiB", line)
+        if m:
+            g[int(m.group(1))] = float(m.group(2))
     pred[code] = np.array([t.get(n, np.nan) for n in N])
+    mem[code] = np.array([g.get(n, np.nan) for n in N])
+has_mem = mem_all.max() > 0
 bloch, eig = (np.array([rows[n][k] for n in N]) for k in ("bloch_s", "eig_s"))
 f = plt.figure(figsize=(10.0, 7.2))
-gs = f.add_gridspec(2, len(pred), height_ratios=(1.25, 1), hspace=0.42, wspace=0.12)
-a = f.add_subplot(gs[0, :])
+gs = f.add_gridspec(2, len(pred), height_ratios=(1.25, 1), hspace=0.42, wspace=0.16)
+a = f.add_subplot(gs[0, :2] if has_mem else gs[0, :])
 for code, t in pred.items():
     a.plot(N, t, color=COL[code], lw=2, marker="o", ms=5)
     ok = np.flatnonzero(np.isfinite(t))
@@ -50,6 +58,18 @@ a.set_xscale("log", base=2); a.set_yscale("log"); a.set_xticks(N); a.set_xtickla
 a.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
 a.set_xlim(N[0] * 0.85, N[-1] * 2.0); a.set_xlabel("Atoms (9 orbitals each)"); a.set_ylabel("Time per structure / s")
 a.grid(True, which="major", color=MUTED, lw=0.3, alpha=0.5)
+if has_mem:
+    c = f.add_subplot(gs[0, 2])
+    for code, v in mem.items():
+        c.plot(N, v, color=COL[code], lw=2, marker="o", ms=5)
+    c.plot(N, mem_all, color=EIG, lw=2, marker="s", ms=5)
+    c.annotate("ace-jax through\nthe eigensolver", (N[-1], mem_all[-1]), xytext=(-6, 4), textcoords="offset points", ha="right", va="bottom", fontsize=7, color=INK)
+    c.annotate("prediction:\nthe codes' colours", (N[0], np.nanmax([v[0] for v in mem.values()])), xytext=(0, 12), textcoords="offset points", fontsize=7, color=INK)
+    c.set_xscale("log", base=2); c.set_yscale("log"); c.set_xticks(N); c.set_xticklabels([str(n) for n in N])
+    c.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}")); c.set_xlabel("Atoms"); c.set_title("Peak device memory / GiB", fontsize=9, loc="left", color=INK)
+    c.grid(True, which="major", color=MUTED, lw=0.3, alpha=0.5)
+    for sp in ("top", "right"):
+        c.spines[sp].set_visible(False)
 x = np.arange(len(N))
 for i, (code, t) in enumerate(pred.items()):
     b = f.add_subplot(gs[1, i])
