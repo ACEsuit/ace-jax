@@ -191,6 +191,8 @@ def cmd_fit(a):
     info = dict(command="aj ham fit", data=os.path.abspath(a.data), n_train=len(train), structures=[os.path.basename(n) for n in names],
                 bonds_per_structure=a.bonds, seed=a.seed, prior=a.prior, ridge=a.ridge, fit_s=round(fit_s, 1), n_coef=n_coef, nelectrons=a.nelectrons,
                 training_residual=resid)
+    os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
+    io.save(a.out, on, off, info=info)                   # before the validation: a failure there does not lose the fit
     if a.validation:
         from .calculator import HamiltonianCalculator
         calc = HamiltonianCalculator((on, off), kpts=tuple(a.kpts), nelectrons=electrons(a.nelectrons), width=a.width, smearing=a.smearing, threads=a.threads)
@@ -200,8 +202,7 @@ def cmd_fit(a):
         print(f"validation set {a.validation}:")
         table, summary = score(calc, a.validation, a.window)
         info["validation"] = dict(data=os.path.abspath(a.validation), blocks={f"{c} {p}": v for (c, p), v in table.items()}, metrics=summary)
-    os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
-    io.save(a.out, on, off, info=info)
+        io.save(a.out, on, off, info=info)
     print(f"wrote {a.out}")
 
 
@@ -249,23 +250,16 @@ def band_structure(calc, atoms, path=None, npoints=200, reference=None):
     return out
 
 
-def plot_bands(b, fig, window=(-13.0, 6.0), smear=0.1, title=None, labels=("reference", "model")):
-    """Figure of a `band_structure` record: bands on the path, the reference (if any) in ink and
-    the model in one hue, and the density of states of the k-point grid (Gaussians of width
-    `smear`) on the shared energy axis; energies from the reference's Fermi level, else the
-    model's.  Needs matplotlib."""
-    try:
-        import matplotlib
-    except ImportError:
-        raise UsageError("--plot needs matplotlib (pip install matplotlib)") from None
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+def draw_bands(p, q, b, window=(-13.0, 6.0), smear=0.1, labels=("reference", "model")):
+    """A `band_structure` record on two axes: p the bands on the path, the reference (if any) in
+    ink and the model in one hue; q the density of states of the k-point grid (Gaussians of
+    width `smear`) on the same energy axis.  Energies from the reference's Fermi level, else the
+    model's."""
     ref = "bands_ref" in b
     mu = float(b["fermi_level_ref"] if ref else b["fermi_level"])
     INK, MODEL, MUTED = "#0b0b0b", "#2a78d6", "#8a8f98"
     x = np.asarray(b["x"])
     cut = np.r_[0, np.flatnonzero(np.diff(x) == 0) + 1, len(x)]            # the path's disconnected pieces
-    f, (p, q) = plt.subplots(1, 2, figsize=(9.0, 5.2), sharey=True, gridspec_kw=dict(width_ratios=(3.4, 1), wspace=0.04))
     style = dict(color=MODEL, lw=1.0, ls=(0, (4, 2))) if ref else dict(color=MODEL, lw=1.2)
     for lo, hi in zip(cut[:-1], cut[1:]):
         if ref:
@@ -294,8 +288,20 @@ def plot_bands(b, fig, window=(-13.0, 6.0), smear=0.1, title=None, labels=("refe
     for ax in (p, q):
         for s in ("top", "right"):
             ax.spines[s].set_visible(False)
+
+
+def plot_bands(b, fig, window=(-13.0, 6.0), smear=0.1, title=None, labels=("reference", "model")):
+    """Figure file of a `band_structure` record (`draw_bands`).  Needs matplotlib."""
+    try:
+        import matplotlib
+    except ImportError:
+        raise UsageError("--plot needs matplotlib (pip install matplotlib)") from None
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    f, (p, q) = plt.subplots(1, 2, figsize=(9.0, 5.2), sharey=True, gridspec_kw=dict(width_ratios=(3.4, 1), wspace=0.04))
+    draw_bands(p, q, b, window, smear, labels)
     if title:
-        f.suptitle(title, fontsize=10, x=0.125, y=1.0 if ref else 0.94, ha="left")
+        f.suptitle(title, fontsize=10, x=0.125, y=1.0 if "bands_ref" in b else 0.94, ha="left")
     f.savefig(fig, dpi=200, bbox_inches="tight")
     plt.close(f)
 
