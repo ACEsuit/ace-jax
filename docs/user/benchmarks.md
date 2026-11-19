@@ -5,8 +5,9 @@ This page gives two benchmarks:
 1. **Accuracy and cost on silicon.** Fitted models of each family are
    compared at the same accuracy. The cost is the time per atom and MD step
    in LAMMPS.
-2. **Speed on SiGe and Cantor.** Models with random weights are compared at
-   the same size. These figures compare speed only, not accuracy.
+2. **Speed on a five-element alloy.** Models with random weights are timed
+   on the CrMnFeCoNi (Cantor) alloy. This table compares speed only, not
+   accuracy.
 
 ## Accuracy and cost: silicon
 
@@ -18,8 +19,11 @@ training and 248 for testing).
   PACE-shaped ACE, PACE (pacemaker), MACE with L = 0 and L = 1, NEP
   (trained with GPUMD), GAP refits, and GRACE-1L, GRACE-2L and GRACE-FS
   (trained with gracemaker). Each family has a ladder of model sizes. Each
-  point is one fit. For GRACE, each point is the mean of three fits, and
-  the bars show the range.
+  point is one fit. For GRACE and for the fine-tuned foundation models,
+  each point is the mean of three fits, and the bars show the range.
+- **Foundation models.** MACE-MH-1, GRACE-2L-OMAT-large and
+  GRACE-1L-OMAT-large are tested as published and after fine-tuning. Refer
+  to [Foundation models](#foundation-models).
 - **Force error.** The root-mean-square force error on the test set.
 - **QoI error.** 21 silicon properties are calculated with each model and
   compared with DFT: elastic constants, energies of other phases, point
@@ -46,7 +50,8 @@ that the figure shows:
 
 1. Click a family in the legend to show or hide it in all panels.
 2. Double-click a family to show only that family.
-3. Click a button above the legend to show a group of families.
+3. Click a button above the legend to show a group of families. The
+   **Foundation models** button shows the foundation models.
 4. Put the pointer on a point to show its model, its values and the code
    that was timed.
 
@@ -110,6 +115,63 @@ is 2.9 to 3.7 times faster (o4d12 to o4d20). It is 4.8 to 8.2 times faster
 than the compiled JAX program. The speed-up is largest for the smallest
 models.
 
+### Foundation models
+
+A foundation model is fitted to a large dataset of many elements. The
+benchmark includes three foundation models: MACE-MH-1 (its `omat_pbe`
+head), GRACE-2L-OMAT-large and GRACE-1L-OMAT-large. Each model is tested in
+two conditions:
+
+- **Zero-shot.** The model is used as published. Its energies have a
+  different reference from the DFT data. Thus one constant energy for each
+  atom is calculated from the training set and added. The forces and the
+  QoIs do not change with this constant.
+- **Fine-tuned.** All parameters of the model are fitted again to the
+  silicon training set of this benchmark. The loss function and the
+  weights are those of the models trained from the start. Each
+  point is the mean of three fits with different seeds.
+
+In the figure, an arrow connects each zero-shot model to its fine-tuned
+model.
+
+!!! note
+    The foundation models keep their architecture. Thus their cutoff
+    radius is 6 Å. The cutoff radius of all other models is 5 Å.
+
+| model | force error (eV/Å) | QoI error | A100 GPU | CPU node (128 cores) |
+|---|---|---|---|---|
+| MACE-MH-1, zero-shot | 0.072 | 1.08 | 6.04 | 46.0 |
+| MACE-MH-1, fine-tuned | 0.044 | 0.29 (0.27 to 0.32) | 6.07 | 45.1 |
+| MACE-MH-1, fine-tuned, mixed precision | 0.044 | 0.29 (0.27 to 0.32) | 2.48 | – |
+| GRACE-2L-OMAT-large, zero-shot | 0.066 | 1.29 | 5.59 | 8.81 |
+| GRACE-2L-OMAT-large, fine-tuned | 0.046 | 0.23 (0.21 to 0.25) | 5.60 | 8.83 |
+| GRACE-1L-OMAT-large, zero-shot | 0.103 | 2.68 | 1.78 | 2.07 |
+| GRACE-1L-OMAT-large, fine-tuned | 0.079 | 0.51 (0.49 to 0.52) | 1.77 | 2.08 |
+
+The costs are in microseconds per atom-step. For the fine-tuned models,
+the errors are the mean of three fits. The range of the QoI error is in
+brackets. The force errors of the three fits agree to 0.001 eV/Å. The
+GRACE costs are in mixed precision.
+
+**Zero-shot.** MACE-MH-1 and GRACE-2L-OMAT-large have a smaller force
+error than GAP-18 (0.083 eV/Å), although they were not fitted to this
+dataset. No zero-shot model reaches the QoI target.
+
+**Fine-tuned.** MACE-MH-1 and GRACE-2L-OMAT-large reach the target.
+GRACE-2L-OMAT-large has the lowest QoI error in the figure (0.23). The QoI
+error of MACE-MH-1 (0.29) is approximately that of the best models trained
+from the start (0.31, GRACE-2L 2l_small and the largest MACE L = 1 models).
+GRACE-1L-OMAT-large reaches the force target. Its QoI error is at the limit
+of the target: one of the three fits is below 0.5.
+
+**Cost.** Fine-tuning does not change the cost of a model. On the A100,
+fine-tuned MACE-MH-1 costs 9.3 times the cost of MACE c16L0 in float64,
+and 3.8 times in mixed precision. Fine-tuned GRACE-2L-OMAT-large costs 8.6
+times the cost of MACE c16L0. On the CPU, MACE-MH-1 costs 76 times and
+GRACE-2L-OMAT-large costs 15 times the cost of MACE c16L0.
+Thus the small models trained from the start reach the target at a much
+lower cost. The fine-tuned foundation models have lower errors.
+
 ### How the cost was measured
 
 - **GPU.** One NVIDIA A100, 32,768 atoms.
@@ -163,6 +225,17 @@ models.
   styles of gracemaker's LAMMPS version.
 - **GRACE-FS** runs in LAMMPS with `grace/fs/kk` (GPU) and `grace/fs`
   (CPU), in float64. grace-runtime does not support GRACE-FS.
+- **MACE-MH-1** runs in LAMMPS with `pair_style
+  symmetrix/mace/foundation` from Symmetrix 0.3.0, in float64. The
+  mixed-precision result uses `symmetrix/mace/foundation/float32-mixed`,
+  which runs on the GPU only.
+- **GRACE-OMAT** runs in LAMMPS with the same grace-runtime styles as
+  GRACE-1L and GRACE-2L, in mixed precision. On the CPU, GRACE-2L-OMAT-large
+  does not have sufficient memory with 128 MPI ranks. It uses 8 MPI ranks
+  with 16 threads.
+- **The foundation models on the A100** were timed on nodes that other
+  jobs used at the same time. All other models were timed on nodes with
+  no other jobs.
 - **NEP** is trained with GPUMD. On the CPU, it runs in LAMMPS with
   `pair_style nep` (NEP_CPU, float64). On the GPU, it runs in GPUMD. GPUMD
   uses mixed precision, and the figure labels these points.
@@ -190,70 +263,55 @@ models.
 - The GAP parameter count includes only the sparse-point coefficients. The
   GAP kernel also keeps the sparse descriptors.
 
-## Speed: SiGe and Cantor
+## Speed: a five-element alloy
 
-Each figure shows the throughput against the system size. The throughput is
-in **atom-steps per second** (atoms × evaluations per second; higher is
-better).
+The silicon benchmark has one element. This table shows the cost for a
+system with five elements: the equiatomic CrMnFeCoNi (Cantor) alloy on an fcc
+lattice. The cost is in microseconds per atom-step (lower is better), in
+LAMMPS and in float64.
 
-- **Workload.** The workload is similar to MD. Before each timed evaluation
-  of energy and forces, each atom moves a small distance, as between two
-  MD steps. The compilation time is not included.
-- **Models.** The models are **medium-size models with random weights**.
-  Their cost is the same as the cost of a fitted model, but they do not
-  predict correctly:
-    - PACE `.yace` models of approximately 500 basis functions for each
-      element (ace-jax and ML-PACE evaluate the same files);
-    - linear ACE models of approximately 450 basis functions for each
-      element;
-    - MACE-MP-0b2 medium.
-- **Standalone** (solid lines) is a direct call of the evaluator, outside an
-  MD engine. For ace-jax and MACE, this is one ASE calculator call from
-  Python, including the neighbour list.
-- **LAMMPS** (dashed lines) is the time of one MD step in LAMMPS: ace-jax
-  with lammps-jax ([LAMMPS export](howto/lammps.md)), ML-PACE as
-  `pair_style pace`, MACE with Symmetrix.
-- **Systems.** SiGe, a random alloy on diamond, and Cantor, the equiatomic
-  CrMnFeCoNi alloy on fcc.
+--8<-- "benchmarks-cantor.md"
 
-### CPU, float64
+- **Models.** The models have **random weights**. Their cost is the same as
+  the cost of a fitted model of the same size, but they do not predict
+  correctly. Thus this table compares only speed.
+    - The linear ACE model has 447 basis functions for each element.
+    - The PACE model has 496 basis functions for each element. ace-jax and
+      ML-PACE evaluate the same `.yace` file.
+    - The MACE model is MACE-MP-0b2 medium.
+- **Codes.** The LAMMPS builds are those of the silicon benchmark: ace-jax
+  with lammps-jax, ML-PACE as `pair_style pace` and `pair_style pace/kk`,
+  and MACE with Symmetrix v0.3.0.
+- **ace-jax kernel.** The kernel evaluates linear ACE models only. Thus the
+  PACE model runs as the compiled JAX program.
+- **GPU.** One NVIDIA A100, 32,768 atoms, one MPI rank.
+- **CPU.** One node with two 64-core AMD EPYC 7742 CPUs, 8,192 atoms, 128
+  MPI ranks with one thread for each rank.
+- **Parity.** Before the timing, each code in LAMMPS is compared with its
+  own reference evaluator on three cells of 256 atoms. All codes agree with
+  their references.
 
-![Throughput against system size on CPU in float64, SiGe and Cantor panels: ACEpotentials.jl trim library and ML-PACE in LAMMPS are fastest, ace-jax standalone 6–10× below ML-PACE and level with ACEpotentials.jl direct, MACE slowest](assets/benchmarks/cpu_float64.png)
+The results are:
 
-When these figures were made, lammps-jax supported only GPUs. Thus the CPU
-figure shows ace-jax standalone only. The silicon benchmark above includes
-ace-jax in LAMMPS on the CPU.
+- On the linear ACE model, the ace-jax kernel is 3.9 times faster than the
+  compiled JAX program on the A100. On the CPU, it is 10 times faster.
+- The ace-jax kernel on the linear ACE model costs less than ML-PACE on the
+  PACE model: 0.15 against 0.30 µs/atom-step on the A100, and 0.38 against
+  0.51 on the CPU. These are different models of approximately the same
+  size.
+- On the same PACE model, ML-PACE is 2.4 times faster than ace-jax on the
+  A100. On the CPU, it is 11 times faster.
+- MACE-MP-0b2 medium costs 7.5 µs/atom-step on the A100 and 29 on the CPU.
+  This is 50 and 78 times the cost of the ace-jax kernel on the linear ACE
+  model.
 
-### GPU, float64
-
-![Throughput against system size on GPU in float64, SiGe and Cantor panels, for ace-jax PACE and linear ACE, ML-PACE and MACE, in LAMMPS and standalone](assets/benchmarks/gpu_float64.png)
-
-### GPU, float32
-
-![Throughput against system size on GPU in float32, SiGe and Cantor panels, for ace-jax PACE and linear ACE and MACE standalone](assets/benchmarks/gpu_float32.png)
-
-### At 8,192 atoms
-
-Atom-steps per second at 8,192 atoms. "—" shows that a code does not run
-in that setting, or ran out of memory at a smaller size.
-
---8<-- "benchmarks-table.md"
-
-## Caveats
-
---8<-- "benchmarks-notes.md"
-- Random weights set the cost of a model, not its accuracy. Thus these
-  numbers compare only speed. A fitted model of the same size has the same
-  speed.
-- ace-jax standalone uses its neighbour list again while the atoms stay in
-  the skin. MACE standalone builds the list again at each call.
-- The throughput depends on the model size, the cutoff and the number of
-  neighbours. The [full benchmarks](https://github.com/ACEsuit/ace-jax/blob/main/docs/dev/benchmarks.md)
-  include small and large models, peak memory and the largest system that
-  fits in memory.
+!!! warning
+    The CPU row uses 128 MPI ranks with one thread for all codes. The
+    silicon benchmark uses the fastest layout of each model. Thus a code can
+    be faster on the CPU with a different layout. The cost of MACE on the
+    CPU changed by more than 20% between 1,024 and 8,192 atoms.
 
 ## More
 
-- [Full benchmark results](https://github.com/ACEsuit/ace-jax/blob/main/docs/dev/benchmarks.md):
-  every model size and host, memory, precision, parity checks and versions.
-- [How to rerun the benchmarks](https://github.com/ACEsuit/ace-jax/blob/main/bench/scaling/README.md).
+- [Full results of both benchmarks](https://github.com/ACEsuit/ace-jax/blob/main/docs/dev/accuracy-cost-results.md):
+  every model, the parity checks, the versions and the commands.

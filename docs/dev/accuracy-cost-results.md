@@ -332,13 +332,13 @@ grep -h '"code": "mlpace-mixed"' $R/sulis-gpu-fp32-o4d*.jsonl > $R/sulis-gpu-fp3
 (cd bench && python -m accuracy_cost.dag_auto)
 python bench/si_qoi/make_cost.py --dtype float64 --source acejax-ace=sulis-cpu-128x1-acejax-auto --out $RR/cost_sulis_cpu.json \
     $(ls $R/sulis-cpu*.jsonl | grep -v -e smoke -e ace_yace -e pacetab-check -e "ace_tab\.jsonl" -e ace_tab2 \
-      -e ace_tab3 -e dagpair -e ffi-xla -e ffi-main -e ffi-mixed-float64) --allow grace-rt:mixed   # ffi-xla, ffi-main, ffi-mixed-float64: the C++ kernel's controls
+      -e ace_tab3 -e dagpair -e ffi-xla -e ffi-main -e ffi-mixed-float64 -e cpu-1x1) --allow grace-rt:mixed   # ffi-xla, ffi-main, ffi-mixed-float64: the C++ kernel's controls; cpu-1x1: the single-core layout
 python bench/si_qoi/make_cost.py --dtype float64 --source acejax-ace=sulis-gpu-acejax-auto --out $RR/cost_sulis_gpu.json \
     bench/accuracy_cost/results/sulis-gpu.jsonl bench/accuracy_cost/results/sulis-gpu-ace-splined.jsonl \
     $R/sulis-gpu-ace-splined-v2.jsonl $R/sulis-gpu-v2.jsonl $R/sulis-gpu-mace_xl.jsonl \
     $R/sulis-gpu-ace_tab5.jsonl $R/sulis-gpu-ace_tabfork.jsonl $R/sulis-gpu-pace-dev.jsonl $R/sulis-gpu-nep.jsonl $R/sulis-gpu-acejax-auto.jsonl \
     $R/sulis-gpu-fp32-mixed.jsonl $R/sulis-gpu-fp32-dot-F32_F32_F32.jsonl $R/sulis-gpu-grace.jsonl $R/sulis-gpu-grace2l.jsonl \
-    $R/sulis-gpu-cudak.jsonl $R/sulis-gpu-gracert.jsonl $R/sulis-gpu-symx3.jsonl \
+    $R/sulis-gpu-cudak.jsonl $R/sulis-gpu-gracert.jsonl $R/sulis-gpu-symx3.jsonl $R/sulis-gpu-fdn.jsonl $R/sulis-gpu-grace-fm.jsonl \
     --allow nep-gpumd:mixed --allow grace-rt:mixed
 ROWS=(--row "A100 GPU, µs/atom-step|$RR/cost_sulis_gpu.json|$RR/cost_sulis_gpu.codes.json"
       --row "CPU node (128 cores), µs/atom-step|$RR/cost_sulis_cpu.json|$RR/cost_sulis_cpu.codes.json")
@@ -351,6 +351,39 @@ python bench/si_qoi/plot_cost_web.py "${ROWS[@]}"     # -> docs/user/assets/benc
 
 Fits, QoIs and timings themselves: `bench/accuracy_cost/` (`sweep.yaml`, `timing.py`, the Sulis job scripts in
 `envs/`); the fitted models are on /storage, not in the repository.
+
+## Multi-component speed rows: Cantor (2026-11-17)
+
+The user Performance page's second half was the SiGe and Cantor scaling figures of `docs/dev/benchmarks.md`
+(rows of 2026-09-30 to 2026-10-04, ace-jax 0.1.0: before the kernels, `aa_dag="auto"`, lammps-jax on the CPU, the
+pace/kk GPU rewrite and Symmetrix v0.3.0). They are replaced by one table from `bench/accuracy_cost/multicomponent.py`:
+the medium random-weight Cantor (CrMnFeCoNi, fcc) models of `bench/scaling/models.py`, in LAMMPS, float64, with this
+benchmark's driver (`timing.run_cases`: gate, N/8 check, 3 repeats, median) and builds.
+
+| code, model | A100, µs/atom-step (32,768 atoms) | CPU 128 x 1, µs/atom-step (8,192 atoms) | gate: max dE/atom (eV), max dF (eV/Å) |
+|---|--:|--:|---|
+| ace-jax kernel (CUDA / C++), linear ACE (447 functions per element) | 0.150 | 0.376 | 5.6e-17, 2.3e-13 |
+| ace-jax XLA program, linear ACE | 0.591 | 3.85 | 2.8e-17, 1.4e-14 |
+| ace-jax XLA program, PACE `.yace` (496 per element) | 0.718 | 5.61 | 2.8e-17, 8.5e-15 |
+| ML-PACE (`pace/kk`, `pace`), the same `.yace` | 0.296 | 0.505 | 1.5e-14, 1.7e-9 |
+| MACE-MP-0b2 medium, Symmetrix v0.3.0 (`symmetrix/mace`) | 7.54 | 29.4 | 2.4e-11, 7.9e-8 |
+
+- Builds: lammps-jax `lmp-jax.sh` (GPU) and `lmp-jax-ffi-cpu.sh` (CPU); ML-PACE `lmp-pacetab.sh` / `lmp-pacetab-cpu.sh`
+  (LAMMPS develop ec02ed0); Symmetrix fc7e532 (v0.3.0) `lmp-symx3.sh` / `lmp-symx3-cpu.sh`, with its own extraction
+  of the model (`mace_medium_Cantor-symx3.json`, 2.1 GB). Kernels built in the job from the staged tree (4b1de03).
+- Jobs: `envs/sulis-gpu-cantor.sbatch` (2291530, gpu012), `envs/sulis-cpu-cantor.sbatch` (2291420 and, for MACE,
+  2291529; node063). Rows: `results/sulis/sulis-gpu-cantor[-kernel].jsonl`, `sulis-cpu-128x1-cantor[-kernel].jsonl`.
+- Gate: three rattled 256-atom Cantor cells (`gate_n`; a 64-atom fcc cell is narrower than twice the cutoffs).
+- GPU sizes are the silicon benchmark's. A first GPU run at 8,192 atoms was below the plateau for every code but
+  MACE (kernel 0.210, XLA linear ACE 0.718, PACE 0.754, ML-PACE 0.306, MACE 7.51 µs/atom-step) and is not kept.
+  MACE takes 15.8 GB of the A100 at 32,768 atoms (the October build ran out of 40 GB above 8,192).
+- CPU: one layout (128 x 1) for every code, not each model's fastest as on silicon. The N/8 check (1,024 atoms,
+  8 per rank) fails for the ace-jax bundles (`check_status: error`), so their plateau flag is unknown; ML-PACE's
+  passes; MACE's differs by more than 20% (`not_plateau`), and its 128 ranks take 278 GB.
+- Not rerun: SiGe, the small and large models, standalone lines, float32, ACEpotentials.jl, memory and size
+  scaling. `docs/dev/benchmarks.md` keeps the October rows for those, marked historical.
+
+Table for the page: `python -m accuracy_cost.multicomponent table > ../docs/snippets/benchmarks-cantor.md` (from `bench/`).
 
 ## Open
 
@@ -710,3 +743,216 @@ retime above) on the GPU row. A row with `ffi_precision: "mixed"` is written to 
 
 At the target, mixed leaves the CPU ranking as it was: o4d20 1.13 against GRACE-2L 0.81 and MACE c16L0
 on Symmetrix 0.59 µs/atom-step.
+
+## Polynomial MLPs (2026-11-12, first pass)
+
+Spec `docs/dev/specs/2026-11-12-ye3t-polymlp-benchmark-design.md` (it covers YE3T and Seko's polynomial MLPs; the two
+are separate pull requests). Protocol, commands and limits for the method's authors: `bench/accuracy_cost/polymlp/README.md`;
+provenance in `bench/accuracy_cost/data.md`. Tables: `python -m accuracy_cost.ye3t_polymlp_report` (from `bench/`).
+The text of the user-facing Performance page is unchanged; its interactive figure has the new series, hidden until
+selected in the legend. Nothing here is tuned per system: read the rows as a first pass, not as the method's best.
+
+Codes: pypolymlp 0.22.1 (b5e61e9) and lammps-polymlp-package 046eaa4 on LAMMPS develop ec02ed0
+(`bench/scaling/envs/sulis-polymlp.sh`). Float64. No stop-and-report point of the spec was met: the code is public,
+every gate passed, the package built, and the penalty is chosen without the test set.
+
+pypolymlp on the training split, cutoff 5.0 Å, Gaussian radials, GAP-18 weights (square roots of the benchmark's
+weights as pypolymlp's row weights), ridge penalty from pypolymlp's grid 1e-8 to 10 on a seeded 10 % validation
+split of train (per configuration type, seed 0; `val_split.json`). The model is the solution on the other 90 %:
+pypolymlp does not refit on train + validation. Design rank:
+updating QR of the weighted training design matrix, unit-norm columns, relative cutoff 1e-10.
+
+| size | coefficients | design rank | penalty | E RMSE (meV/atom) | F RMSE (eV/Å) | QoI error | 1 rank x 128 threads µs/atom-step | 1 x 1 |
+|---|---|---|---|---|---|---|---|---|
+| m3g6-l44 | 141 | 135 | 1e-7 | 92.2 | 0.1347 | 2.13 | 4.45 | 71.2 |
+| m3g8-l442 | 300 | 260 | 1e-5 | 40.8 | 0.1191 | 1.75 | 5.04 | 99.8 |
+| m3g9-l882 | 747 | 701 | 1e-8 | 31.4 | 0.1074 | 1.21 | 14.27 | 461.7 |
+| m4g6-l442 | 864 | 768 | 1e-8 | 34.4 | 0.1101 | 1.23 | 4.55 | 80.8 |
+| m4g9-l442 | 1782 | 1629 | 1e-7 | 14.6 | 0.1063 | 0.96 | 5.53 | 122.6 |
+| m4g8-l842 | 3536 | 3401 | 1e-6 | 13.4 | 0.1252 | 0.98 | 11.36 | 276.0 |
+| m4g9-l882 | 4797 | 4569 | 1e-3 | 13.9 | 0.0956 | 1.01 | 14.96 | 532.2 |
+| m4g8-l1282 | 6984 | 6776 | 1e-3 | 11.8 | 0.0922 | 0.82 | 21.51 | 750.6 |
+| m2g6-l44 | 7380 | – | 1e-2 | 11.0 | 0.0966 | 1.10 | 7.94 | 360.9 |
+| m2g6-l84 | 10584 | – | 1e-2 | 9.4 | 0.0953 | 0.74 | 13.02 | 554.9 |
+| m2g8-l84 | 18720 | – | 1e-2 | 9.8 | 0.0994 | 0.66 | 19.46 | 921.9 |
+| m2g9-l84 | 23652 | – | 1e-1 | 8.5 | 0.0965 | 0.62 | 45.51 | 1261.9 |
+| m2g8-l124 | 25424 | – | 1e-1 | 8.6 | 0.1009 | 0.54 | 61.21 | 1503.4 |
+| m2g9-l124 | 32130 | – | 1e-1 | 8.6 | 0.0973 | 0.54 | 122.40 | 2320.6 |
+
+Gates (LAMMPS against pypolymlp): ≤ 2.7e-14 eV/atom, 8.1e-13 eV/Å.
+
+- **No MPI.** The package README says "MPI is not currently available", and `pair_polymlp.cpp` indexes its per-atom
+  arrays by atom tag with the local atom count as their size (not run decomposed; read from the source), so the 128 x 1 layout cannot be run: the rows are one rank with 128 OpenMP
+  threads, recorded as such, and plotted on the CPU row under that label. Thread scaling is 7-36x on 128 cores, so
+  the CPU-node cost (1.5-22 µs) is far from the one-core cost / 128; the 1 x 1 column is the fairer measure of the
+  kernel. CPU only (no GPU code).
+- Accuracy: forces reach 0.092 eV/Å at 6,984 coefficients (model type 4; linear ACE: 0.082 at 5,476) and stay at
+  0.095-0.101 for the model type 2 sizes, so the ladder does not reach the target (force RMSE ≤ 0.0825 and QoI ≤
+  0.5). Energy RMSE is 8.5-11 meV/atom for type 2 and above 11 for the others, where ACE is at 3.5-7.
+- **Model type 2 (added 2026-11-13, the form of the accurate Si models in Seko's repository).** Six sizes at order
+  3 with `gtinv_maxl` [4, 4], [8, 4] and [12, 4], 7,380 to 32,130 coefficients. Their QoI error is 0.74 to 0.54
+  from 10,584 coefficients up, against 0.82 for the best type 4 model: the vacancy is −2.0 tolerances (type 4:
+  −3.5) and every phase energy is within one tolerance. Forces do not improve, and the cost is high: 13 to 122 µs
+  per atom-step on the node and 0.55 to 2.3 ms on one core. Their penalties (1e-2, 1e-1) are inside Seko's grid.
+  No design rank was computed at these sizes (an SVD of days).
+- The design rank is 87-97 % of the coefficient count (260 / 300 lowest; 6,776 / 6,984), so the count overstates
+  the effective size only slightly on this training set.
+- Two penalties sit on the grid's lower edge (1e-8: m3g9-l882, m4g6-l442); pypolymlp's grid was kept.
+- A pair-only model (pair-g9p3: 74.7 meV/atom, 0.2314 eV/Å, QoI 3.67, bcc 800 meV/atom off) was fitted and
+  removed: it is not a sensible model for Si, and Seko's repository has no pair-only Si model with files.
+- **Why the ladder is not monotonic.** (i) It is not one nested family: two model types, so
+  the orders by coefficients, cost and accuracy differ
+  (m3g9-l882 costs 14 µs for QoI 1.21, m4g9-l442 5.5 µs for 0.96). (ii) The plateau 0.96 / 0.98 / 1.01 at 1,782 to
+  4,797 coefficients is mostly hcp: both l = (8, 8, 2) models put it 37-42 meV/atom too low (neighbours +6, +9),
+  which alone moves the geometric mean by 9 %. (iii) m4g8-l842's penalty. Its validation curve has two near-tied
+  minima (1e-6: 0.18693, 1e-3: 0.18748) with a bump between, and 1e-6 won. A diagnostic refit on the same 90 %
+  scored on the test set (`ext/logs/probe9.py`; not a selection, the row is unchanged):
+
+  | penalty | validation (weighted) | E RMSE (meV/atom) | F RMSE (eV/Å) |
+  |---|---|---|---|
+  | 1e-8 | 0.478 | 16.1 | 0.296 |
+  | 1e-7 | 0.282 | 12.8 | 0.208 |
+  | 1e-6 (chosen) | 0.1869 | 13.4 | 0.125 |
+  | 1e-5 | 0.221 | 15.9 | 0.112 |
+  | 1e-4 | 0.204 | 17.8 | 0.114 |
+  | 1e-3 | 0.1875 | 18.6 | 0.101 |
+  | 1e-2 | 0.193 | 21.4 | 0.102 |
+
+  Forces degrade sharply at small penalties while pypolymlp's weighted validation RMSE hardly registers it; at 1e-3
+  the force error is on the size trend. The two larger models chose 1e-3. A selection rule that sees forces (or
+  a floor on the grid) is a protocol change for a PR, not made here.
+- Seko's repository potentials (`polymlp_repo`) were not added. Their settings were looked up
+  (`bench/accuracy_cost/polymlp/README.md`): cutoff 6 or 8 Å, mostly model type 2 at order 3 with `gtinv_maxl`
+  [8, 4] or [12, 4], 6,512 to 77,420 coefficients. The type 2 sizes above follow them at this benchmark's 5.0 Å cutoff.
+
+### Figures
+
+`bench/si_qoi/results/rmse_qoi_cost.png`, `rmse_qoi_cost_wl.png` and `qoi_heatmap.png` are regenerated with the new family (dark grey thin diamonds).
+Existing entries of `cost_sulis_cpu.json` are unchanged (diffed); the new ones are added.
+
+**Author's comments (2026-11-17).** A. Seko confirmed the 5.0 Å cutoff and that there is no MPI version, and
+pointed to pypolymlp's 1/|F| weighting of forces above 1 eV/Å and to the penalty grid. Both were checked
+(`bench/accuracy_cost/polymlp/README.md`, "Author's comments and two checks"): in MAE and small-force RMSE the
+largest polymlp is within 4 % of linear ACE o4d20 (19 % in RMSE), the difference being the large components
+(24-42 % of polymlp's squared error, 17-19 % of ACE's and PACE's; `force_measures.py`); a 28-value penalty grid
+changes the force errors by at most 3.5 % and no row here.
+
+## Foundation models: zero-shot and fine-tuned (2026-11-16)
+
+Two foundation-model families join the figure (stars and squares, points only, with an arrow from each zero-shot
+model down to its fine-tuned one: `plot_cost.FM_ARROWS`, which a distilled model would extend with an arrow to the
+left; web preset "Foundation models"): **MACE-MH-1**
+(`mace_fm`, the `omat_pbe` head; `bench/accuracy_cost/fit_mace_fm.py`) and **GRACE-1L/2L-OMAT-large**
+(`grace_fm`, the `-base-fp64` models; `fit_grace_fm.py`). Each is scored zero-shot and after fine-tuning on the
+benchmark's training split.
+
+These rows do not follow two of the benchmark's rules, and the figure's footnote says so:
+
+- **Cutoff.** The architecture is the foundation model's, so the cutoff is 6 Å, not 5 Å.
+- **Precision.** GRACE is timed by grace-runtime, which is mixed precision only (as the from-scratch GRACE rows).
+  MACE-MH-1 has a float64 row (plotted) and a mixed-precision row (light violet, its own line).
+
+**Zero-shot.** A foundation model's energies are on its own reference. One constant per atom is taken from the
+*training* split (`e_shift`: the mean of (E_DFT − E_model)/N over 2,226 configurations, the isolated atom left out)
+and added by the scoring calculator. Nothing else is fitted. Forces, virials and the QoIs do not depend on it.
+
+**Fine-tuned.** Every parameter is updated, with the benchmark's loss (energies, forces, virials, the GAP-18
+per-type weights), 5% of the training split as the validation set, float64.
+
+- MACE-MH-1: `mace_run_train`, single head (`--multiheads_finetuning=False`), 60 epochs with `--swa --ema`, batch 5,
+  at learning rates 1e-2, 1e-3 and 1e-4. E0 is the head's own Si reference plus `e_shift`, so the fine-tune starts
+  from the zero-shot energies. The plotted row is the learning rate with the lowest validation loss (stage one):
+  1e-3 (0.0128; 1e-4 0.0139; 1e-2 0.0221) (`plot_cost.FM_PLOTTED`). The test set took no part in that choice. About
+  4 h each on a Sulis L40 (jobs 2289089-91).
+- GRACE: gracemaker's fine-tuning recipe (`finetune_foundation_model`, `reduce_elements`, `shift: auto`, Adam at
+  0.001 with cosine decay), 10,000 updates; 76 min (2L) and 21 min (1L) on a Sulis L40 (jobs 2289103-4).
+  `reduce_elements` keeps only Si, so the fine-tuned parameter counts are far below the zero-shot ones.
+
+| Model | Parameters | E RMSE (meV/atom) | F RMSE (eV/Å) | V RMSE (meV/atom) | QoI error | QoIs within tolerance | A100 µs/atom-step |
+|---|---|---|---|---|---|---|---|
+| MACE-MH-1, zero-shot | 6,439,878 | 20.0 | 0.0716 | 72.8 | 1.08 | 52% | 6.04 (float64), 4.29 (float32), 2.47 (mixed) |
+| MACE-MH-1, fine-tuned, lr 1e-3 (seed 0) | 6,170,528 | 3.3 | 0.0443 | 26.2 | 0.27 | 86% | 6.07 (float64), 4.31 (float32), 2.48 (mixed) |
+| MACE-MH-1, fine-tuned, lr 1e-4 | 6,170,528 | 6.3 | 0.0518 | 33.1 | not run | not run | not timed |
+| MACE-MH-1, fine-tuned, lr 1e-2 | 6,170,528 | 7.4 | 0.0889 | 47.0 | not run | not run | not timed |
+| GRACE-2L-OMAT-large, zero-shot | 26,394,284 | 15.4 | 0.0655 | 56.4 | 1.29 | 38% | 5.59 (mixed) |
+| GRACE-2L-OMAT-large, fine-tuned (seed 0) | 984,548 | 2.1 | 0.0455 | 19.6 | 0.21 | 95% | 5.60 (mixed) |
+| GRACE-1L-OMAT-large, zero-shot | 8,953,529 | 34.0 | 0.1025 | 128.9 | 2.68 | 24% | 1.78 (mixed) |
+| GRACE-1L-OMAT-large, fine-tuned (seed 0) | 468,833 | 5.8 | 0.0788 | 27.7 | 0.52 | 76% | 1.77 (mixed) |
+
+**Fine-tuning seeds (2026-11-17).** Each plotted fine-tune has two more fits (sweep sizes `<size>_s1`, `_s2`, entry
+key `seed`; the unsuffixed row is seed 0). The seed is `mace_run_train --seed` / gracemaker's `seed`: it sets the
+5% validation draw and the batch order; the starting weights are the foundation model's in every seed. The figure
+plots the mean of the three with the min-max as a bar (`plot_cost.SEEDED`), at seed 0's cost (same architecture).
+Sulis L40 jobs 2290900-5; the other MACE learning rates have one seed.
+
+| Fine-tuned model | seed | E RMSE (meV/atom) | F RMSE (eV/Å) | V RMSE (meV/atom) | QoI error | QoIs within tolerance |
+|---|---|---|---|---|---|---|
+| MACE-MH-1, lr 1e-3 | 0 | 3.3 | 0.0443 | 26.2 | 0.27 | 86% |
+| | 1 | 3.1 | 0.0444 | 27.1 | 0.32 | 86% |
+| | 2 | 4.1 | 0.0439 | 25.0 | 0.27 | 86% |
+| | mean [min, max] | 3.5 [3.1, 4.1] | 0.0442 [0.0439, 0.0444] | | 0.29 [0.27, 0.32] | |
+| GRACE-2L-OMAT-large | 0 | 2.1 | 0.0455 | 19.6 | 0.21 | 95% |
+| | 1 | 2.1 | 0.0456 | 19.5 | 0.22 | 95% |
+| | 2 | 2.1 | 0.0457 | 19.7 | 0.25 | 90% |
+| | mean [min, max] | 2.1 [2.1, 2.1] | 0.0456 [0.0455, 0.0457] | | 0.23 [0.21, 0.25] | |
+| GRACE-1L-OMAT-large | 0 | 5.8 | 0.0788 | 27.7 | 0.52 | 76% |
+| | 1 | 5.8 | 0.0789 | 27.5 | 0.49 | 76% |
+| | 2 | 5.7 | 0.0788 | 27.9 | 0.51 | 76% |
+| | mean [min, max] | 5.8 [5.7, 5.8] | 0.0788 [0.0788, 0.0789] | | 0.51 [0.49, 0.52] | |
+
+The force error is reproducible to 0.0005 eV/Å; the QoI error moves by up to 0.05 between seeds. GRACE-1L-OMAT is
+at the QoI target's edge: one seed of three is below 0.5, the mean is not. On lestrade, two MACE QoI tests at once
+ran out of GPU memory (20 GB) for four tests of seeds 1 and 2; they were rerun one at a time.
+
+Target: force RMSE ≤ GAP-18's and QoI error ≤ 0.5. For comparison, linear ACE o4d20: 0.0816 eV/Å, QoI error 0.39,
+0.75 µs/atom-step (CUDA kernel, float64).
+
+- **Zero-shot** MACE-MH-1 and GRACE-2L are below GAP-18's force error without seeing the data, but none of the three
+  reaches the QoI target. The large errors are in the high-coordination phases and point defects (MACE-MH-1, in
+  tolerances: fcc −7.7, st12 +4.7, vacancy −4.7, bcc −4.5, hcp −4.4).
+- **Fine-tuned** MACE-MH-1 and GRACE-2L reach the target (seed means: QoI 0.29 and 0.23; GRACE-2L-OMAT is the
+  lowest in the figure, MACE-MH-1 level with the best from-scratch models at 0.31). GRACE-1L reaches the force
+  target but not the QoI one (seed mean 0.51).
+- **Cost.** Fine-tuning does not change the cost (≤ 0.5%). At the target, fine-tuned MACE-MH-1 costs 8.1 times
+  linear ACE o4d20 in float64 and 3.3 times in mixed precision; fine-tuned GRACE-2L costs 7.5 times (mixed).
+- The `MACEFM_mh1-omat` QoIs are identical to the earlier `SYMX_mh1` entry.
+
+**Codes.** MACE-MH-1: Symmetrix v0.3.0 `pair_style symmetrix/mace/foundation`, `.../float32` and
+`.../float32-mixed` (`bench/scaling/envs/sulis-symx3.sh lammps_cuda_fdn`, build job 2289052; the model extracted
+for Si with `symmetrix_extract_mace --head omat_pbe`; a fine-tuned model is extracted from a CPU copy). GRACE:
+`grace/runtime/kk` on the model's `kokkos.npz` (grace-runtime 0.1.4, Academic Software Licence, as are the GRACE
+foundation models).
+
+**Gates** (64-atom cells, against the model in PyTorch / TensorFlow, float64): MACE-MH-1 float64 ≤ 1.5e-10
+eV/atom, 2.0e-7 eV/Å; float32 ≤ 5.6e-8 / 3.6e-6; mixed ≤ 3.3e-8 / 3.0e-6 (bounds 1e-8 / 1e-5 and 1e-6 / 1e-4).
+GRACE ≤ 3.9e-6 / 2.1e-6.
+
+**Timing.** 32,768 atoms, one A100-PCIE-40GB each, on *shared* nodes (8 cores; load 1.4-3.8), not the exclusive
+nodes of the other rows: `accuracy_cost/envs/sulis-gpu-fdn.sbatch` (jobs 2289095, 2289390) and
+`sulis-gpu-grace-fm.sbatch` (jobs 2289094, 2289389), rows in `results/sulis/sulis-gpu-fdn.jsonl` and
+`sulis-gpu-grace-fm.jsonl`. MACE-MH-1 float64 takes 30.3 GB of device memory at this size, mixed 15.5 GB.
+
+**CPU row.** One exclusive 128-core EPYC 7742 node, 4,096 atoms, as the other CPU rows; µs/atom-step at each
+layout (MPI ranks x OpenMP threads), the figure taking each model's fastest. MACE-MH-1: the same Symmetrix styles
+in its CPU build (`lmp-symx3-cpu.sh`; float64 and float32, the float32-mixed style being GPU only),
+`accuracy_cost/envs/sulis-cpu-fdn.sbatch` (jobs 2290209, 2290229). GRACE: `grace/runtime`,
+`sulis-cpu-grace-fm.sbatch` (job 2290210). Rows in `results/sulis/sulis-cpu-<RxT>-fdn.jsonl` and
+`sulis-cpu-<RxT>-grace-fm.jsonl`.
+
+| model | 128x1 | 32x4 | 16x8 (MACE) / 8x16 (GRACE) | fastest | A100 |
+|---|---|---|---|---|---|
+| MACE-MH-1 zero-shot, float64 | 52.5 | 46.0 | 48.0 | 46.0 | 6.04 |
+| MACE-MH-1 fine-tuned, float64 | 53.2 | 45.1 | 47.2 | 45.1 | 6.07 |
+| MACE-MH-1 zero-shot, float32 | 21.2 | 18.4 | 21.6 | 18.4 | 4.29 |
+| MACE-MH-1 fine-tuned, float32 | 21.5 | 18.5 | 21.5 | 18.5 | 4.31 |
+| GRACE-1L-OMAT-large zero-shot | 3.17 | 2.09 | 2.07 | 2.07 | 1.78 |
+| GRACE-1L fine-tuned | 3.05 | 2.08 | 2.09 | 2.08 | 1.77 |
+| GRACE-2L-OMAT-large zero-shot | out of memory | 8.94 | 8.81 | 8.81 | 5.59 |
+| GRACE-2L fine-tuned | out of memory | 8.86 | 8.83 | 8.83 | 5.60 |
+
+Gates as on the A100 (MACE-MH-1 float64 ≤ 1.5e-10 / 2.0e-7, float32 ≤ 5.3e-8 / 3.7e-6; GRACE ≤ 5.7e-8 / 9.9e-7).
+GRACE-2L does not fit at 128 ranks (each rank holds the model). The float32 MACE rows are not in the cost file
+(float64 only, as for the other models). The fine-tuned MACE model holds CUDA tensors, so on a CPU node the gate's
+PyTorch reference is its CPU copy (`timing.cases`; the first run, job 2290209, failed that gate at loading).
+
+Not done: a float64 GRACE timing (the native `grace/2l/kk` style on the foundation `kokkos.npz`).

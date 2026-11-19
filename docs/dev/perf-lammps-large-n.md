@@ -1,5 +1,7 @@
 # ace-jax in LAMMPS: why throughput falls above 16k atoms
 
+> **Historical (2026-10-02).** A record of the diagnosis, kept for its method. The timings predate the C++ and CUDA kernels, the automatic DAG product basis and lammps-jax on the CPU. Current timings: `docs/dev/accuracy-cost-results.md` (silicon, and the multi-component rows) and the user Performance page.
+
 Diagnosis on a Modal A100-80GB, float64, Cantor medium, at b7b7605
 (`perf/ace-jax-speedups`). The lammps-jax build in the image is 4a7f4fb.
 Scripts are in `bench/perf/` (`bundle_scaling.py`, `lammps_bundle_variant.py`,

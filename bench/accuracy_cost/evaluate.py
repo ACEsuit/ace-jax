@@ -72,12 +72,23 @@ def load_calc(family, path, device="cpu"):
             path = str(cpu_copy(pathlib.Path(path).parent))
         return MACECalculator(model_paths=path, device="cuda" if device == "gpu" else "cpu",
                               default_dtype="float64")
+    if family == "mace_fm":                      # a foundation model's registered head + its energy shift (fit_mace_fm)
+        from .fit_grace import _local
+        from .fit_mace_fm import calculator
+        return calculator(_local(path), "cuda" if device == "gpu" else None)
     if family == "nep":                          # NEP_CPU via calorine, float64, E0 added back (fit_nep)
         from .fit_nep import calculator
+        return calculator(path)
+    if family == "polymlp":                      # pypolymlp's evaluator (float64), E0 added back, ASE stress (fit_polymlp)
+        from .fit_polymlp import calculator
         return calculator(path)
     if family in ("grace", "grace_fs", "grace_abl", "grace_2l"):   # gracemaker's SavedModel (float64), E0 added back (fit_grace)
         from .fit_grace import _local, calculator
         return calculator(_local(path))                # a Sulis fit's status.json names its Sulis path
+    if family == "grace_fm":                     # a GRACE foundation model's SavedModel + its energy shift (fit_grace_fm)
+        from .fit_grace import _local
+        from .fit_grace_fm import calculator
+        return calculator(_local(path))
     if family in ("gap", "gap_noglue", "gap_E30"):  # noglue: the same loader, the XML just has no Glue term; E30: other sigmas
         import quippy
         return quippy.potential.Potential(param_filename=path)

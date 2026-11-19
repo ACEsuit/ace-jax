@@ -38,6 +38,29 @@ mace:         # mace_run_train from scratch, 2 layers, max_ell 3, correlation 3
   # MACE's many-channel nonlinear model.  Trained on a Sulis A100 (envs/sulis-mace.sbatch)
   - {size: c16L0n1, channels: 16, max_L: 0, interactions: 1}
   - {size: c32L0n1, channels: 32, max_L: 0, interactions: 1}
+mace_fm:      # foundation MACE models (fit_mace_fm.py): zero-shot (one constant energy shift per atom from the training
+              # split) and fine-tuned on the benchmark's training split.  `head`: the readout head evaluated
+  - {size: mh1-omat, model: mace-mh-1, head: omat_pbe}
+  # single-head fine-tuning of every weight on the benchmark's training split, at three learning rates (mace_run_train's
+  # default 0.01, 0.001 and 0.0001); the plotted one is the lowest validation loss
+  - {size: mh1-omat-ft-lr1e-2, model: mace-mh-1, head: omat_pbe, finetune: {lr: 0.01, epochs: 60}}
+  - {size: mh1-omat-ft-lr1e-3, model: mace-mh-1, head: omat_pbe, finetune: {lr: 0.001, epochs: 60}}
+  - {size: mh1-omat-ft-lr1e-4, model: mace-mh-1, head: omat_pbe, finetune: {lr: 0.0001, epochs: 60}}
+  # two more fine-tuning seeds of the plotted learning rate (`seed`: mace_run_train's --seed, which sets the 5%
+  # validation draw and the batch order; the starting weights are the foundation model's in every seed)
+  - {size: mh1-omat-ft-lr1e-3_s1, model: mace-mh-1, head: omat_pbe, seed: 1, finetune: {lr: 0.001, epochs: 60}}
+  - {size: mh1-omat-ft-lr1e-3_s2, model: mace-mh-1, head: omat_pbe, seed: 2, finetune: {lr: 0.001, epochs: 60}}
+grace_fm:     # GRACE foundation models (fit_grace_fm.py; OMat24, PBE): zero-shot and fine-tuned on the benchmark's
+              # training split (gracemaker's fine-tuning recipe, every parameter updated)
+  - {size: 2l-omat-large, model: GRACE-2L-OMAT-large-base-fp64}
+  - {size: 1l-omat-large, model: GRACE-1L-OMAT-large-base-fp64}
+  - {size: 2l-omat-large-ft, model: GRACE-2L-OMAT-large-base-fp64, finetune: {updates: 10000}}
+  - {size: 1l-omat-large-ft, model: GRACE-1L-OMAT-large-base-fp64, finetune: {updates: 10000}}
+  # two more fine-tuning seeds each (`seed`: gracemaker's, which sets the 5% test draw and the batch order)
+  - {size: 2l-omat-large-ft_s1, model: GRACE-2L-OMAT-large-base-fp64, seed: 1, finetune: {updates: 10000}}
+  - {size: 2l-omat-large-ft_s2, model: GRACE-2L-OMAT-large-base-fp64, seed: 2, finetune: {updates: 10000}}
+  - {size: 1l-omat-large-ft_s1, model: GRACE-1L-OMAT-large-base-fp64, seed: 1, finetune: {updates: 10000}}
+  - {size: 1l-omat-large-ft_s2, model: GRACE-1L-OMAT-large-base-fp64, seed: 2, finetune: {updates: 10000}}
 gap:          # GAP-18's gap_fit command line, only n_sparse changed
   - {size: s1000, n_sparse: 1000}
   - {size: s3000, n_sparse: 3000}
@@ -174,3 +197,37 @@ grace_2l:      # GRACE-2L (two message-passing layers) from scratch: gracemaker'
   # training-length check: 2l_small at 3x the updates (150k), seed 0 only; accuracy only
   - {size: 2l_small_long, preset: GRACE_2LAYER_latest, lmax: [4, 3], max_order: 4, indicator_lmax: 1, n_rad_max: [32, 32],
      prod_func_n_max: [32, 32], n_mlp_dens: 12, n_rad_base: 8, target_total_updates: 150000, timing: false}
+polymlp:       # Seko's polynomial MLPs (fit_polymlp.py; pypolymlp 0.22.1): points of his grid search at cutoff 5 A
+               # (n_gaussians rint((rc + 1) x {1, 1.25, 1.5}) = 6, 8, 9; gtinv l-sets and model types of
+               # utils/grid_search).  model_type 2: polynomial (max_p) of all invariants; 3: polynomial of the pair
+               # invariants + linear in all; 4: polynomial of the order <= 2 invariants + linear in all.  gtinv_maxl:
+               # max l per invariant order from 2 up.  n_params: Pypolymlp.n_features (fit_polymlp --count)
+               # No pair-only model (a pair-g9p3 row was fitted and removed, 2026-11-12): every Si model with files
+               # in Seko's repository is gtinv (polymlp/README.md)
+  - {size: m3g6-l44,   model_type: 3, max_p: 2, gtinv_order: 3, gtinv_maxl: [4, 4],    n_gaussians: 6, n_params: 141}
+  - {size: m3g8-l442,  model_type: 3, max_p: 2, gtinv_order: 4, gtinv_maxl: [4, 4, 2], n_gaussians: 8, n_params: 300}
+  - {size: m3g9-l882,  model_type: 3, max_p: 2, gtinv_order: 4, gtinv_maxl: [8, 8, 2], n_gaussians: 9, n_params: 747}
+  - {size: m4g6-l442,  model_type: 4, max_p: 2, gtinv_order: 4, gtinv_maxl: [4, 4, 2], n_gaussians: 6, n_params: 864}
+  - {size: m4g9-l442,  model_type: 4, max_p: 2, gtinv_order: 4, gtinv_maxl: [4, 4, 2], n_gaussians: 9, n_params: 1782}
+  - {size: m4g8-l842,  model_type: 4, max_p: 2, gtinv_order: 4, gtinv_maxl: [8, 4, 2], n_gaussians: 8, n_params: 3536}
+  - {size: m4g9-l882,  model_type: 4, max_p: 2, gtinv_order: 4, gtinv_maxl: [8, 8, 2], n_gaussians: 9, n_params: 4797}
+  - {size: m4g8-l1282, model_type: 4, max_p: 2, gtinv_order: 4, gtinv_maxl: [12, 8, 2], n_gaussians: 8, n_params: 6984}
+  # model type 2 at order 3: the form of the accurate Si models in Seko's repository (gtinv_maxl [8, 4] and [12, 4]
+  # there, at 6 and 8 A; here at the benchmark's cutoff).  rank: false -- no design rank (an SVD at this size)
+  - {size: m2g6-l44,   model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [4, 4],  n_gaussians: 6, n_params: 7380,  rank: false}
+  - {size: m2g6-l84,   model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [8, 4],  n_gaussians: 6, n_params: 10584, rank: false}
+  - {size: m2g8-l84,   model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [8, 4],  n_gaussians: 8, n_params: 18720, rank: false}
+  - {size: m2g9-l84,   model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [8, 4],  n_gaussians: 9, n_params: 23652, rank: false}
+  - {size: m2g8-l124,  model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [12, 4], n_gaussians: 8, n_params: 25424, rank: false}
+  - {size: m2g9-l124,  model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [12, 4], n_gaussians: 9, n_params: 32130, rank: false}
+  # the same models with a denser penalty grid (Seko, 2026-11-17: he tests 10-30 values): 28 values, 1/3 decade
+  # apart, a superset of the 10 above; selection as before, on the validation split of train
+  - {size: m4g8-l842-a28, model_type: 4, max_p: 2, gtinv_order: 4, gtinv_maxl: [8, 4, 2], n_gaussians: 8, n_params: 3536, reg_alpha: [-8, 1, 28]}
+  - {size: m4g9-l882-a28, model_type: 4, max_p: 2, gtinv_order: 4, gtinv_maxl: [8, 8, 2], n_gaussians: 9, n_params: 4797, reg_alpha: [-8, 1, 28]}
+  - {size: m4g8-l1282-a28, model_type: 4, max_p: 2, gtinv_order: 4, gtinv_maxl: [12, 8, 2], n_gaussians: 8, n_params: 6984, reg_alpha: [-8, 1, 28]}
+  - {size: m2g6-l44-a28, model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [4, 4], n_gaussians: 6, n_params: 7380, rank: false, reg_alpha: [-8, 1, 28]}
+  - {size: m2g6-l84-a28, model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [8, 4], n_gaussians: 6, n_params: 10584, rank: false, reg_alpha: [-8, 1, 28]}
+  - {size: m2g8-l84-a28, model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [8, 4], n_gaussians: 8, n_params: 18720, rank: false, reg_alpha: [-8, 1, 28]}
+  - {size: m2g9-l84-a28, model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [8, 4], n_gaussians: 9, n_params: 23652, rank: false, reg_alpha: [-8, 1, 28]}
+  - {size: m2g8-l124-a28, model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [12, 4], n_gaussians: 8, n_params: 25424, rank: false, reg_alpha: [-8, 1, 28]}
+  - {size: m2g9-l124-a28, model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [12, 4], n_gaussians: 9, n_params: 32130, rank: false, reg_alpha: [-8, 1, 28]}

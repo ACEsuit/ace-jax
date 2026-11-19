@@ -296,3 +296,6 @@ These pages use the words below with one meaning only.
 | block | the part of H or S that connects the orbitals of one atom with the orbitals of a second atom. An on-site block connects an atom with itself |
 | channel | one operator that a Hamiltonian model predicts: `H`, `S`, or `H_up` and `H_dn` for collinear spin |
 | band energy | the sum of the occupied eigenvalues of a Hamiltonian model. It is not a total energy |
+| foundation model | a model that its authors fitted to a large dataset of many elements, for use with many materials |
+| zero-shot | the use of a foundation model as published, with no fit to the data of the benchmark |
+| fine-tuning | a fit that starts from the parameters of a foundation model and changes them to agree with a small dataset |

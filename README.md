@@ -96,8 +96,12 @@ is a compact usage guide.
 
 Fits agree with the ACEfit design matrix and least-squares solution to 1e-8.
 PACE evaluation agrees with the ML-PACE C++ code and python-ace. CI checks
-both. The throughput benchmarks against LAMMPS ML-PACE are in
-[`docs/dev/benchmarks.md`](https://github.com/ACEsuit/ace-jax/blob/main/docs/dev/benchmarks.md).
+both.
+
+The [Performance page](https://acesuit.github.io/ace-jax/benchmarks/) gives
+the benchmarks. On silicon, it compares the accuracy and the cost of ace-jax
+with other interatomic potentials in LAMMPS. On a five-element alloy, it
+compares the speed of ace-jax with ML-PACE and MACE.
 
 ## Citing
 

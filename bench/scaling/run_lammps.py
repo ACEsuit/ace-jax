@@ -29,14 +29,22 @@ KOKKOS = {"acejax": "newton on neigh half", "mlpace": "newton on neigh half",
           # bench/scaling/envs/sulis-grace-runtime.sh): grace/runtime/kk and pace/runtime/kk need newton on, half list
           "grace-rt": "newton on neigh half", "pace-rt": "newton on neigh half",
           # Symmetrix v0.3.0 (bench/scaling/envs/sulis-symx3.sh), the same pair style as "mace" in its own LAMMPS
-          "mace-symx3": "newton on neigh half"}
+          "mace-symx3": "newton on neigh half",
+          # Symmetrix v0.3.0's foundation-model styles (FDN below; the lammps_cuda_fdn build of sulis-symx3.sh)
+          "mace-fdn": "newton on neigh half", "mace-fdn-f32": "newton on neigh half", "mace-fdn-f32m": "newton on neigh half"}
 # grace-runtime's CPU styles (grace/runtime, pace/runtime) are plain MPI + OpenMP styles, not KOKKOS: on the CPU
 # they take OMP_NUM_THREADS threads a rank (cpu_mpirun binds them) and no -k switches
 RUNTIME = ("grace-rt", "pace-rt")
 # Symmetrix's pair styles: v0.3.0's plain symmetrix/mace threads each MPI rank with OpenMP itself ("8 threads per rank"
 # its README's rule of thumb), so on the CPU it, like grace-runtime, takes no -k switches
-MACE_STYLES = ("mace", "mace-symx3")
-OMP_PLAIN = (*RUNTIME, "mace-symx3")
+# symmetrix/mace/foundation: the fixed-architecture kernels for the preset shapes (MACE-MH-1, MP-0, OMAT-0, ... and
+# models fine-tuned from them): float64, float32, and float32-mixed (fp16 tensor-core GEMMs; GPU only)
+FDN = {"mace-fdn": "symmetrix/mace/foundation", "mace-fdn-f32": "symmetrix/mace/foundation/float32",
+       "mace-fdn-f32m": "symmetrix/mace/foundation/float32-mixed"}
+MACE_STYLES = ("mace", "mace-symx3", *FDN)
+# Seko's pair_style polymlp (lammps-polymlp-package) is OpenMP only and has no MPI support (its per-atom arrays
+# are indexed by atom tag and sized by the local atom count): one rank, OMP_NUM_THREADS threads
+OMP_PLAIN = (*RUNTIME, "mace-symx3", "mace-fdn", "mace-fdn-f32", "polymlp")   # on the CPU
 # Symmetrix-XL (bench/scaling/envs/sulis-xl.sh): its fast path is pair_style symmetrix/mace[/float32]/kk with
 # a JIT-compiled R1 artifact, so it runs Kokkos on the CPU too (the non-kk style is the old evaluator)
 XL = {"mace-xl": ("symmetrix/mace/kk", "float64"), "mace-xl-f32": ("symmetrix/mace/float32/kk", "float32")}
@@ -50,7 +58,7 @@ def _pair(style, model_path, elements, device, extra=None):
         return ("pair_style pace product\n" if device == "gpu" else "pair_style pace\n") + \
                f"pair_coeff * * {model_path} {els}\n"
     if style in MACE_STYLES:                # Symmetrix: element-specific .json
-        return f"pair_style symmetrix/mace\npair_coeff * * {model_path} {els}\n"
+        return f"pair_style {FDN.get(style, 'symmetrix/mace')}\npair_coeff * * {model_path} {els}\n"
     if style in XL:                         # extra: the R1 artifact fragment (xl_pair_args); GPU one rank
         dd = "no_domain_decomposition" if device == "gpu" else "mpi_message_passing"
         return (f"pair_style {XL[style][0]} {dd} streamed_edges direct profile speed {extra}\n"
@@ -79,6 +87,8 @@ def _pair(style, model_path, elements, device, extra=None):
         return f"pair_style {'grace/fs/kk' if device == 'gpu' else 'grace/fs'}\npair_coeff * * {model_path} {els}\n"
     if style == "nep":                      # NEP_CPU's USER-NEP (float64, MPI): pair_style takes no arguments
         return f"pair_style nep\npair_coeff * * {model_path} {els}\n"
+    if style == "polymlp":                  # lammps-polymlp-package: polymlp.yaml (pypolymlp >= 0.9)
+        return f"pair_style polymlp\npair_coeff * * {model_path} {els}\n"
     if style == TRIM:                       # PR 309 plugin, then the juliac --trim library
         return f"plugin load ${{aceplugin}}\npair_style ace\npair_coeff * * {model_path} {els}\n"
     if style == "gap":                       # QUIP takes atomic numbers, and the xml label picks the Potential

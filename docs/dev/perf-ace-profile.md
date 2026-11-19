@@ -1,5 +1,7 @@
 # `ACEModel` GPU profile, and the pool-first / feature-major decision
 
+> **Historical (2026-10-02).** A record of the profile and the decision it led to. The timings predate the C++ and CUDA kernels, the automatic DAG product basis and lammps-jax on the CPU. Current timings: `docs/dev/accuracy-cost-results.md` (silicon, and the multi-component rows) and the user Performance page.
+
 Task 8 of the perf plan. This profiles the linear ACE model's force call and
 decides which of PACE's model-level changes `ACEModel` should get in Task 9.
 

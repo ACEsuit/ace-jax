@@ -26,6 +26,10 @@ PRESETS = {
     "ACE variants": ("ace", "ace_E10", "ace_f32", "ace_ffi_reduced", "ace_lr", "ace_pshape", "ace_pshape_lr", "ace_pshape_E10"),
     "Same model, other code": ("ace", "ace_tab", "ace_tabfork", "ace_trim", "ace_ffi", "ace_ffi_reduced", "ace_tab_mixed", "mace_L0",
                                "mace_L1", "mace_xl_L0", "mace_xl_L1"),
+    "Foundation models": ("ace", "ace_ffi", "mace_L0", "mace_L1", "grace", "grace_2l", "mace_fm", "mace_fm_ft",
+                          "mace_fm_ft_mixed", "grace_fm", "grace_fm_ft"),
+    # (polymlp, a first-pass family, is under "All" only: a preset of its own waits for the review of
+    # docs/dev/accuracy-cost-results.md -- the page's JSON lists the presets)
     "All": None,
 }
 GAP_X, GAP_Y, ROW_H = 0.08, 0.1, 380          # subplot gaps (paper fraction) and the height of one row (px)
@@ -50,7 +54,7 @@ def traces(data, key, xa, ya, xlabel, shown, codes):
         p = [q for q in pts if q[key] is not None and q["x"] is not None]
         if not p:
             continue
-        t = {"type": "scatter", "mode": "lines+markers", "name": lab, "legendgroup": fam, "showlegend": False,
+        t = {"type": "scatter", "mode": "markers" if fam in P.POINTS_ONLY else "lines+markers", "name": lab, "legendgroup": fam, "showlegend": False,
              "xaxis": xa, "yaxis": ya, "x": [q["x"] for q in p], "y": [q[key] for q in p],
              "line": {"color": col, "width": 2, "dash": DASH[ls]},
              "marker": {"symbol": SYMBOL[mk] + ("" if filled else "-open"), "size": 9, "color": col,
@@ -61,10 +65,18 @@ def traces(data, key, xa, ya, xlabel, shown, codes):
                                "parameters %{customdata[1]:,}<br>%{customdata[4]}<extra></extra>"),
              "visible": True if shown is None or fam in shown else "legendonly", "meta": fam}
         if all(key + "_lo" in q for q in p):
-            t["error_y"] = {"type": "data", "symmetric": False, "color": col, "thickness": 1.2, "width": 3,
+            top = fam in P.POINTS_ONLY                 # as plot_cost.series: a lone point's bar in ink, wider
+            t["error_y"] = {"type": "data", "symmetric": False, "color": P.INK if top else col,
+                            "thickness": 1.6 if top else 1.2, "width": 5 if top else 3,
                             "array": [q[key + "_hi"] - q[key] for q in p],
                             "arrayminus": [q[key] - q[key + "_lo"] for q in p]}
         out.append(t)
+    for fam in {f for f, _, _ in P.arrow_pairs(data, key)}:   # plot_cost's arrows: a thin line per pair, in the
+        seg = [(a, b) for f, a, b in P.arrow_pairs(data, key) if f == fam]   # derived family's group (shown with it)
+        out.append({"type": "scatter", "mode": "lines", "name": P.FAM[fam][0], "legendgroup": fam, "showlegend": False,
+                    "xaxis": xa, "yaxis": ya, "x": [v for a, b in seg for v in (a[0], b[0], None)],
+                    "y": [v for a, b in seg for v in (a[1], b[1], None)], "line": {"color": P.FAM[fam][1], "width": 1.5},
+                    "hoverinfo": "skip", "visible": True if shown is None or fam in shown else "legendonly", "meta": fam})
     return out
 
 
