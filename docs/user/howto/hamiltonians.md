@@ -86,16 +86,18 @@ with these options:
 
 - `none` (the default) fits with no prior. Use it when the data is from one
   material and the structures are similar.
-- `loo` selects the prior scale by leaving one structure out at a time. Use it
-  for datasets with many elements or few structures.
-- `evidence` selects the prior scale by the Bayesian evidence.
+- `evidence` selects the prior scale by the Bayesian evidence. Use it for
+  datasets with many elements.
+- `loo` selects the prior scale by leaving one structure out at a time. On a
+  dataset with four elements it did not remove the problem in the warning
+  below, and its fit used much more time and disk space.
 - A number sets the scale directly.
 
 !!! warning
     A fit with no prior can give an eigenvalue far from the bands when the
     overlap matrix is almost singular. The block errors do not show this
     problem. If the validation set shows a structure with a large band error,
-    fit again with `--prior loo` or `--prior evidence`.
+    fit again with `--prior evidence`.
 
 ## Read the errors
 

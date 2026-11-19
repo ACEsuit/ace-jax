@@ -391,8 +391,9 @@ structures. User page: `docs/user/howto/hamiltonians.md`; measurements: `docs/de
 - `aj ham fit --data DIR --out model.npz [--validation DIR] [--prior none|loo|evidence|press|<number>]`
   (`--site-rcut`, `--site-radials`, `--bond-radials`, `--bond-rcut`, `--coupled N L`, `--env R N L NB LB` or
   `--no-env`, `--bonds N` to subsample off-site blocks). The bond-environment group gives most of the
-  accuracy and most of the cost. With many elements or nearly dependent overlaps use `--prior loo` (or
-  `evidence`): without a prior one spurious eigenvalue can appear that the block errors do not show.
+  accuracy and most of the cost. With many elements or nearly dependent overlaps use `--prior evidence`:
+  without a prior one spurious eigenvalue can appear that the block errors do not show (`loo` did not remove
+  it on the four-element alloy, and costs hours and tens of GB of scratch there).
 - `aj eval --model model.npz --data DIR` (or `--validation` on the fit): block errors and the
   electronic-structure errors of `ace_jax.ham.metrics` (band RMSE at a common zero and from own Fermi levels,
   Fermi level, band energy per atom, density-of-states Wasserstein distance, outlier structures).
