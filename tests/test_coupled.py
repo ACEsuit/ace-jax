@@ -194,3 +194,32 @@ def test_gpu_plan_emulated_equals_the_reference(name, T):
         E1, d1 = emulate_gpu(ints, reals[zc], A[order])
         assert E1 == pytest.approx(E0[0], rel=1e-12, abs=1e-12)
         np.testing.assert_allclose(d1[new], d0[0], atol=1e-11 * np.abs(d0).max())
+
+
+@pytest.mark.parametrize("device", ["gpu"], indirect=True)
+@pytest.mark.parametrize("dtype", ["float64", "float32"])
+@pytest.mark.parametrize("name", NAMES)
+def test_gpu_analytic_radial_matches_the_table(device, monkeypatch, name, dtype):  # noqa: F811
+    """The CUDA kernel with the tensor radial evaluated analytically (`ffi.RADIAL`) against the same kernel on
+    the radial table, which approximates it to ~1e-9 (forces ~1e-8 of the largest)."""
+    m, meta = _lean(name)
+    if ffi.analytic_plan(m, ffi.plan(m, gpu=True)[0]) is None:
+        pytest.skip(f"{name}: the tensor radial is not the polynomial one")
+    m = with_dtype(m, dtype)
+    rcut = float(meta["rcut"])
+    at = cluster(meta)
+    els = [int(z) for z in meta["elements"]]
+    out = []
+    with jax.default_device(jax.devices(device)[0]):
+        pos, z, graph = matrix_inputs(at, rcut + 1.0, [els.index(int(n)) for n in at.numbers])
+        for radial in (None, "analytic"):
+            monkeypatch.setattr(ffi, "RADIAL", radial)
+            attrs, _ = ffi.kernel_inputs(m, True)
+            assert (attrs["nq"] > 0) == (radial == "analytic")
+            efn, ffn = ffi.lammps_fns(m, len(els), list(range(len(els))), rcut, True)
+            out.append([np.asarray(a) for a in (efn(pos.astype(dtype), z, graph), ffn(pos.astype(dtype), z, graph))])
+    (e0, f0), (e1, f1) = out
+    print(f"\n  max|de| {np.abs(e1 - e0).max():.1e}  max|dF|/max|F| {np.abs(f1 - f0).max() / np.abs(f0).max():.1e}")
+    te, tf = (1e-8, 1e-6) if dtype == "float64" else (1e-4, 1e-3)
+    assert np.abs(e1 - e0).max() <= te * max(np.abs(e0).max(), 1.0)
+    assert np.abs(f1 - f0).max() <= tf * np.abs(f0).max()

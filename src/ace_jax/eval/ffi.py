@@ -575,6 +575,50 @@ def coupled_gpu_plan(model, T=None, check=True, real=8):
     return ints.astype(np.uint32).view(np.int32), np.ascontiguousarray(np.concatenate(reals, 1)), T
 
 
+ANALYTIC_LMAX = 8                                     # the degrees the kernel's analytic force pass is made for
+# "analytic" (opt-in until timed in LAMMPS): the GPU kernel evaluates a polynomial tensor radial itself
+# (`analytic_plan`) in its force pass, a lane per neighbour, and for few A in float64 in its A pass too; the
+# default, None or "table", reads the radial table.  Forces then differ from the table's by its error (~1e-8).
+RADIAL = os.environ.get("ACEJAX_FFI_RADIAL") or None
+
+
+def analytic_plan(model, runs):
+    """(ints, reals, nq) of the GPU kernel's analytic radial for a lean model whose tensor radial is the
+    polynomial one (`radial_kind` "analytic", `rnl_basis` "poly": R_c = env(x) sum_q W_cq P_q(x), x the Agnesi
+    transform), or None.  `runs`: `plan(model, gpu=True)`'s, each of one degree l.  ints: per species pair and
+    degree the first entry of each q (NZ^2 (L + 1) (nq + 1)), then each entry's first A (of its run's 2l + 1);
+    reals: per pair the transform's 7 and the envelope's 5 parameters, the recursion's A, B, C (nq each), the
+    entries' W.  nq stops at the last polynomial any column reads.  The pair radial stays in the table (its
+    columns after n_rnl).  None too above degree `ANALYTIC_LMAX` or where a run is not a whole degree."""
+    if model.radial_kind != "analytic" or getattr(model, "rnl_basis", "poly") != "poly":
+        return None
+    W = np.asarray(model.rnl_Wnlq, np.float64)             # (NZ, NZ, n_rnl, n_q)
+    nz, _, n_rnl, _ = W.shape
+    if n_rnl != model.rtab_coefs.shape[-1] - model.Wpair.shape[0]:
+        return None
+    used = np.flatnonzero(np.abs(W).sum(axis=(0, 1, 2)))
+    nq = int(used.max()) + 1 if len(used) else 1
+    deg = np.sqrt(runs[:, 2]).astype(np.int64)             # each run's degree
+    L = int(model.lmax)
+    if L > ANALYTIC_LMAX or not (np.array_equal(runs[:, 2], deg * deg) and np.array_equal(runs[:, 3], 2 * deg + 1)):
+        return None
+    ptr, ents, vals, off = [], [], [], 0
+    for pz in range(nz * nz):
+        Wp = W.reshape(nz * nz, n_rnl, -1)[pz][:, :nq]
+        for l in range(L + 1):
+            u = np.flatnonzero(deg == l)
+            n, q = np.nonzero(Wp[runs[u, 1]])              # (run of this degree, q)
+            o = np.lexsort((n, q))
+            ptr.append(off + np.r_[0, np.cumsum(np.bincount(q, minlength=nq))])
+            ents.append(runs[u, 0][n[o]]); vals.append(Wp[runs[u, 1]][n[o], q[o]])
+            off += len(o)
+    par = np.concatenate([np.asarray(model.rnl_transform, np.float64).reshape(nz * nz, 7),
+                          np.asarray(model.rnl_envelope, np.float64).reshape(nz * nz, 5)], 1)
+    abc = np.concatenate([np.asarray(a, np.float64)[:nq] for a in (model.polys_A, model.polys_B, model.polys_C)])
+    return (np.concatenate([np.concatenate(ptr), np.concatenate(ents)]).astype(np.int32),
+            np.concatenate([par.ravel(), abc, np.concatenate(vals)]), nq)
+
+
 def choose_form(model, form, n_nodes):
     """"dag" or "coupled" for `form` (`FORMS`): auto is coupled where the model has a coupled plan with fewer
     operations than `COUPLED_GAIN` x the DAG's (3 a node).  Returns (form, the coupled arrays or None)."""
@@ -632,6 +676,12 @@ def kernel_inputs(model, gpu=False, precision=None, form=None):
                  n_rnl=np.int64(model.rtab_coefs.shape[-1] - model.Wpair.shape[0]),
                  solid=np.int64(model.ysolid), n_leaf=np.int64(n_leaf))
     i32 = lambda a: jnp.asarray(a, jnp.int32)
+    if gpu:                                                # the radial: the table, or (asked for) analytic
+        if RADIAL not in (None, "table", "analytic"):
+            raise ValueError(f"ffi.RADIAL is 'table' or 'analytic', got {RADIAL!r}")
+        an = analytic_plan(model, runs) if RADIAL == "analytic" else None   # where the model has one
+        radial = (i32(an[0]), jnp.asarray(an[1], model.E0.dtype)) if an else (i32(np.zeros(1)), jnp.zeros(1, model.E0.dtype))
+        attrs["nq"] = np.int64(an[2] if an else 0)
     if not gpu:
         attrs["form"] = np.int64(0)
         which, cp = choose_form(model, form, len(factor))
@@ -654,7 +704,7 @@ def kernel_inputs(model, gpu=False, precision=None, form=None):
                          "lv": np.int64(0), "threads": np.int64(T), "form": np.int64(1)},   # n_st, tile: sizes
                         (model.rtab_coefs, model.table_cutoffs(), i32(runs), i32(np.zeros((1, 2))),
                          i32(np.zeros(0)), jnp.asarray(reals[:, :ints[1]], dag), model.E0, i32(np.zeros(1)),
-                         i32(ints), jnp.asarray(reals, dag)))
+                         i32(ints), jnp.asarray(reals, dag)) + radial)
         except coupled.NoPlan:
             if gform == "coupled":
                 raise
@@ -668,7 +718,7 @@ def kernel_inputs(model, gpu=False, precision=None, form=None):
     lc = np.zeros((len(ct), pos.max() + 1 if n_leaf else 0)); lc[:, pos] = np.tile(ct[:, ct.shape[1] - n_leaf:], 2)
     return ({**attrs, "n_st": np.int64(n_st), "tile": np.int64(tile), "lv": np.int64(lv),
              "threads": np.int64(T), "form": np.int64(0)},
-            consts + (i32(lev), i32(pull), jnp.asarray(lc, dag)))
+            consts + (i32(lev), i32(pull), jnp.asarray(lc, dag)) + radial)
 
 
 PULL_TILE = 2048                                      # leaf parents per tile
@@ -984,7 +1034,7 @@ def _edge_bwd(attrs, g, ct):
     return (ct[:, None, None] * g,) + (None,) * 3 + (None,) * (N_CONSTS_GPU if gpu else N_CONSTS)
 
 
-N_CONSTS, N_CONSTS_GPU = 7, 10                        # `kernel_inputs`' arrays (gpu=False, True)
+N_CONSTS, N_CONSTS_GPU = 7, 12                        # `kernel_inputs`' arrays (gpu=False, True)
 edge_site_energies.defvjp(_edge_fwd, _edge_bwd)
 
 

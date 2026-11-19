@@ -165,3 +165,47 @@ o4d12's main run and did not start o3d8), µs/atom-step:
 | o4d20 | 1.571 | 0.436, 0.450 |
 | o4d16 | 0.329 | 0.187 |
 | o4d12 | (0.151 in the published table, another node) | 0.121 |
+
+## Analytic radial on the GPU (2026-11-19, late)
+
+Agreed with the user: a path that needs the polynomial tensor radial (`radial_kind` "analytic", `rnl_basis`
+"poly") is acceptable. Opt-in for now: `ffi.RADIAL = "analytic"` / `ACEJAX_FFI_RADIAL=analytic`; models without
+such a radial (splines, learned radials after `to_spline`, PACE) keep the table. `ffi.analytic_plan`: per species
+pair and degree, the W entries by q; `ace_forces_lane` / `ace_density_lane` in `ace_ffi_gpu.cu` (a warp per
+block, a lane per neighbour, one instantiation per lmax up to 8).
+
+A100 (Modal), 32,768 Si atoms, ms, table kernel then analytic:
+
+| model, type | forces | A |
+|---|---|---|
+| o4d20 float64 | 2.60, 1.83 | 0.98, 2.54 (not taken) |
+| o4d16 float64 | 1.41, 0.79 | 0.77, 1.07 (not taken) |
+| o3d8 float64 | 0.51, 0.26 | 0.35, 0.23 |
+| o4d20 float32 | 1.60, 1.03 | 0.78, 1.22 (not taken) |
+| o4d16 float32 | 1.13, 0.51 | 0.61, 0.62 (not taken) |
+| o3d8 float32 | 0.41, 0.16 | 0.29, 0.17 (not taken: 2e-3 eV/atom) |
+
+What it took, in order:
+
+- The analytic radial as a drop-in for the table inside the team kernels: slower (forces 5.6 ms, A 3.2 at o4d20):
+  every lane of a team repeats the recursion and scans all entries. Removed.
+- A lane per neighbour with the degree's radial columns in the lane's column of shared memory: o3d8 0.39, but
+  o4d16 2.2 and o4d20 6.1 (5 warps an SM, index work per (harmonic, column)).
+- The degree's 2l + 1 sums dE/dY, dE/dY' in registers, a function per degree, the plan's entries naming the
+  first A of their column: o4d20 1.86. One kernel per lmax (registers follow the largest degree): 1.83, o4d16
+  0.86 -> 0.79, o3d8 0.33 -> 0.26.
+- The A pass the same way sums each A entry over the warp by shuffles: it wins only for few A, and float32
+  loses the pair term's digits in the transform, so it is taken for n_a <= 64 in float64 only. Where it is not
+  taken the energy is the table's and the forces the analytic radial's: they differ by the table's error.
+
+Nsight on `ace_forces_lane` (o4d20 float64): 168 registers, 17.5 KB shared a warp (12.5 of it the lane's
+harmonics), 8 warps an SM, no eligible warp 65 % of cycles: occupancy-bound. Symmetrix's 0.78 ms comes with
+generated contracted harmonics (no Y array per lane).
+
+Kernel sums now, o4d20 float64: 4.7 + 1.83 + 0.98 = 7.5 ms (main 21.6, Symmetrix ~4.2); o4d16 1.3 + 0.79 + 0.77
+= 2.9 (main 5.5); o3d8 0.08 + 0.26 + 0.23 = 0.57 (main 0.94; Symmetrix's whole step 0.59).
+
+Symmetrix's `symmetrix/ace/kk` on a Sulis A100-PCIE-40GB (job 2295321, gpu011; LAMMPS 0165101, its `in.acejax`,
+32,768 Si atoms, three runs each), µs/atom-step, float64 then its float32 mode: o4d20 0.121-0.124 and
+0.092-0.095; o4d16 0.0556 and 0.047; o3d8 0.0165 and 0.0166. These reproduce its own Perlmutter figures (0.116,
+0.0555, 0.0180). That job was cancelled by mistake before the ace-jax legs; 2295397 repeats all three.
