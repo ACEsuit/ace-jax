@@ -380,6 +380,34 @@ User page: `docs/user/howto/batch.md`; numbers: `docs/dev/batched-evaluation-res
   `batch.temperature(p, mass, live)`; Nose-Hoover counts padding as DOF -> only unpadded (one-size)
   batches. Tests `tests/test_batch_md.py`.
 
+### Hamiltonian models (`aj ham`, the `ham` extra; new, interface may change)
+
+Linear ACE models of the H and S blocks of DFT in an atomic-orbital basis; closed-form fit from a few
+structures. User page: `docs/user/howto/hamiltonians.md`; measurements: `docs/dev/ham-results.md`.
+
+- Data: a directory of DeepH-layout subdirectories (`hamiltonians.h5`, `overlaps.h5`; `up/` + `dn/` inside =
+  collinear spin, channels `H_up`, `H_dn`, `S`) or of operator caches (`ace_jax.ham.cache.save`), one orbital
+  basis for all. FHI-aims output goes through Quoll.jl (`ham/julia/ingest.jl`).
+- `aj ham fit --data DIR --out model.npz [--validation DIR] [--prior none|loo|evidence|press|<number>]`
+  (`--site-rcut`, `--site-radials`, `--bond-radials`, `--bond-rcut`, `--coupled N L`, `--env R N L NB LB` or
+  `--no-env`, `--bonds N` to subsample off-site blocks). The bond-environment group gives most of the
+  accuracy and most of the cost. With many elements or nearly dependent overlaps use `--prior loo` (or
+  `evidence`): without a prior one spurious eigenvalue can appear that the block errors do not show.
+- `aj eval --model model.npz --data DIR` (or `--validation` on the fit): block errors and the
+  electronic-structure errors of `ace_jax.ham.metrics` (band RMSE at a common zero and from own Fermi levels,
+  Fermi level, band energy per atom, density-of-states Wasserstein distance, outlier structures).
+  `--nelectrons` (per cell, or `Z:n,...` per atom; default the atomic numbers), `--kpts`, `--width`,
+  `--smearing`, `--window LO HI`. Quote the band RMSE from own Fermi levels when comparing with
+  publications; a per-structure rigid shift of a few meV sits in the common-zero number.
+- `aj ham predict --model M --data <extxyz | DIR> --out DIR`: `hamiltonians_pred.h5`, `overlaps_pred.h5` per
+  structure (DeepH layout). `aj ham bands --model M --structure S [--index i] [--path GXMG] --out bands.npz
+  --plot bands.png`: path bands and grid DoS; with blocks in the structure, the reference's bands and the errors.
+- Python: `HamiltonianCalculator("model.npz", kpts=, nelectrons=, width=, smearing=, threads=)` (ASE):
+  eigenvalues, Fermi level, H and S blocks, `write_results(dir)`, and the BAND energy with forces and stress
+  (not a total energy: no repulsive term). `ace_jax.operators.io.save / load` is the model file
+  (`meta_json` kind "operator"); `HamiltonianPredictor.from_file`.
+- float64 (`jax.config.update("jax_enable_x64", True)`; the commands set it).
+
 ### JAX-MD (MD fully on the device)
 
 `pip install "ace-jax[jaxmd]"`. User page: `docs/user/howto/jax-md.md`.

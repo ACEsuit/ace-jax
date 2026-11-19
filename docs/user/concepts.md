@@ -292,3 +292,7 @@ These pages use the words below with one meaning only.
 | kernel | the compiled C++ or CUDA program that evaluates a linear ACE model in place of the JAX model (`ffi=True`) |
 | product basis | the products of the one-particle basis functions of an atom. Its calculation uses most of the time of a large model |
 | mixed precision | a mode of the kernel: the product basis in float32, all other quantities in float64 (`ffi_precision="mixed"`) |
+| Hamiltonian model | a model that predicts the blocks of the Hamiltonian matrix H and the overlap matrix S of a structure |
+| block | the part of H or S that connects the orbitals of one atom with the orbitals of a second atom. An on-site block connects an atom with itself |
+| channel | one operator that a Hamiltonian model predicts: `H`, `S`, or `H_up` and `H_dn` for collinear spin |
+| band energy | the sum of the occupied eigenvalues of a Hamiltonian model. It is not a total energy |

@@ -1,7 +1,7 @@
 """Inference time of MACE-H (maurergroup/MACE-H) on a DeepH-layout dataset, with untrained
 weights: the forward pass and the conversion of the network output to Hamiltonian blocks,
 as `DeepHE3Kernel.eval` runs them.  Run in MACE-H's own environment (torch, e3nn, PyG):
-    python bench/ham/maceh_time.py <MACE-H or DeepH-E3 checkout> <dataset dir> <work dir> <cpu|cuda> [threads] [train.ini]
+    python bench/ham/maceh_time.py <MACE-H or DeepH-E3 checkout> <dataset dir> <work dir> <cpu|cuda> [threads] [train.ini] [repeats]
 <dataset dir> holds one folder per structure (hamiltonians.h5, element.dat, ...).  The network
 is the [network] section of MACE-H's configs/train.ini (its Bi2Te3 example: 3 blocks,
 correlation 3, hidden 64x0e+64x1o+64x2e, l_max 4, cutoff 7.2 angstrom), or that of the given
@@ -14,6 +14,7 @@ import time
 repo, data, work, device = sys.argv[1:5]
 threads = int(sys.argv[5]) if len(sys.argv) > 5 else None
 config = sys.argv[6] if len(sys.argv) > 6 else None
+repeats = int(sys.argv[7]) if len(sys.argv) > 7 else 5
 if threads:
     for v in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
         os.environ[v] = str(threads)
@@ -73,11 +74,11 @@ def run():
 
 run()
 ts = []
-for _ in range(5):
+for _ in range(repeats):
     t = time.perf_counter(); H = run(); ts.append(time.perf_counter() - t)
 t = min(ts)
 fs = []
-for _ in range(3):                                           # the network alone, without the conversion to blocks
+for _ in range(min(3, repeats)):                             # the network alone, without the conversion to blocks
     t0 = time.perf_counter()
     with torch.no_grad():
         net(batch)
