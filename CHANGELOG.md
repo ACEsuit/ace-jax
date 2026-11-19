@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Fixed
+
+- **Hamiltonian models: the features of the atoms near a bond are smooth at the bond midpoint.** These
+  features use spherical harmonics about the midpoint of the bond, and a harmonic with l > 0 has no value
+  at the origin. Thus the features changed abruptly when an atom was near the midpoint, and bonds of a
+  perfect crystal that are equivalent by symmetry got different blocks (up to 2.5 meV for bulk gold) when
+  an atom was exactly at the midpoint. The features now use `rho = sqrt(x^2 + a^2)` for an atom at `x`
+  from the midpoint: the radial variable is `rho - a` and the harmonics are regular solid harmonics of
+  `x / rho`. The new setting is `BondBasis.env_core` (`a`, 1 Å by default). This also decreases the
+  errors: for bulk gold with the default basis and 4 training structures, the band error decreases from
+  3.0 meV to 2.1 meV. A model file from 0.7.0 gives the same predictions as before; fit the model again
+  to get the correction.
+- A fit of a Hamiltonian model on a CPU releases compiled programs also while it assembles the rows of
+  large structures (see 0.7.0, "Hamiltonian models of several elements on a CPU").
+
+### Added
+
+- `ace_jax.eval.harmonics.regular_solid_harmonics` gives the solid harmonics as polynomials, with exact
+  values and derivatives at the origin.
+
 ### Added
 
 - **A generic linear fit, `ace_jax.fit.linear`.** A row generator gives `(Phi, Y, w)` for each quantity of
