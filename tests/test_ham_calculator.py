@@ -109,6 +109,7 @@ def test_calculator_from_a_model_file_and_aj_eval(models, tmp_path, capsys):  # 
     `aj eval` on it: against reference blocks (here the model's own, H shifted by a constant
     times S: zero block and band errors but for the shift, which moves only the Fermi level) and
     on an extxyz file (band energy, Fermi level, forces and stress written back)."""
+    require_optional("h5py")                     # --blocks-out and aj ham predict write the DeepH layout
     from ase_extxyz.io import read_cextxyz, write_cextxyz
 
     from ace_jax.cli import main
@@ -153,6 +154,7 @@ def test_aj_ham_fit_predict_bands(models, tmp_path, capsys):  # noqa: F811
     predictions with the same settings it reproduces them (the validation table and the file's
     record).  `aj ham predict` writes its blocks in the DeepH layout, and `aj ham bands` the bands
     on a path and a grid, the reference's from the structure's blocks beside them."""
+    require_optional("h5py")                     # --blocks-out and aj ham predict write the DeepH layout
     from ase_extxyz.io import write_cextxyz
 
     from ace_jax.cli import main
