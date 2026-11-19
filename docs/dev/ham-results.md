@@ -773,3 +773,68 @@ The same categorical model on the reduced, core-projected alloy set with `smooth
 On-site only, alloy light all-electron data, the prior scale by criterion (test RMSE, meV): identity embedding, 372 features: "loo" 23.4, "press" 23.7, evidence 32.6, best fixed 21.9, none 51.1; categorical, 336: "loo" 28.6, evidence 31.2, none 28.3. Order 2 with the evidence, order-2 widths 1, 2, 4: 68.3, 70.5, 76.6 (training 23.9, 23.1, 22.1): overfitting the evidence does not control.
 
 `ham.metrics` on the unregularised model's 16 test structures (4 x 8 x 8 grid): fifteen have band RMSE at a common zero 18 to 52 meV (median 27), from own Fermi levels 23 to 75 (median 41), Fermi level -19 to +80 meV, band energy -116 to +131 meV per atom, DoS Wasserstein distance 9 to 32 meV; structure 8: 1,123 meV, Fermi level -1.57 eV, band energy -9.4 eV per atom, Wasserstein distance 996 meV.
+
+## Gold: cross-code accuracy, data and cost with one metric code (2026-11-19)
+
+`bench/ham/gold_pareto.py`; figure `figures/ham-gold-pareto.png`. The ace-jax grid (`gold_grid.sh`, 56 points, models saved), and MACE-H and DeepH-E3 trained on Sulis A100s with the authors' gold recipe (`maceh_train.py`; the same nested training sets; runs end when the learning rate reaches its floor, 1.5 to 12.5 h) and predicted with `maceh_eval.py`. All scored by `ham.metrics` on the ten test structures, 7x7x7 k-points, window -12 to 5 eV, 11 electrons per atom, 1000 K. MACE-H with 32 structures hit its 14 h limit (its best model so far is scored); both runs with 64 are still queued.
+
+| Code | Training structures | H MAE / meV | Band RMSE, own Fermi levels | at a common zero, median (worst) | Fermi level RMSE | Band energy RMSE / meV per atom | DoS Wasserstein |
+|---|---|---|---|---|---|---|---|
+| MACE-H | 1 | 1.279 | 20.79 | 18.80 (21.69) | 17.23 | 91.9 | 13.89 |
+| MACE-H | 2 | 1.079 | 16.65 | 14.95 (20.99) | 12.40 | 95.1 | 12.40 |
+| MACE-H | 4 | 0.886 | 14.51 | 14.47 (19.45) | 15.86 | 88.1 | 11.25 |
+| MACE-H | 8 | 0.730 | 9.65 | 10.10 (15.84) | 9.38 | 86.4 | 9.02 |
+| MACE-H | 16 | 0.524 | 6.12 | 9.21 (15.26) | 10.94 | 91.0 | 8.36 |
+| MACE-H | 32 | 0.380 | 5.32 | 7.77 (14.49) | 10.43 | 87.5 | 7.21 |
+| DeepH-E3 | 1 | 1.364 | 41.08 | 28.75 (40.26) | 37.82 | 103.6 | 24.20 |
+| DeepH-E3 | 2 | 1.210 | 33.88 | 25.94 (34.96) | 28.24 | 104.7 | 21.69 |
+| DeepH-E3 | 4 | 0.941 | 24.90 | 20.11 (26.78) | 21.71 | 87.9 | 17.01 |
+| DeepH-E3 | 8 | 0.642 | 11.23 | 11.53 (18.76) | 9.26 | 89.7 | 10.50 |
+| DeepH-E3 | 16 | 0.559 | 12.49 | 9.65 (13.06) | 10.55 | 49.4 | 7.86 |
+| DeepH-E3 | 32 | 0.470 | 8.40 | 7.17 (11.13) | 5.67 | 44.5 | 6.16 |
+| ace-jax, largest | 1 | 0.176 | 1.81 | 3.33 (10.75) | 4.51 | 48.3 | 3.49 |
+| ace-jax, largest | 2 | 0.163 | 1.50 | 5.40 (8.45) | 4.73 | 56.2 | 4.39 |
+| ace-jax, largest | 32 | 0.152 | 1.30 | 4.29 (7.92) | 4.82 | 54.4 | 4.28 |
+| ace-jax, largest | 152 | 0.151 | 1.29 | 4.20 (7.70) | 4.74 | 53.5 | 4.23 |
+
+Block prediction on one core (Xeon Gold 6130, one core (mnf148); positions to every H block, neighbour lists included, no Bloch sums and no eigensolver; the other codes without their graph construction), with the accuracy at 32 training structures:
+
+| Model | ms per atom | Band RMSE, own Fermi levels / meV |
+|---|---|---|
+| ace-jax site (0, 0), env none | 1.4 | 64.42 |
+| ace-jax site (2, 2), env none | 2.2 | 50.53 |
+| ace-jax site (0, 0), env [5.0, 4, 4, 2, 4] | 7.3 | 15.78 |
+| ace-jax site (0, 0), env [5.0, 6, 4, 4, 4] | 13.9 | 3.46 |
+| ace-jax site (2, 2), env [5.0, 6, 4, 4, 4] | 14.4 | 2.92 |
+| ace-jax site (2, 2), env [5.0, 8, 4, 6, 4] | 17.3 | 1.49 |
+| ace-jax site (4, 4), env [5.0, 8, 4, 6, 4], 20 bond and 16 site radials | 18.2 | 1.30 |
+| MACE-H (float32) | 258 | 5.32 |
+| DeepH-E3 (float32) | 264 | 8.40 |
+
+- ace-jax from two structures is ahead of MACE-H from 32 in every column: 2.4 times in H MAE, 3.5 times in the band error from own Fermi levels, at 1/14 of the one-core cost (1/18 for the model at 3 meV).
+- The other two codes are still improving at 32 structures; ace-jax is flat from 4. The two networks have the same irreps in the authors' gold configuration and cost the same (the conversion of the network output to blocks is under 1 % of it).
+- **A rigid shift is the floor of the common-zero numbers.** Every ace-jax model with the bond environment has a Fermi-level error near 4.7 meV and a band-energy error near 54 meV per atom (11 electrons times the shift) whatever its size and training set, at 1.3 meV of band error from own Fermi levels. Replacing the predicted on-site blocks by the reference's removes it (mean eigenvalue shift of four test structures -4.5, -2.6, -6.8, -0.5 meV; 0.0, 0.0, 0.2, 0.0 with the reference's on-site blocks and the predicted off-site ones; the spread about the shift is 1.2 to 1.8 meV either way). MACE-H and DeepH-E3 show the same kind of floor (Fermi level 6 to 10 meV, band energy 45 to 90 meV per atom at 32 structures while their bands improve fourfold). Reading, not tested: each structure's H has its own energy zero (the cell average of the electrostatic potential), a constant times S that is not a local function of the environment. It decides nothing for bands and matters for a band-energy term of a total energy.
+- The accuracy axis of the figure is therefore the band RMSE from own Fermi levels; the shift is its own column.
+
+## Alloy: the prior scored with the metric set (2026-11-19)
+
+Four-element alloy, 80 / 16 structures, 3,000 bonds each, full model; `alloy_bands.py` on a 4x8x8 grid, `ham.metrics` (meV). The leave-structure-out fit of the full model first ran out of memory (per-structure factors of 120 off-site designs, up to 80 GB): they are on disk now (`operators.fit._Spill`, `$ACEJAX_SCRATCH`); its result is to come.
+
+| | No prior | Evidence |
+|---|---|---|
+| Band RMSE at a common zero, pooled | 282 | 50 |
+| median structure | 27 | 26 |
+| worst structure (8, C9Ge2Si4Sn) | 1,123 | 163 |
+| Largest state error | 3,509 | 552 |
+| Band RMSE from own Fermi levels | 196 | 48 |
+| Fermi level RMSE (largest) | 394 (1,570) | 60 (191) |
+| Band energy RMSE per atom (largest) | 2,350 (9,396) | 122 (399) |
+| DoS Wasserstein, mean (worst) | 79 (996) | 25 (133) |
+
+The other 15 structures do not change (18 to 52 against 17 to 51). Structure 8 keeps the largest error without the intruder band: its blocks are at 18 meV against 6 to 10 for the rest.
+
+Order 2 on-site with the evidence, completing the earlier line: order-2 width 10 (6,916 features) 5,459 meV on the test set (training 35.9), categorical order 2 (10,744 features) 1,069 meV (training 212). The evidence does not make order 2 usable from 80 structures.
+
+## `aj ham` (2026-11-19)
+
+`ham/cli.py`: `aj ham fit` (blocks to a model file; basis and prior as options, defaults the gold recipe; `--validation` scored as `aj eval`), `aj ham predict` (DeepH layout), `aj ham bands` (path bands, grid DoS, figure, errors against the structure's own blocks). `aj eval` calls the same `score`. Not yet: a user page, the skill file, `aj ham fit` on gold through the command line.
