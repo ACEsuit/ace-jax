@@ -499,6 +499,170 @@ __global__ void __launch_bounds__(kThreads)
   }
 }
 
+// Pass 2 in coupled form (eval/coupled.py; ffi.coupled_gpu_plan's streams P and their coefficients cw, per
+// centre species): z = [A; X] and g = W z of a batch of GA rows of one species, a row's values side by side
+// (index GA + row).  A thread runs its own list of each stream, a step an item, kAhead steps loaded before
+// they are used (the lists' load latency); every target has one owner (no atomic adds, so deterministic).
+//   X:      acc += c z_a z_b                       -> z_dst
+//   rows:   acc_m += w z_(v + m), m < NC           -> g_(dst + m), and the energy acc_m z_(u + m) / 2
+//   dE/dA:  acc += c g_x z_a                       -> g_dst
+// A long task is in pieces: the later ones write piece slots, which cp_fix adds to their target.  Shared
+// memory holds z, g of the A part and the pieces; g of the X part goes to the block's scratch and, after the
+// rows, over z's X part, which dE/dA then reads.
+template <typename R, int GA>
+struct CpMem {
+  R *Z, *gA, *pc, *gX;                                    // z; g of A; piece slots; g of X (scratch)
+  int na, ntot;
+  __device__ __forceinline__ R *target(int dst) const {
+    return dst < na ? gA + dst * GA : dst < ntot ? gX + (dst - na) * GA : pc + (dst - ntot) * GA;
+  }
+};
+
+template <typename R, int GA, bool X>
+__device__ __forceinline__ void cp_bilinear(const int32_t *P, const int32_t *st, const R *cz, int T, int t,
+                                           const CpMem<R, GA> &m) {
+  constexpr int AH = sizeof(R) == 8 ? ::kAhead / 2 : ::kAhead;
+  const int32_t *it = P + st[2] + t, *hd = P + st[3] + t;
+  const R *co = cz + st[4] + t, *Z = m.Z;
+  R acc[GA];
+  for (int g = 0; g < GA; ++g) acc[g] = 0;
+  for (int j = 0, steps = st[0]; j < steps; j += AH) {    // steps: a multiple of 8
+    uint32_t v[AH];
+    R c[AH];
+    for (int a = 0; a < AH; ++a) {
+      v[a] = static_cast<uint32_t>(it[(j + a) * T]);
+      c[a] = co[(j + a) * T];
+    }
+    for (int a = 0; a < AH; ++a) {
+      const int lo = (v[a] & 0x7fff) * GA, hi = ((v[a] >> 15) & 0xffff) * GA;
+      for (int g = 0; g < GA; ++g) acc[g] += c[a] * (Z[lo + g] * Z[hi + g]);
+      if (v[a] >> 31) {
+        const int dst = static_cast<uint32_t>(*hd) & 0xffff;
+        hd += T;
+        R *d = X ? m.Z + dst * GA : m.target(dst);
+        for (int g = 0; g < GA; ++g) {
+          d[g] = X || dst >= m.ntot ? acc[g] : d[g] + acc[g];
+          acc[g] = 0;
+        }
+      }
+    }
+  }
+}
+
+template <typename R, typename S, int GA, int NC>
+__device__ __forceinline__ void cp_rows(const int32_t *P, const int32_t *st, const R *cz, int T, int t,
+                                       const CpMem<R, GA> &m, S *e) {
+  constexpr int AH = sizeof(R) == 8 ? ::kAhead / 2 : ::kAhead;
+  const int32_t *it = P + st[2] + t, *hd = P + st[3] + t;
+  const R *co = cz + st[4] + t, *Z = m.Z;
+  R acc[NC * GA];
+  for (int q = 0; q < NC * GA; ++q) acc[q] = 0;
+  for (int j = 0, steps = st[0]; j < steps; j += AH) {
+    uint32_t v[AH];
+    R w[AH];
+    for (int a = 0; a < AH; ++a) {
+      v[a] = static_cast<uint32_t>(it[(j + a) * T]);
+      w[a] = co[(j + a) * T];
+    }
+    for (int a = 0; a < AH; ++a) {
+      const R *zv = Z + (v[a] & 0x7fff) * GA;
+      for (int q = 0; q < NC * GA; ++q) acc[q] += w[a] * zv[q];
+      if (v[a] >> 31) {
+        const uint32_t h = static_cast<uint32_t>(*hd);
+        hd += T;
+        R *gd = m.target(h & 0xffff);
+        const R *zu = Z + (h >> 16) * GA;
+        for (int q = 0; q < NC * GA; ++q) {
+          gd[q] = acc[q];
+          e[q % GA] += static_cast<S>(acc[q]) * static_cast<S>(zu[q]);
+          acc[q] = 0;
+        }
+      }
+    }
+  }
+}
+
+template <typename R, int GA>
+__device__ __forceinline__ void cp_fix(const int32_t *P, const int32_t *fx, int T, int t, const CpMem<R, GA> &m) {
+  for (int k = t; k < fx[0]; k += T) {
+    const uint32_t w0 = static_cast<uint32_t>(P[fx[1] + 2 * k]), w1 = static_cast<uint32_t>(P[fx[1] + 2 * k + 1]);
+    const int cnt = w0 >> 16, stride = w1 >> 16;
+    R *d = m.target(w0 & 0xffff);
+    const R *p = m.target(w1 & 0xffff);
+    for (int g = 0; g < GA; ++g) {
+      R s = d[g];
+      for (int q = 0; q < cnt; ++q) s += p[q * stride * GA + g];
+      d[g] = s;
+    }
+  }
+}
+
+template <typename R, typename S, int GA>
+__global__ void __launch_bounds__(kThreads)
+    ace_coupled(const int32_t *P, const R *cw, int n_real, const int32_t *z, const int32_t *perm, int n_batches,
+                const S *Ag, S *wAg, R *scratch, int64_t per_block, S *eo) {
+  extern __shared__ double sh[];
+  const int T = blockDim.x, t = threadIdx.x, C = T / kChunk;
+  const int na = P[1], nx = P[2], ntot = na + nx, ns = P[4];
+  const int32_t *st = P + 5, *fx = st + 5 * ns;
+  S *red = reinterpret_cast<S *>(sh);
+  CpMem<R, GA> m;
+  m.Z = reinterpret_cast<R *>(red + C * GA);
+  m.gA = m.Z + ntot * GA;
+  m.pc = m.gA + na * GA;
+  m.gX = scratch + blockIdx.x * per_block;
+  m.na = na;
+  m.ntot = ntot;
+  for (int b = blockIdx.x; b < n_batches; b += gridDim.x) {
+    int i[GA];
+    for (int g = 0; g < GA; ++g) i[g] = perm[b * GA + g];
+    if (i[0] < 0) continue;                               // past the last batch
+    const R *cz = cw + static_cast<int64_t>(z[i[0]]) * n_real;
+    for (int a = t; a < na; a += T)
+      for (int g = 0; g < GA; ++g) {
+        m.Z[a * GA + g] = i[g] >= 0 ? Ag[static_cast<int64_t>(i[g]) * na + a] : 0;
+        m.gA[a * GA + g] = 0;                             // an A block without a weight has no row
+      }
+    __syncthreads();
+    cp_bilinear<R, GA, true>(P, st, cz, T, t, m);
+    __syncthreads();
+    S e[GA];
+    for (int g = 0; g < GA; ++g) e[g] = 0;
+    cp_rows<R, S, GA, 1>(P, st + 5, cz, T, t, m, e);
+    cp_rows<R, S, GA, 2>(P, st + 10, cz, T, t, m, e);
+    cp_rows<R, S, GA, 3>(P, st + 15, cz, T, t, m, e);
+    cp_rows<R, S, GA, 4>(P, st + 20, cz, T, t, m, e);
+    __syncthreads();
+    cp_fix<R, GA>(P, fx, T, t, m);
+    __syncthreads();
+    for (int k = t; k < nx * GA; k += T) m.Z[na * GA + k] = m.gX[k];   // g of X over X
+    __syncthreads();
+    cp_bilinear<R, GA, false>(P, st + 25, cz, T, t, m);
+    __syncthreads();
+    cp_fix<R, GA>(P, fx + 2, T, t, m);
+    __syncthreads();
+    for (int g = 0; g < GA; ++g) e[g] *= S(0.5);
+    for (int a = t; a < na; a += T)
+      for (int g = 0; g < GA; ++g)
+        if (i[g] >= 0) {
+          const S la = cz[a], Aa = Ag[static_cast<int64_t>(i[g]) * na + a];
+          wAg[static_cast<int64_t>(i[g]) * na + a] = static_cast<S>(m.gA[a * GA + g]) + la;
+          e[g] += la * Aa;
+        }
+    for (int o = kChunk / 2; o > 0; o /= 2)
+      for (int g = 0; g < GA; ++g) e[g] += SHFL_XOR(e[g], o);
+    if (t % kChunk == 0)
+      for (int g = 0; g < GA; ++g) red[t / kChunk * GA + g] = e[g];
+    __syncthreads();
+    if (t < GA && i[t] >= 0) {                            // thread g sums row g's
+      S s = 0;
+      for (int c = 0; c < C; ++c) s += red[c * GA + t];
+      eo[i[t]] += s;
+    }
+    __syncthreads();
+  }
+}
+
 // Pass 3: the forces, -sum_i w_i grad e_i, or NaN everywhere after a NaN position. A block per row, Team
 // lanes per pair; a lane per harmonic takes dE/dY over its A entries, times grad Y. E: dE_i / drij
 // per live slot instead, written once each (no atomics, so deterministic), no weights.
@@ -629,7 +793,7 @@ struct Consts {
   ffi::Buffer<ffi::S32> levels, pull;
   ffi::AnyBuffer lc;
   double x0, h;
-  int64_t n, n_rnl, lmax, solid, n_leaf, n_st, tile, lv, threads;
+  int64_t n, n_rnl, lmax, solid, n_leaf, n_st, tile, lv, threads, form;
 };
 
 // Both entry points: x the positions (atoms, 3), or (E) rij (rows, K, 3); out the forces (atoms, 3), or (E)
@@ -696,6 +860,18 @@ ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBu
   const int mode = c.lv == 0 ? 0 : c.lv == 1 && dag_shared(1, 1) <= static_cast<size_t>(optin) ? 1 : 2;
   int GA = szd == 8 ? 2 : 4;                              // A100: float64 fastest at 2, float32 at 4
   while (GA > 1 && dag_shared(GA, mode) > room) GA /= 2;
+  // The coupled form (form = 1): `pull` is ffi.coupled_gpu_plan's streams, `lc` their coefficients, n_st the
+  // X values and tile the piece slots; z, g and the pieces of a batch are in shared memory.
+  const bool cpl = c.form != 0;
+  const auto cpl_shared = [&](int64_t ga) {
+    return TD / kChunk * ga * sz + (2 * n_a + c.n_st + c.tile) * ga * szd;
+  };
+  if (cpl) {
+    const char *ga_env = std::getenv("ACEJAX_CPL_GA");   // rows a block (a development knob)
+    GA = ga_env ? std::atoi(ga_env) : szd == 8 ? 2 : 4;
+    if (GA != 1 && GA != 2 && GA != 4) return ffi::Error::InvalidArgument("ACEJAX_CPL_GA is 1, 2 or 4");
+    while (GA > 1 && cpl_shared(GA) > (ga_env ? static_cast<size_t>(optin) : room)) GA /= 2;
+  }
   const auto blocks = [&](auto kernel, int threads, size_t shared, int64_t work) {   // fill the device
     int resident = 1;
     if (shared > (48 << 10))
@@ -704,11 +880,11 @@ ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBu
     (void)GPU(OccupancyMaxActiveBlocksPerMultiprocessor)(&resident, kernel, threads, shared);
     return std::max<int64_t>(1, std::min<int64_t>(work, std::max(resident, 1) * static_cast<int64_t>(sms)));
   };
-  const size_t s1 = density_shared(T1), s2 = dag_shared(GA, mode), s3 = forces_shared(T3);
+  const size_t s1 = density_shared(T1), s2 = cpl ? cpl_shared(GA) : dag_shared(GA, mode), s3 = forces_shared(T3);
   if (std::max({s1, s2, s3}) > static_cast<size_t>(optin))
     return ffi::Error::InvalidArgument("the model needs more shared memory per block than this GPU has");
   const int64_t lists = n_lev + (n_lev > 1 ? 2 * n_mid / M + 2 : 0);   // pw: a piece per list, factor and
-  const int64_t per_batch = GA * ((1 + (mode == 2)) * nL + lists * (n_a + TD));   // range at most
+  const int64_t per_batch = cpl ? GA * c.n_st : GA * ((1 + (mode == 2)) * nL + lists * (n_a + TD));   // range at most
   const int64_t n_A = n_rows * n_a, n_list = n_rows * (K + 1);
   const int64_t n_batches = (n_rows + nz * (GA - 1) + GA - 1) / GA;
   const auto run = [&](auto zero, auto zero_dag) {        // the rest in the floats' type R, the DAG pass in Rd
@@ -734,7 +910,8 @@ ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBu
     const auto dag = mode == 0 ? ACE_DAG(0) : mode == 1 ? ACE_DAG(1) : ACE_DAG(2);
 #undef ACE_DAG
     const int64_t b1 = blocks(density, T1, s1, n_rows), b3 = blocks(forces, T3, s3, n_rows);
-    const int64_t b2 = blocks(dag, i32(TD), s2, n_batches);
+    const auto coupled = GA == 1 ? ace_coupled<Rd, R, 1> : GA == 2 ? ace_coupled<Rd, R, 2> : ace_coupled<Rd, R, 4>;
+    const int64_t b2 = cpl ? blocks(coupled, i32(TD), s2, n_batches) : blocks(dag, i32(TD), s2, n_batches);
     // Scratch: A and dE/dA per row, per block the DAG's adjoints and unshared values, then the live lists,
     // the species' counts and the batches.
     const int64_t bytes = 2 * n_A * sz + b2 * per_batch * szd + (n_list + 1 + nz + n_batches * GA) * sizeof(int);
@@ -756,7 +933,11 @@ ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBu
       ace_count<<<bc, 256, 0, stream>>>(zs, i32(n_rows), per_z);
       ace_base<<<1, 1, 0, stream>>>(nz, GA, per_z);
       ace_fill<<<bc, 256, 0, stream>>>(zs, i32(n_rows), per_z, perm);
-      dag<<<b2, i32(TD), s2, stream>>>(md, zs, perm, i32(n_batches), i32(M), Ag, wAg, D, per_batch, eo);
+      if (cpl)
+        coupled<<<b2, i32(TD), s2, stream>>>(c.pull.typed_data(), c.lc.typed_data<Rd>(), i32(c.lc.dimensions()[1]),
+                                             zs, perm, i32(n_batches), Ag, wAg, D, per_batch, eo);
+      else
+        dag<<<b2, i32(TD), s2, stream>>>(md, zs, perm, i32(n_batches), i32(M), Ag, wAg, D, per_batch, eo);
       forces<<<b3, T3, s3, stream>>>(m, x, zs, nb, static_cast<const R *>(wt), ed, i32(atoms), i32(K), i32(rows),
                                      lists, wAg, broken, eo, fo);
     }
@@ -776,10 +957,10 @@ ffi::Error AceDirectGpuImpl(gpuStream_t stream, ffi::ScratchAllocator scratch, f
                             ffi::Buffer<ffi::S32> levels,
                             ffi::Buffer<ffi::S32> pull, ffi::AnyBuffer lc, double x0, double h,
                             int64_t n, int64_t n_rnl, int64_t lmax, int64_t solid, int64_t n_leaf,
-                            int64_t n_st, int64_t tile, int64_t lv, int64_t threads, double rc2, ffi::Result<ffi::AnyBuffer> e,
+                            int64_t n_st, int64_t tile, int64_t lv, int64_t threads, int64_t form, double rc2, ffi::Result<ffi::AnyBuffer> e,
                             ffi::Result<ffi::AnyBuffer> f) {
   const Consts c{rtab, rcut, runs, groups, factor, ct, e0, levels, pull, lc,
-                 x0, h, n, n_rnl, lmax, solid, n_leaf, n_st, tile, lv, threads};
+                 x0, h, n, n_rnl, lmax, solid, n_leaf, n_st, tile, lv, threads, form};
   return Launch<false>(stream, scratch, pos, species.typed_data(), nbr.typed_data(), num.typed_data(),
                        weight.untyped_data(), nullptr, nullptr, pos.dimensions()[0], nbr.dimensions()[0],
                        nbr.dimensions()[1], c, rc2,
@@ -796,10 +977,10 @@ ffi::Error AceEdgesGpuImpl(gpuStream_t stream, ffi::ScratchAllocator scratch, ff
                            ffi::AnyBuffer e0, ffi::Buffer<ffi::S32> levels,
                            ffi::Buffer<ffi::S32> pull, ffi::AnyBuffer lc, double x0, double h, int64_t n,
                            int64_t n_rnl, int64_t lmax, int64_t solid, int64_t n_leaf, int64_t n_st,
-                           int64_t tile, int64_t lv, int64_t threads, ffi::Result<ffi::AnyBuffer> e,
+                           int64_t tile, int64_t lv, int64_t threads, int64_t form, ffi::Result<ffi::AnyBuffer> e,
                            ffi::Result<ffi::AnyBuffer> g) {
   const Consts c{rtab, rcut, runs, groups, factor, ct, e0, levels, pull, lc,
-                 x0, h, n, n_rnl, lmax, solid, n_leaf, n_st, tile, lv, threads};
+                 x0, h, n, n_rnl, lmax, solid, n_leaf, n_st, tile, lv, threads, form};
   const int64_t rows = rij.dimensions()[0], K = rij.dimensions()[1];
   return Launch<true>(stream, scratch, rij, zi.typed_data(), nullptr, nullptr, nullptr, zj.typed_data(),
                       mask.typed_data(), rows, K, rows, c, 0.0,
@@ -840,6 +1021,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(AceDirectGpu, AceDirectGpuImpl,
                                   .Attr<int64_t>("tile")
                                   .Attr<int64_t>("lv")
                                   .Attr<int64_t>("threads")
+                                  .Attr<int64_t>("form")            // 0: the DAG; 1: the coupled form
                                   .Attr<double>("rc2")
                                   .Ret<ffi::AnyBuffer>()            // atom energies (atoms,)
                                   .Ret<ffi::AnyBuffer>());          // -sum_i w_i grad e_i (atoms, 3)
@@ -873,5 +1055,6 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(AceEdgesGpu, AceEdgesGpuImpl,
                                   .Attr<int64_t>("tile")
                                   .Attr<int64_t>("lv")
                                   .Attr<int64_t>("threads")
+                                  .Attr<int64_t>("form")            // 0: the DAG; 1: the coupled form
                                   .Ret<ffi::AnyBuffer>()            // site energies (rows,)
                                   .Ret<ffi::AnyBuffer>());          // dE_i / drij (rows, K, 3)

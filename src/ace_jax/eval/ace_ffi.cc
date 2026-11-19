@@ -23,25 +23,37 @@ namespace {
 constexpr double kPi = 3.14159265358979323846;
 
 typedef double v4 __attribute__((vector_size(32)));     // four neighbours of one site
-inline double vsqrt(double x) { return std::sqrt(x); }
-inline v4 vsqrt(v4 x) { v4 r; for (int i = 0; i < 4; ++i) r[i] = std::sqrt(x[i]); return r; }
+typedef double v4u __attribute__((vector_size(32), aligned(8), may_alias));   // four doubles anywhere
+typedef long long v4i __attribute__((vector_size(32)));
+#if defined(__clang__)
+#define ACE_SHUF(a, b, i, j, k, l) __builtin_shufflevector(a, b, i, j, k, l)
+#else
+#define ACE_SHUF(a, b, i, j, k, l) __builtin_shuffle(a, b, (v4i){i, j, k, l})
+#endif
+// a[j][c] -> o[c][j]: four neighbours' values of four columns, to four columns of the four neighbours.
+inline void transpose(const v4 a[4], v4 *o) {
+  const v4 t0 = ACE_SHUF(a[0], a[1], 0, 4, 2, 6), t1 = ACE_SHUF(a[0], a[1], 1, 5, 3, 7);
+  const v4 t2 = ACE_SHUF(a[2], a[3], 0, 4, 2, 6), t3 = ACE_SHUF(a[2], a[3], 1, 5, 3, 7);
+  o[0] = ACE_SHUF(t0, t2, 0, 1, 4, 5);
+  o[1] = ACE_SHUF(t1, t3, 0, 1, 4, 5);
+  o[2] = ACE_SHUF(t0, t2, 2, 3, 6, 7);
+  o[3] = ACE_SHUF(t1, t3, 2, 3, 6, 7);
+}
 
-// ace_jax.eval.harmonics with gradients: Y[l * l + l + m], dY[d * nY + i].
+// ace_jax.eval.harmonics, Y[l * l + l + m], and their gradients from the harmonics one degree down: for
+// C_lm = r^l P_lm e^(i m phi), d/dz C_lm = (l + m) C_l-1,m, (d/dx + i d/dy) C_lm = -C_l-1,m+1 and
+// (d/dx - i d/dy) C_lm = (l + m)(l + m - 1) C_l-1,m-1, so grad Y_i is at most five terms (`grad`: per i and
+// component two (index, coefficient) pairs, one for z), exact for the solid harmonics; the spherical ones are
+// r^-l times them: grad Y = (those terms - l rhat Y) / r.  No derivative is stored per neighbour.
 struct Harmonics {
-  template <class T> struct Scratch {
-    std::vector<T> A, B, P, dP, rp;
-    explicit Scratch(int W) : A(W), B(W), P(W * W), dP(W * W), rp(W) {}
-  };
-  Scratch<double> s1;
-  Scratch<v4> s4;
-  Scratch<double> &scr(double) { return s1; }
-  Scratch<v4> &scr(v4) { return s4; }
   int L;
   bool solid;
-  std::vector<double> norm, ca, cb;
+  std::vector<double> norm, ca, cb, gc;                   // gc[5 * i + t]: x, x, y, y, z terms of grad Y_i
+  std::vector<int32_t> gi;
 
   Harmonics(int L_, bool solid_)
-      : s1(L_ + 1), s4(L_ + 1), L(L_), solid(solid_), norm((L_ + 1) * (L_ + 1)), ca((L_ + 1) * (L_ + 1)), cb((L_ + 1) * (L_ + 1)) {
+      : L(L_), solid(solid_), norm((L_ + 1) * (L_ + 1)), ca((L_ + 1) * (L_ + 1)),
+        cb((L_ + 1) * (L_ + 1)), gc(5 * (L_ + 1) * (L_ + 1)), gi(5 * (L_ + 1) * (L_ + 1)) {
     for (int l = 0; l <= L; ++l)
       for (int m = -l; m <= l; ++m) {
         const int am = std::abs(m);
@@ -53,81 +65,116 @@ struct Harmonics {
           cb[l * (L + 1) + m] = (l + m - 1.0) / (l - m);
         }
       }
+    for (int l = 1; l <= L; ++l)
+      for (int m = -l; m <= l; ++m) {
+        const int am = std::abs(m), sg = m < 0 ? -1 : 1, i = l * l + l + m, b = (l - 1) * l;
+        const double c = norm[l * l + l + am];
+        const double gz = am < l ? (l + am) * c / norm[b + am] : 0.0;
+        const double gp = am + 1 < l ? (am ? -0.5 : -1.0) * c / norm[b + am + 1] : 0.0;   // m = 0: both conjugates
+        const double gm = am >= 1 ? 0.5 * (l + am) * (l + am - 1) * c / norm[b + am - 1] : 0.0;
+        const bool up = am + 1 < l, dn = am > 0;
+        const bool sm = dn && (sg > 0 || am > 1), om = dn && (sg < 0 || am > 1);          // no sine at m = 0
+        auto put = [&](int t, bool on, int idx, double coef) {
+          gi[5 * i + t] = on ? idx : 0;
+          gc[5 * i + t] = on ? coef : 0.0;
+        };
+        put(0, up, b + sg * (am + 1), gp);
+        put(1, sm, b + sg * (am - 1), gm);
+        put(2, up, b - sg * (am + 1), sg * gp);
+        put(3, om, b - sg * (am - 1), -sg * gm);
+        put(4, am < l, b + sg * am, gz);
+      }
   }
 
-  void eval(const double *v, double *Y, double *dY) { eval<double>(v[0], v[1], v[2], Y, dY); }
-
-  // T = double, or v4 for four vectors at once (Y[i], dY[d * nY + i] then hold the four)
-  template <class T> void eval(const T x, const T y, const T z, T *Y, T *dY) {
-    auto &S = scr(T{});
-    T *A = S.A.data(), *B = S.B.data(), *P = S.P.data(), *dP = S.dP.data(), *rp = S.rp.data();
-    const T zero = T{}, one = zero + 1.0;
-    const T r2 = x * x + y * y + z * z, r = vsqrt(r2), ir = 1.0 / r, ir2 = ir * ir, u = z * ir;
-    const T du[3] = {-z * x * ir2 * ir, -z * y * ir2 * ir, (x * x + y * y) * ir2 * ir};
-    const int W = L + 1, nY = W * W;
-    A[0] = one;
-    B[0] = zero;
-    for (int m = 1; m <= L; ++m) {                       // A_m + i B_m = (x + i y)^m
-      A[m] = x * A[m - 1] - y * B[m - 1];
-      B[m] = x * B[m - 1] + y * A[m - 1];
-    }
-    double dfact = 1.0;                                   // P(l, m) = Rbar_l^m(u), dP = d/du
+  // The harmonics of (x, y, z), r = |v| and ir = 1 / r given: T = double, or v4 for four vectors at once.
+  // Per m, the recurrence in l in registers.
+  template <class T> void eval(const T x, const T y, const T z, const T r, const T ir, T *Y) const {
+    const T zero = T{}, one = zero + 1.0, u = z * ir;
+    const int W = L + 1;
+    T Am = one, Bm = zero, rm = one;                      // A_m + i B_m = (x + i y)^m; spherical: r^-m
+    double dfact = 1.0;
     for (int m = 0; m <= L; ++m) {
-      if (m > 0) dfact *= 2 * m - 1;
-      P[m * W + m] = zero + dfact;
-      dP[m * W + m] = zero;
-      if (m + 1 <= L) {
-        P[(m + 1) * W + m] = ((2 * m + 1) * dfact) * u;
-        dP[(m + 1) * W + m] = zero + (2 * m + 1) * dfact;
+      if (m > 0) {
+        const T a1 = Am;
+        Am = x * a1 - y * Bm;
+        Bm = x * Bm + y * a1;
+        dfact *= 2 * m - 1;
+        if (!solid) rm = rm * ir;
       }
-      for (int l = m + 2; l <= L; ++l) {
-        const double a = ca[l * W + m], b = cb[l * W + m];
-        P[l * W + m] = a * u * P[(l - 1) * W + m] - b * P[(l - 2) * W + m];
-        dP[l * W + m] = a * (P[(l - 1) * W + m] + u * dP[(l - 1) * W + m]) - b * dP[(l - 2) * W + m];
+      T fa = rm * Am, fb = rm * Bm, P1 = zero + dfact, P2 = zero;   // solid: times r^(l - m)
+      for (int l = m; l <= L; ++l) {
+        const T P = l == m ? P1 : l == m + 1 ? ((2 * m + 1) * dfact) * u
+                                             : ca[l * W + m] * u * P1 - cb[l * W + m] * P2;
+        Y[l * l + l + m] = (norm[l * l + l + m] * P) * fa;
+        if (m) Y[l * l + l - m] = (norm[l * l + l - m] * P) * fb;
+        if (l > m) P2 = P1;
+        P1 = P;
+        if (solid) {
+          fa = fa * r;
+          fb = fb * r;
+        }
       }
     }
-    rp[0] = one;                                          // solid r^k, spherical r^-k
-    for (int k = 1; k <= L; ++k) rp[k] = rp[k - 1] * (solid ? r : ir);
-    for (int l = 0; l <= L; ++l)
-      for (int m = -l; m <= l; ++m) {
-        const int am = std::abs(m), i = l * l + l + m, p = solid ? l - am : am;
-        const T ang = m >= 0 ? A[am] : B[am];
-        T dax = zero, day = zero;
-        if (am) {
-          dax = double(am) * (m > 0 ? A[am - 1] : B[am - 1]);
-          day = m > 0 ? -double(am) * B[am - 1] : double(am) * A[am - 1];
-        }
-        const T c = norm[i] * rp[p], Pc = c * P[l * W + am], dPc = c * dP[l * W + am] * ang;
-        const T Yi = Pc * ang, g = double(solid ? p : -p) * ir2 * Yi;   // d(r^+-p) = +-p r^(+-p-2) v
-        Y[i] = Yi;
-        dY[i] = dPc * du[0] + Pc * dax + g * x;
-        dY[nY + i] = dPc * du[1] + Pc * day + g * y;
-        dY[2 * nY + i] = dPc * du[2] + g * z;
-      }
   }
 };
 
-// radial.spline_eval and d/dr on one species pair's table, zero from its cutoff on.
-void table(const double *coef, int64_t F, double x0, double h, int64_t n, double r, double rc,
-           double *v, double *dv) {
-  if (r >= rc) {
-    std::memset(v, 0, F * sizeof(double));
-    std::memset(dv, 0, F * sizeof(double));
-    return;
+// A site's A (or its dE/dY) over one run of `len` consecutive harmonics, unrolled for the lengths of whole
+// l blocks; `ffi.plan` lists the runs by length, so the switch is predicted.
+template <int N> inline void axpy(v4 *a, const v4 R, const v4 *Y) {
+  for (int m = 0; m < N; ++m) a[m] += R * Y[m];
+}
+inline void run_a(v4 *a, const v4 R, const v4 *Y, int32_t len) {
+  switch (len) {
+    case 1: return axpy<1>(a, R, Y);
+    case 3: return axpy<3>(a, R, Y);
+    case 5: return axpy<5>(a, R, Y);
+    case 7: return axpy<7>(a, R, Y);
+    case 9: return axpy<9>(a, R, Y);
+    case 11: return axpy<11>(a, R, Y);
+    case 13: return axpy<13>(a, R, Y);
+    default: for (int32_t m = 0; m < len; ++m) a[m] += R * Y[m];
   }
-  const double k = (r - x0) / h + 1.0;
+}
+template <int N> inline void axpy2(v4 *q, v4 *dq, const double *w, const v4 R, const v4 dR) {
+  for (int m = 0; m < N; ++m) {
+    q[m] += w[m] * R;
+    dq[m] += w[m] * dR;
+  }
+}
+inline void run_q(v4 *q, v4 *dq, const double *w, const v4 R, const v4 dR, int32_t len) {
+  switch (len) {
+    case 1: return axpy2<1>(q, dq, w, R, dR);
+    case 3: return axpy2<3>(q, dq, w, R, dR);
+    case 5: return axpy2<5>(q, dq, w, R, dR);
+    case 7: return axpy2<7>(q, dq, w, R, dR);
+    case 9: return axpy2<9>(q, dq, w, R, dR);
+    case 11: return axpy2<11>(q, dq, w, R, dR);
+    case 13: return axpy2<13>(q, dq, w, R, dR);
+    default:
+      for (int32_t m = 0; m < len; ++m) {
+        q[m] += w[m] * R;
+        dq[m] += w[m] * dR;
+      }
+  }
+}
+
+// radial.spline_eval and d/dr on one species pair's table `coef`, zero from its cutoff on: the first of the four
+// rows r reads, and their weights w and dw (no division: ih = 1 / h).
+inline const double *table_rows(const double *coef, int64_t F, double x0, double ih, int64_t n, double r, double rc,
+                                double *w, double *dw) {
+  if (!(r < rc)) {
+    for (int i = 0; i < 4; ++i) w[i] = dw[i] = r >= rc ? 0.0 : r;   // a NaN stays one
+    return coef;
+  }
+  const double k = (r - x0) * ih + 1.0, sixth = 1.0 / 6.0;
   int64_t ix = static_cast<int64_t>(std::floor(k));
   ix = ix < 1 ? 1 : (ix > n - 1 ? n - 1 : ix);
   const double t = k - ix, s = 1.0 - t;
-  const double w[4] = {s * s * s / 6.0, (4.0 - 6.0 * t * t + 3.0 * t * t * t) / 6.0,
-                       (4.0 - 6.0 * s * s + 3.0 * s * s * s) / 6.0, t * t * t / 6.0};
-  const double dw[4] = {-0.5 * s * s / h, (1.5 * t * t - 2.0 * t) / h, (2.0 * s - 1.5 * s * s) / h,
-                        0.5 * t * t / h};
-  const double *c0 = coef + (ix - 1) * F, *c1 = c0 + F, *c2 = c1 + F, *c3 = c2 + F;
-  for (int64_t c = 0; c < F; ++c) {
-    v[c] = w[0] * c0[c] + w[1] * c1[c] + w[2] * c2[c] + w[3] * c3[c];
-    dv[c] = dw[0] * c0[c] + dw[1] * c1[c] + dw[2] * c2[c] + dw[3] * c3[c];
-  }
+  w[0] = s * s * s * sixth; w[1] = (4.0 - 6.0 * t * t + 3.0 * t * t * t) * sixth;
+  w[2] = (4.0 - 6.0 * s * s + 3.0 * s * s * s) * sixth; w[3] = t * t * t * sixth;
+  dw[0] = -0.5 * s * s * ih; dw[1] = (1.5 * t * t - 2.0 * t) * ih; dw[2] = (2.0 * s - 1.5 * s * s) * ih;
+  dw[3] = 0.5 * t * t * ih;
+  return coef + (ix - 1) * F;
 }
 
 // Sites in batches of kLanes of one centre species, a site per SIMD lane: A, its adjoint, the DAG values and
@@ -153,12 +200,12 @@ struct Site {
   const double *tab, *rc, *E0;
   const D *ct;
   const int32_t *run, *grp, *fac;
-  int64_t nz, ncoef, F, n_rnl, n_runs, n_groups, n_nodes, N, n_a, nY, n, n_leaf, g_leaf, K;
-  double x0, h;
+  int64_t form, nz, ncoef, F, n_rnl, n_runs, n_groups, n_nodes, N, n_a, nY, n, n_leaf, g_leaf, K;
+  double x0, ih;
   Harmonics harm;
-  std::vector<double> hat, A, wl, tR, tdR;
+  std::vector<double> hat, ir4, A, wl;
   std::vector<D> wA, wB, L, w;
-  std::vector<v4> R, dR, Y, dY, at, q, dq;               // [lane][block of 4 neighbours][feature]
+  std::vector<v4> R, dR, Y, at, q, dq;                   // [lane][block of 4 neighbours][feature]
   int64_t Kb;
   std::vector<double> vin, G;                             // per lane: neighbour vectors in, dE/dv out
   std::vector<int32_t> zin, idx;                          // per lane: neighbour species, and atom or slot
@@ -168,52 +215,70 @@ struct Site {
   Site(ffi::Buffer<ffi::F64> rtab, ffi::Buffer<ffi::F64> rcut, ffi::Buffer<ffi::S32> runs,
        ffi::Buffer<ffi::S32> groups, ffi::Buffer<ffi::S32> factor, ffi::AnyBuffer ctz,
        ffi::Buffer<ffi::F64> e0, double x0_, double h_, int64_t n_, int64_t n_rnl_, int64_t lmax,
-       int64_t solid, int64_t n_leaf_, int64_t K_)
+       int64_t solid, int64_t n_leaf_, int64_t form_, int64_t K_)
       : tab(rtab.typed_data()), rc(rcut.typed_data()), E0(e0.typed_data()), ct(ctz.typed_data<D>()),
         run(runs.typed_data()), grp(groups.typed_data()), fac(factor.typed_data()),
-        nz(rtab.dimensions()[0]), ncoef(rtab.dimensions()[2]), F(rtab.dimensions()[3]), n_rnl(n_rnl_),
+        form(form_), nz(rtab.dimensions()[0]), ncoef(rtab.dimensions()[2]), F(rtab.dimensions()[3]), n_rnl(n_rnl_),
         n_runs(runs.dimensions()[0]), n_groups(groups.dimensions()[0]), n_nodes(factor.element_count()),
-        N(ctz.dimensions()[1]), n_a(N - n_nodes), nY((lmax + 1) * (lmax + 1)), n(n_), n_leaf(n_leaf_),
-        g_leaf(0), K(K_), x0(x0_), h(h_), harm(static_cast<int>(lmax), solid != 0), hat(V * K_ * 3), A(n_a * V), wl(n_a), tR(4 * F), tdR(4 * F),
-        wA(n_a * V), wB(n_a * V), L((N - n_leaf) * V), w((N - n_leaf) * V),
-        R(V * ((K_ + 3) / 4) * F), dR(R.size()), Y(V * ((K_ + 3) / 4) * nY), dY(3 * Y.size()), at(n_a), q(nY), dq(nY),
+        N(ctz.dimensions()[1]), n_a(form_ ? grp[0] : N - n_nodes), nY((lmax + 1) * (lmax + 1)), n(n_), n_leaf(n_leaf_),
+        g_leaf(0), K(K_), x0(x0_), ih(1.0 / h_), harm(static_cast<int>(lmax), solid != 0), hat(V * K_ * 3), ir4(V * K_), A(n_a * V), wl(n_a),
+        wA(n_a * V), wB(n_a * V), L((form_ ? grp[0] + grp[1] : N - n_leaf) * V), w(L.size()),
+        R(V * ((K_ + 3) / 4) * F), dR(R.size()), Y(V * ((K_ + 3) / 4) * nY), at(n_a), q(nY), dq(nY),
         Kb((K_ + 3) / 4), vin(V * K * 3), G(V * K * 3),
         zin(V * K), idx(V * K), nzc(e0.element_count()) {
-    while (g_leaf < n_groups && grp[2 * g_leaf + 1] <= n_nodes - n_leaf) ++g_leaf;   // the first leaf group
+    while (!form && g_leaf < n_groups && grp[2 * g_leaf + 1] <= n_nodes - n_leaf) ++g_leaf;   // the first leaf group
   }
 
   // Lane v's radials, harmonics and A column for its nl neighbour vectors V3 (species zj); e[v] = E0 + pair.
   void neighbours(int v, int64_t zc, int64_t nl, const double *V3, const int32_t *zj) {
     double ei = E0[zc];
-    v4 *Rv = &R[v * Kb * F], *dRv = &dR[v * Kb * F], *Yv = &Y[v * Kb * nY], *dYv = &dY[v * Kb * 3 * nY];
-    double *hv = &hat[v * K * 3], *t = tR.data(), *td = tdR.data();
+    v4 *Rv = &R[v * Kb * F], *dRv = &dR[v * Kb * F], *Yv = &Y[v * Kb * nY];
+    double *hv = &hat[v * K * 3];
     const int64_t nb = (nl + 3) / 4;
     std::fill(at.begin(), at.end(), v4{});
     v4 *a4 = at.data();
     for (int64_t b = 0; b < nb; ++b) {                    // four neighbours: a padding one has R = 0
       v4 x = {0.6, 0.6, 0.6, 0.6}, y = {0.48, 0.48, 0.48, 0.48}, z = {0.64, 0.64, 0.64, 0.64};
-      std::fill(t, t + 4 * F, 0.0);
-      std::fill(td, td + 4 * F, 0.0);
+      v4 rr = {1.0, 1.0, 1.0, 1.0}, ir = rr;
+      const double *row[4] = {tab, tab, tab, tab};
+      double w[4][4] = {}, dw[4][4] = {};
       for (int j = 0; j < 4 && 4 * b + j < nl; ++j) {
         const int64_t s = 4 * b + j;
         const double *u = V3 + 3 * s;
-        const double r = std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
+        const double r = std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]), ri = 1.0 / r;
         const int64_t pz = zc * nz + zj[s];
-        table(tab + pz * ncoef * F, F, x0, h, n, r, rc[pz], t + j * F, td + j * F);
-        for (int64_t c = n_rnl; c < F; ++c) ei += t[j * F + c];   // the folded pair radial
-        for (int d = 0; d < 3; ++d) hv[s * 3 + d] = u[d] / r;
-        x[j] = u[0]; y[j] = u[1]; z[j] = u[2];
+        row[j] = table_rows(tab + pz * ncoef * F, F, x0, ih, n, r, rc[pz], w[j], dw[j]);
+        for (int d = 0; d < 3; ++d) hv[s * 3 + d] = u[d] * ri;
+        ir4[v * K + s] = ri;
+        x[j] = u[0]; y[j] = u[1]; z[j] = u[2]; rr[j] = r; ir[j] = ri;
       }
       v4 *Rb = Rv + b * F, *dRb = dRv + b * F, *Yb = Yv + b * nY;
-      for (int64_t c = 0; c < F; ++c) {
-        Rb[c] = v4{t[c], t[F + c], t[2 * F + c], t[3 * F + c]};
-        dRb[c] = v4{td[c], td[F + c], td[2 * F + c], td[3 * F + c]};
+      int64_t c = 0;
+      for (; c + 4 <= F; c += 4) {                        // four columns of each neighbour, then transposed
+        v4 a[4], d[4];
+        for (int j = 0; j < 4; ++j) {
+          const double *p = row[j] + c;
+          const v4 l0 = *(const v4u *)p, l1 = *(const v4u *)(p + F), l2 = *(const v4u *)(p + 2 * F),
+                   l3 = *(const v4u *)(p + 3 * F);
+          a[j] = (w[j][0] * l0 + w[j][1] * l1) + (w[j][2] * l2 + w[j][3] * l3);
+          d[j] = (dw[j][0] * l0 + dw[j][1] * l1) + (dw[j][2] * l2 + dw[j][3] * l3);
+        }
+        transpose(a, Rb + c);
+        transpose(d, dRb + c);
       }
-      harm.eval<v4>(x, y, z, Yb, dYv + b * 3 * nY);
+      for (; c < F; ++c)
+        for (int j = 0; j < 4; ++j) {
+          const double *p = row[j] + c;
+          Rb[c][j] = (w[j][0] * p[0] + w[j][1] * p[F]) + (w[j][2] * p[2 * F] + w[j][3] * p[3 * F]);
+          dRb[c][j] = (dw[j][0] * p[0] + dw[j][1] * p[F]) + (dw[j][2] * p[2 * F] + dw[j][3] * p[3 * F]);
+        }
+      v4 ep = {};
+      for (c = n_rnl; c < F; ++c) ep += Rb[c];            // the folded pair radial
+      ei += (ep[0] + ep[1]) + (ep[2] + ep[3]);
+      harm.eval<v4>(x, y, z, rr, ir, Yb);
       for (int64_t u = 0; u < n_runs; ++u) {
-        const int32_t a0 = run[4 * u], rr = run[4 * u + 1], y0 = run[4 * u + 2], len = run[4 * u + 3];
-        const v4 Rr = Rb[rr];
-        for (int32_t m = 0; m < len; ++m) a4[a0 + m] += Rr * Yb[y0 + m];
+        const int32_t *ru = run + 4 * u;
+        run_a(a4 + ru[0], Rb[ru[1]], Yb + ru[2], ru[3]);
       }
     }
     e[v] = ei;
@@ -225,6 +290,7 @@ struct Site {
   static inline vd ld(const D *p) { return *(const vd *)p; }
   static inline void st(D *p, vd x) { *(vd *)p = x; }
   void dag(int64_t zc) {
+    if (form) return coupled(zc);
     const int64_t n_in = n_nodes - n_leaf, M = n_a + n_in;   // leaves: the last level, never stored
     const int32_t *gp = grp, *fa = fac;
     constexpr bool dbl = sizeof(D) == sizeof(double);
@@ -308,42 +374,145 @@ struct Site {
     for (int64_t a = 0; a < n_a; ++a) st(wa + a * V, (ld(wa + a * V) + ld(wb + a * V)) + ld(wv + a * V) + cz[a]);
   }
 
+  // g_U[m0 .. m0 + NC) of one block row: sum over its entries of w z_V, the weight shared by the components;
+  // returns the row's z . g of these components.
+  template <int NC>
+  inline vd row_chunk(const D *gw, const int32_t *ent, int64_t k0, int64_t end, const D *zv, D *gu, const D *zu) {
+    vd a0 = {}, a1 = {}, a2 = {}, a3 = {};
+    for (int64_t k = k0; k < end; ++k) {
+      const vd wk = gw[k] + vd{};
+      const D *zp = zv + (int64_t)ent[k] * V;
+      a0 += wk * ld(zp);
+      if constexpr (NC > 1) a1 += wk * ld(zp + V);
+      if constexpr (NC > 2) a2 += wk * ld(zp + 2 * V);
+      if constexpr (NC > 3) a3 += wk * ld(zp + 3 * V);
+    }
+    vd es = a0 * ld(zu);
+    st(gu, a0);
+    if constexpr (NC > 1) { st(gu + V, a1); es += a1 * ld(zu + V); }
+    if constexpr (NC > 2) { st(gu + 2 * V, a2); es += a2 * ld(zu + 2 * V); }
+    if constexpr (NC > 3) { st(gu + 3 * V, a3); es += a3 * ld(zu + 3 * V); }
+    return es;
+  }
+
+  // The product basis in coupled form (eval/coupled.py; `ffi.coupled_plan`'s arrays in grp and ct): z = [A; X],
+  // X = sum c A A, g = W z by block rows, E += lin . A + z . g / 2, dE/dA = lin + g_A + sum c g_X A into wA.
+  void coupled(int64_t zc) {
+    const int32_t *h = grp;
+    const int64_t nx = h[1], nxe = h[2], nrows = h[3], nent = h[4], np3 = h[5];
+    const int32_t *xptr = h + 8, *xa = xptr + nx + 1, *xb = xa + nxe, *rows = xb + nxe, *ent = rows + 3 * nrows;
+    const int32_t *aptr = ent + nent, *ax = aptr + n_a + 1, *ap = ax + np3;
+    const D *lin = ct + zc * N, *gw = lin + n_a, *xc = gw + nent, *ac = xc + nxe;
+    D *zv = L.data(), *gv = w.data(), *wa = wA.data();
+    std::copy(A.data(), A.data() + n_a * V, zv);
+    for (int64_t x = 0; x < nx; ++x) {
+      vd s0 = {}, s1 = {};
+      int64_t k = xptr[x];
+      const int64_t end = xptr[x + 1];
+      for (; k + 1 < end; k += 2) {
+        s0 += xc[k] * ld(zv + (int64_t)xa[k] * V) * ld(zv + (int64_t)xb[k] * V);
+        s1 += xc[k + 1] * ld(zv + (int64_t)xa[k + 1] * V) * ld(zv + (int64_t)xb[k + 1] * V);
+      }
+      if (k < end) s0 += xc[k] * ld(zv + (int64_t)xa[k] * V) * ld(zv + (int64_t)xb[k] * V);
+      st(zv + (n_a + x) * V, s0 + s1);
+    }
+    std::fill(gv, gv + n_a * V, D(0));                    // an A block without a weight has no row
+    double eq[V] = {};
+    int64_t k0 = 0;
+    for (int64_t r = 0; r < nrows; ++r) {
+      const int64_t u = rows[3 * r], K = rows[3 * r + 1], end = rows[3 * r + 2];
+      vd es = {};
+      int64_t m = 0;
+      for (; m + 4 <= K; m += 4) es += row_chunk<4>(gw, ent, k0, end, zv + m * V, gv + (u + m) * V, zv + (u + m) * V);
+      if (K - m == 3) es += row_chunk<3>(gw, ent, k0, end, zv + m * V, gv + (u + m) * V, zv + (u + m) * V);
+      else if (K - m == 2) es += row_chunk<2>(gw, ent, k0, end, zv + m * V, gv + (u + m) * V, zv + (u + m) * V);
+      else if (K - m == 1) es += row_chunk<1>(gw, ent, k0, end, zv + m * V, gv + (u + m) * V, zv + (u + m) * V);
+      for (int v = 0; v < V; ++v) eq[v] += es[v];        // rows are short: the sum over them is in double
+      k0 = end;
+    }
+    for (int v = 0; v < V; ++v) {
+      double el = 0.0;
+      for (int64_t a = 0; a < n_a; ++a) el += A[a * V + v] * static_cast<double>(lin[a]);
+      e[v] += el + 0.5 * eq[v];
+    }
+    for (int64_t a = 0; a < n_a; ++a) {
+      vd s0 = {}, s1 = {};
+      int64_t k = aptr[a];
+      const int64_t end = aptr[a + 1];
+      for (; k + 1 < end; k += 2) {
+        s0 += ac[k] * ld(gv + (int64_t)ax[k] * V) * ld(zv + (int64_t)ap[k] * V);
+        s1 += ac[k + 1] * ld(gv + (int64_t)ax[k + 1] * V) * ld(zv + (int64_t)ap[k + 1] * V);
+      }
+      if (k < end) s0 += ac[k] * ld(gv + (int64_t)ax[k] * V) * ld(zv + (int64_t)ap[k] * V);
+      st(wa + a * V, (s0 + s1) + ld(gv + a * V) + lin[a]);
+    }
+  }
+
   // Lane v's dE/dv for its nl neighbours, from wA (after dag).
   void grad(int v, int64_t nl, double *G) {
-    const v4 *Rv = &R[v * Kb * F], *dRv = &dR[v * Kb * F], *Yv = &Y[v * Kb * nY], *dYv = &dY[v * Kb * 3 * nY];
+    const v4 *Rv = &R[v * Kb * F], *dRv = &dR[v * Kb * F], *Yv = &Y[v * Kb * nY];
     const double *hv = &hat[v * K * 3];
     for (int64_t a = 0; a < n_a; ++a) wl[a] = wA[a * V + v];
     v4 *q4 = q.data(), *dq4 = dq.data();
     for (int64_t b = 0; 4 * b < nl; ++b) {
-      const v4 *Rb = Rv + b * F, *dRb = dRv + b * F, *Yb = Yv + b * nY, *dYb = dYv + b * 3 * nY;
+      const v4 *Rb = Rv + b * F, *dRb = dRv + b * F, *Yb = Yv + b * nY;
       std::fill(q4, q4 + nY, v4{});                      // q_y = sum_a wA R_r(a), dq_y with R'
       std::fill(dq4, dq4 + nY, v4{});
       for (int64_t u = 0; u < n_runs; ++u) {
         const int32_t a0 = run[4 * u], rr = run[4 * u + 1], y0 = run[4 * u + 2], len = run[4 * u + 3];
         const v4 Rr = Rb[rr], dRr = dRb[rr];
-        for (int32_t m = 0; m < len; ++m) {
-          const double wm = wl[a0 + m];
-          q4[y0 + m] += wm * Rr;
-          dq4[y0 + m] += wm * dRr;
-        }
+        run_q(q4 + y0, dq4 + y0, &wl[a0], Rr, dRr, len);
       }
-      v4 sc = {}, gx = {}, gy = {}, gz = {};
+      v4 sc = {}, gx = {}, gy = {}, gz = {}, sl = {};
       for (int64_t c = n_rnl; c < F; ++c) sc += dRb[c];
-      for (int64_t yy = 0; yy < nY; ++yy) {
+      sc += dq4[0] * Yb[0];
+      const int32_t *gi = harm.gi.data();
+      const double *gc = harm.gc.data();
+      for (int64_t yy = 1; yy < nY; ++yy) {               // grad Y from the degree below (Harmonics)
+        const int32_t *i5 = gi + 5 * yy;
+        const double *c5 = gc + 5 * yy;
+        const v4 qy = q4[yy];
         sc += dq4[yy] * Yb[yy];
-        gx += q4[yy] * dYb[yy];
-        gy += q4[yy] * dYb[nY + yy];
-        gz += q4[yy] * dYb[2 * nY + yy];
+        gx += qy * (c5[0] * Yb[i5[0]] + c5[1] * Yb[i5[1]]);
+        gy += qy * (c5[2] * Yb[i5[2]] + c5[3] * Yb[i5[3]]);
+        gz += qy * (c5[4] * Yb[i5[4]]);
       }
+      if (!harm.solid)                                    // sum_y l q_y Y_y, along rhat
+        for (int64_t l = 1, yy = 1; l <= harm.L; ++l)
+          for (int64_t m = 0; m < 2 * l + 1; ++m, ++yy) sl += double(l) * (q4[yy] * Yb[yy]);
       for (int j = 0; j < 4 && 4 * b + j < nl; ++j) {
         const int64_t s = 4 * b + j;
-        G[3 * s] = sc[j] * hv[s * 3] + gx[j];
-        G[3 * s + 1] = sc[j] * hv[s * 3 + 1] + gy[j];
-        G[3 * s + 2] = sc[j] * hv[s * 3 + 2] + gz[j];
+        const double ir = harm.solid ? 1.0 : ir4[v * K + s], rad = sc[j] - ir * sl[j];
+        G[3 * s] = rad * hv[s * 3] + ir * gx[j];
+        G[3 * s + 1] = rad * hv[s * 3 + 1] + ir * gy[j];
+        G[3 * s + 2] = rad * hv[s * 3 + 2] + ir * gz[j];
       }
     }
   }
 };
+
+// -DACEJAX_FFI_PROF: seconds in the three stages (A, the product basis, the forces), printed per call to stderr.
+#ifdef ACEJAX_FFI_PROF
+#include <chrono>
+#include <cstdio>
+static std::atomic<int64_t> prof_ns[3], prof_rows;
+#define PROF_T(t) const auto t = std::chrono::steady_clock::now()
+#define PROF_ADD(t0, t1, t2, nr)                                                                     \
+  do {                                                                                              \
+    const auto t3 = std::chrono::steady_clock::now();                                               \
+    prof_ns[0] += (t1 - t0).count(); prof_ns[1] += (t2 - t1).count(); prof_ns[2] += (t3 - t2).count(); \
+    prof_rows += nr;                                                                                \
+  } while (0)
+static void prof_report() {
+  const double n = std::max<int64_t>(1, prof_rows.exchange(0));
+  std::fprintf(stderr, "ace_ffi us/site: A %.3f product %.3f forces %.3f\n", prof_ns[0].exchange(0) / n * 1e-3,
+               prof_ns[1].exchange(0) / n * 1e-3, prof_ns[2].exchange(0) / n * 1e-3);
+}
+#else
+#define PROF_T(t)
+#define PROF_ADD(t0, t1, t2, nr)
+static void prof_report() {}
+#endif
 
 // Rows [i0, i1) in batches of the site's V lanes of one centre species z[i].  gather(i, vec, zs, ix) writes row i's live
 // neighbour vectors, species and atom (or slot) indices and returns their count; emit(i, e, nl, G, ix) takes
@@ -356,18 +525,22 @@ void batched(S &site, int64_t i0, int64_t i1, const int32_t *z, Gather gather, E
   std::vector<std::vector<int64_t>> pend(site.nzc);
   auto run = [&](int64_t zc, std::vector<int64_t> &rows) {
     const int nr = static_cast<int>(rows.size());
+    PROF_T(t0);
     for (int v = 0; v < V; ++v) {
       double *vec = &site.vin[v * K * 3];
       int32_t *zs = &site.zin[v * K], *ix = &site.idx[v * K];
       site.nl[v] = v < nr ? gather(rows[v], vec, zs, ix) : 0;
       site.neighbours(v, zc, site.nl[v], vec, zs);
     }
+    PROF_T(t1);
     site.dag(zc);
+    PROF_T(t2);
     for (int v = 0; v < nr; ++v) {
       double *g = &site.G[v * K * 3];
       site.grad(v, site.nl[v], g);
       emit(rows[v], site.e[v], site.nl[v], g, &site.idx[v * K]);
     }
+    PROF_ADD(t0, t1, t2, nr);
     rows.clear();
   };
   for (int64_t i = i0; i < i1; ++i) {
@@ -389,7 +562,7 @@ ffi::Error AceDirectImpl(ffi::Buffer<ffi::F64> pos, ffi::Buffer<ffi::S32> specie
                          ffi::Buffer<ffi::S32> runs, ffi::Buffer<ffi::S32> groups,
                          ffi::Buffer<ffi::S32> factor, ffi::AnyBuffer ct, ffi::Buffer<ffi::F64> e0,
                          double x0, double h, int64_t n, int64_t n_rnl, int64_t lmax, int64_t solid,
-                         int64_t n_leaf, double rc2, ffi::ResultBuffer<ffi::F64> e,
+                         int64_t n_leaf, int64_t form, double rc2, ffi::ResultBuffer<ffi::F64> e,
                          ffi::ResultBuffer<ffi::F64> f) {
   const int64_t atoms = pos.dimensions()[0], K = nbr.dimensions()[0], rows = nbr.dimensions()[1];
   const double *x = pos.typed_data(), *wt = weight.typed_data();
@@ -428,11 +601,12 @@ ffi::Error AceDirectImpl(ffi::Buffer<ffi::F64> pos, ffi::Buffer<ffi::S32> specie
       }
   };
   const auto run = [&](auto d) {                          // the DAG's type, from the readout's
-    Site<decltype(d)> site(rtab, rcut, runs, groups, factor, ct, e0, x0, h, n, n_rnl, lmax, solid, n_leaf, K);
+    Site<decltype(d)> site(rtab, rcut, runs, groups, factor, ct, e0, x0, h, n, n_rnl, lmax, solid, n_leaf, form, K);
     batched(site, 0, std::min(rows, atoms), z, gather, emit);
   };
   if (ct.element_type() == ffi::F32) run(float{});
   else run(double{});
+  prof_report();
   if (broken) {                                           // a NaN position: NaN out, not a dropped pair
     std::fill(eo, eo + atoms, std::numeric_limits<double>::quiet_NaN());
     std::fill(fo, fo + atoms * 3, std::numeric_limits<double>::quiet_NaN());
@@ -483,7 +657,7 @@ ffi::Error AceEdgesImpl(ffi::ThreadPool pool, ffi::Buffer<ffi::F64> rij, ffi::Bu
                         ffi::Buffer<ffi::F64> rcut, ffi::Buffer<ffi::S32> runs, ffi::Buffer<ffi::S32> groups,
                         ffi::Buffer<ffi::S32> factor, ffi::AnyBuffer ct, ffi::Buffer<ffi::F64> e0,
                         double x0, double h, int64_t n, int64_t n_rnl, int64_t lmax, int64_t solid,
-                        int64_t n_leaf, int64_t max_threads, ffi::ResultBuffer<ffi::F64> e,
+                        int64_t n_leaf, int64_t form, int64_t max_threads, ffi::ResultBuffer<ffi::F64> e,
                         ffi::ResultBuffer<ffi::F64> g) {
   const int64_t rows = rij.dimensions()[0], K = rij.dimensions()[1];
   const double *r = rij.typed_data();
@@ -492,11 +666,15 @@ ffi::Error AceEdgesImpl(ffi::ThreadPool pool, ffi::Buffer<ffi::F64> rij, ffi::Bu
   double *eo = e->typed_data(), *go = g->typed_data();
   if (ct.element_type() != ffi::F64 && ct.element_type() != ffi::F32)
     return ffi::Error::InvalidArgument("the ACE kernel's readout is float64, or float32 for a float DAG");
+  double rc2 = 0.0;
+  for (size_t p = 0; p < rcut.element_count(); ++p) rc2 = std::max(rc2, rcut.typed_data()[p] * rcut.typed_data()[p]);
   parallel_rows(pool, rows, max_threads, [&](int64_t i0, int64_t i1) {
     auto gather = [&](int64_t i, double *V, int32_t *zs, int32_t *slot) {
       int64_t nl = 0;
       for (int64_t k = 0; k < K; ++k)
         if (live[i * K + k]) {
+          const double *u = r + 3 * (i * K + k);           // a skin pair is zero in every table: not a neighbour
+          if (u[0] * u[0] + u[1] * u[1] + u[2] * u[2] >= rc2) continue;   // (a NaN stays, and gives NaN)
           std::memcpy(&V[3 * nl], r + 3 * (i * K + k), 3 * sizeof(double));
           zs[nl] = zn[i * K + k];
           slot[nl++] = static_cast<int32_t>(k);
@@ -510,12 +688,13 @@ ffi::Error AceEdgesImpl(ffi::ThreadPool pool, ffi::Buffer<ffi::F64> rij, ffi::Bu
       for (int64_t s = 0; s < nl; ++s) std::memcpy(gi + 3 * slot[s], &G[3 * s], 3 * sizeof(double));
     };
     const auto run = [&](auto d) {
-      Site<decltype(d)> site(rtab, rcut, runs, groups, factor, ct, e0, x0, h, n, n_rnl, lmax, solid, n_leaf, K);
+      Site<decltype(d)> site(rtab, rcut, runs, groups, factor, ct, e0, x0, h, n, n_rnl, lmax, solid, n_leaf, form, K);
       batched(site, i0, i1, z, gather, emit);
     };
     if (ct.element_type() == ffi::F32) run(float{});
     else run(double{});
   });
+  prof_report();
   return ffi::Error::Success();
 }
 
@@ -531,9 +710,9 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(AceEdges, AceEdgesImpl,
                                   .Arg<ffi::Buffer<ffi::F64>>()     // radial table (NZ, NZ, ncoef, F)
                                   .Arg<ffi::Buffer<ffi::F64>>()     // pair cutoffs (NZ, NZ)
                                   .Arg<ffi::Buffer<ffi::S32>>()     // A runs (n_runs, 4): a0, r, y0, len
-                                  .Arg<ffi::Buffer<ffi::S32>>()     // DAG groups (n_groups, 2): parent, end
+                                  .Arg<ffi::Buffer<ffi::S32>>()     // DAG groups (n_groups, 2): parent, end; or the coupled plan
                                   .Arg<ffi::Buffer<ffi::S32>>()     // DAG A factor per node
-                                  .Arg<ffi::AnyBuffer>()            // readout (NZ, n_A + nodes): its type is the DAG's
+                                  .Arg<ffi::AnyBuffer>()            // readout (NZ, n_A + nodes), or the coupled plan's reals: its type is the DAG's
                                   .Arg<ffi::Buffer<ffi::F64>>()     // E0 (NZ,)
                                   .Attr<double>("x0")
                                   .Attr<double>("h")
@@ -542,6 +721,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(AceEdges, AceEdgesImpl,
                                   .Attr<int64_t>("lmax")
                                   .Attr<int64_t>("solid")
                                   .Attr<int64_t>("n_leaf")
+                                  .Attr<int64_t>("form")            // 0: the DAG; 1: the coupled form
                                   .Attr<int64_t>("max_threads")
                                   .Ret<ffi::Buffer<ffi::F64>>()     // site energies (rows,)
                                   .Ret<ffi::Buffer<ffi::F64>>());   // dE_i / drij (rows, K, 3)
@@ -556,9 +736,9 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(AceDirect, AceDirectImpl,
                                   .Arg<ffi::Buffer<ffi::F64>>()     // radial table (NZ, NZ, ncoef, F)
                                   .Arg<ffi::Buffer<ffi::F64>>()     // pair cutoffs (NZ, NZ)
                                   .Arg<ffi::Buffer<ffi::S32>>()     // A runs (n_runs, 4): a0, r, y0, len
-                                  .Arg<ffi::Buffer<ffi::S32>>()     // DAG groups (n_groups, 2): parent, end
+                                  .Arg<ffi::Buffer<ffi::S32>>()     // DAG groups (n_groups, 2): parent, end; or the coupled plan
                                   .Arg<ffi::Buffer<ffi::S32>>()     // DAG A factor per node
-                                  .Arg<ffi::AnyBuffer>()            // readout (NZ, n_A + nodes): its type is the DAG's
+                                  .Arg<ffi::AnyBuffer>()            // readout (NZ, n_A + nodes), or the coupled plan's reals: its type is the DAG's
                                   .Arg<ffi::Buffer<ffi::F64>>()     // E0 (NZ,)
                                   .Attr<double>("x0")
                                   .Attr<double>("h")
@@ -567,6 +747,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(AceDirect, AceDirectImpl,
                                   .Attr<int64_t>("lmax")
                                   .Attr<int64_t>("solid")
                                   .Attr<int64_t>("n_leaf")
+                                  .Attr<int64_t>("form")            // 0: the DAG; 1: the coupled form
                                   .Attr<double>("rc2")
                                   .Ret<ffi::Buffer<ffi::F64>>()     // atom energies (atoms,)
                                   .Ret<ffi::Buffer<ffi::F64>>());   // -sum_i w_i grad e_i (atoms, 3): forces at w = 1

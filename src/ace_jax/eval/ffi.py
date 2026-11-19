@@ -46,6 +46,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from .aa_dag import build_plan
+from . import coupled
 from .edge_model import EdgeSiteModel
 
 TARGET = "ace_jax_direct"
@@ -338,11 +339,259 @@ def plan(model, gpu=False):
     deg = np.sqrt(ys).astype(np.int64) if gpu else 0 * ys     # the GPU kernel files each run under one l
     a0 = np.nonzero(np.r_[True, (rs[1:] != rs[:-1]) | (ys[1:] != ys[:-1] + 1) | (deg[1:] != deg[:-1])])[0]
     runs = np.stack([a0, rs[a0], ys[a0], np.diff(np.r_[a0, n_a])], axis=1)
+    if not gpu:
+        runs = runs[np.argsort(runs[:, 3], kind="stable")]   # by length: the C++ kernel switches on it
     return (runs, np.stack([parent[ends - 1], ends], axis=1), factor, np.ascontiguousarray(ct.T),
             len(levels[-1][0]) if levels else 0, np.asarray(lev))
 
 
 PRECISIONS = ("float64", "mixed")
+FORMS = ("auto", "dag", "coupled")
+FORM = os.environ.get("ACEJAX_FFI_FORM") or None   # the product basis' form for every kernel_inputs: None, by argument
+COUPLED_SPLIT = 1.25                                  # a task above this x the mean work of a thread is split
+COUPLED_THREADS = None                                # the GPU pass's threads per block: None by size
+COUPLED_SHARED = 90 << 10                             # bytes of z, g and pieces of one row a GPU block may take
+COUPLED_GAIN = 0.8                                    # auto: coupled when its operations are below this x the DAG's
+ILP_SECONDS = 0.0                                     # `coupled.build`'s integer program (greedy alone: within ~5 %)
+_COUPLED = {}                                         # spec digest -> coupled.Plan or the NoPlan
+
+
+def _a_order(model):
+    """The kernels' order of A, by radial column then harmonic: (order, old index -> new)."""
+    ar, ay = np.asarray(model.aspec_r), np.asarray(model.aspec_y)
+    order = np.lexsort((ay, ar))
+    new = np.empty(len(ar), np.int64); new[order] = np.arange(len(ar))
+    return order, new
+
+
+def coupled_of(model):
+    """`coupled.build`'s plan of the model's product basis (kept per spec: it does not depend on the readout);
+    raises `coupled.NoPlan` where there is none."""
+    ar, ay = np.asarray(model.aspec_r, np.int64), np.asarray(model.aspec_y, np.int64)
+    specs = [np.ascontiguousarray(s, np.int64) for s in model.aa_specs]
+    hh = hashlib.sha256()
+    for a in (ar, ay, *specs):
+        hh.update(str(a.shape).encode()); hh.update(np.ascontiguousarray(a).tobytes())
+    key = (hh.hexdigest(), ILP_SECONDS)
+    if key not in _COUPLED:
+        if len(_COUPLED) > 16:
+            _COUPLED.clear()
+        try:
+            _COUPLED[key] = coupled.build(ar, ay, specs, ilp_seconds=ILP_SECONDS)
+        except coupled.NoPlan as e:
+            _COUPLED[key] = e
+    if isinstance(_COUPLED[key], coupled.NoPlan):
+        raise _COUPLED[key]
+    return _COUPLED[key]
+
+
+def _coupled_terms(model, check=True):
+    """The coupled plan of the model in the kernels' order of A (every block a run of z), as arrays: n_a, n_x,
+    nz; xt (x, a, b) and xc, the CG terms sorted by x; per row entry its row's first z index ru, 2L + 1 rK, its
+    column's first z index rv and its weights rw (nz, entries), sorted by row; tu (a, x, partner) and ac, the
+    dE/dA terms sorted by a; lin (nz, n_a)."""
+    import types
+    P = coupled_of(model)
+    ct = np.asarray(model.ctilde, np.float64)
+    w = P.weights(ct)
+    if check:                                              # a float32 readout is in the span to float32 only
+        coupled.check(P, [np.asarray(s) for s in model.aa_specs], ct, w,
+                      tol=coupled.RESIDUAL if model.ctilde.dtype == jnp.float64 else 1e-5)
+    _, new = _a_order(model)
+    n_a, nb, n_lin, nz = P.n_a, len(P.bl), len(P.lin), ct.shape[1]
+    base = np.empty(nb + len(P.xb), np.int64)
+    for b, q in enumerate(P.mem):
+        qn = new[np.asarray(q)]
+        if not np.array_equal(qn, qn[0] + np.arange(len(qn))):
+            raise coupled.NoPlan("an A block is not a run of the kernels' A")
+        base[b] = qn[0]
+    base[nb:] = P.x_base
+    K = np.r_[2 * P.bl + 1, 2 * P.xb[:, 2] + 1]
+    xt, xc = P.cg_terms()
+    xt = np.stack([xt[:, 0], new[xt[:, 1]], new[xt[:, 2]]], 1) if len(xt) else xt
+    o = np.lexsort((xt[:, 2], xt[:, 1], xt[:, 0]))
+    xt, xc = xt[o], xc[o]
+    U, V = P.quad[:, 0], P.quad[:, 1]                      # rows: U gets (V, w), V gets (U, w); U = V: 2 w
+    widx = np.arange(len(P.quad))
+    same = U == V
+    ru = np.r_[U, V[~same]]; rv = np.r_[V, U[~same]]; rw = np.r_[widx, widx[~same]]
+    rf = np.r_[np.where(same, 2.0, 1.0), np.ones(int((~same).sum()))]
+    o = np.lexsort((base[rv], ru))
+    ru, rv, rw, rf = ru[o], rv[o], rw[o], rf[o]
+    t = np.r_[np.stack([xt[:, 1], xt[:, 0], xt[:, 2]], 1), np.stack([xt[:, 2], xt[:, 0], xt[:, 1]], 1)]
+    tu, tinv = np.unique(t, axis=0, return_inverse=True)   # sorted by target A, X, partner; equal terms merged
+    ac = np.bincount(tinv.ravel(), np.r_[xc, xc], minlength=len(tu))
+    lin = np.zeros((nz, n_a)); lin[:, new[P.lin]] = w[:n_lin].T
+    return types.SimpleNamespace(n_a=n_a, n_x=P.n_x, nz=nz, xt=xt, xc=xc, ru=base[ru], rK=K[ru], rv=base[rv],
+                                 rw=(w[n_lin:][rw] * rf[:, None]).T, tu=tu, ac=ac, lin=lin,
+                                 ops=2 * len(xt) + int(K[ru].sum()) + 2 * len(tu))
+
+
+def coupled_plan(model, check=True):
+    """(ints (n, 2), reals (NZ, N), operations): the coupled form of the model's product basis for the C++
+    kernel (`coupled.Plan`, A in the kernels' order, so every block is a run of z).
+
+    ints, flat: a header (n_a, n_x, CG terms, block rows, row entries, dE/dA entries, 0, 0), then the X values
+    as CSR (xptr, and each term's two A), the block rows (z index of the first component, 2L + 1, end of its
+    entries), each entry's first z index, and dE/dA as CSR per A (aptr, the X in z and the partner A of each term).
+    reals, per centre species: the linear weights (n_a), the entries' weights, the CG coefficients of the X
+    terms and of the dE/dA terms.  operations: multiply-adds a site, to compare with 3 a DAG node."""
+    c = _coupled_terms(model, check)
+    n_a, nz = c.n_a, c.nz
+    xptr = np.r_[0, np.cumsum(np.bincount(c.xt[:, 0] - n_a, minlength=c.n_x))]
+    us, first, cnt = np.unique(c.ru, return_index=True, return_counts=True)
+    rows = np.stack([us, c.rK[first], np.cumsum(cnt)], 1)
+    aptr = np.r_[0, np.cumsum(np.bincount(c.tu[:, 0], minlength=n_a))]
+    ints = np.concatenate([[n_a, c.n_x, len(c.xt), len(rows), len(c.rv), len(c.tu), 0, 0], xptr, c.xt[:, 1],
+                           c.xt[:, 2], rows.ravel(), c.rv, aptr, c.tu[:, 1], c.tu[:, 2]]).astype(np.int64)
+    if ints.max(initial=0) >= 2 ** 31:
+        raise coupled.NoPlan("the coupled plan overflows int32")
+    ints = np.r_[ints, np.zeros(len(ints) % 2, np.int64)].reshape(-1, 2)
+    reals = np.concatenate([c.lin, c.rw, np.tile(c.xc, (nz, 1)), np.tile(c.ac, (nz, 1))], 1)
+    return ints, np.ascontiguousarray(reals), c.ops
+
+
+GPU_NC = 4                                            # components of a block row a thread takes together, at most
+GPU_HEAD = 48                                         # ints before the streams' arrays
+END = np.int64(1) << 31                               # an item that ends its task
+
+
+def coupled_threads(ops, real=8):
+    """Threads per block of the GPU kernel's coupled pass, by its operations a site and the bytes of its
+    floats (A100, o4d20, the pass in ms at 128 and 256 threads: float64 5.5, 4.7; float32 2.9, 3.4)."""
+    return 32 if ops < 2000 else 64 if ops < 8000 else 128 if ops < 30000 or real == 4 else 256
+
+
+def _stream(tasks, T, n_tot, piece0, split, nz=1):
+    """Tasks (dst, u, item ints, their coefficient columns (k, items)) dealt to T threads of near-equal work.
+    A task above `split` items goes in pieces, the later ones to piece slots from n_tot + piece0 on (`nc`
+    slots each, nc = the task's components), which a fix-up adds to dst.  Returns items (steps, T) (a thread's
+    stream, END on a task's last item, padded with item 0), hdr (tasks, T) (dst | u << 16 per task in order),
+    cols (k, steps, T) (padded with 0), fixes [(dst, first slot, pieces, stride)], piece slots used."""
+    import heapq
+    parts, fixes, used = [], [], 0
+    for dst, u, nc, it, co in tasks:
+        n = len(it)
+        if split and n > split:
+            k = -(-n // split)
+            cuts = np.linspace(0, n, k + 1).astype(int)
+            parts.append((dst, u, it[:cuts[1]], co[:, :cuts[1]]))
+            for j in range(1, k):
+                parts.append((n_tot + piece0 + used + (j - 1) * nc, u, it[cuts[j]:cuts[j + 1]], co[:, cuts[j]:cuts[j + 1]]))
+            fixes += [(dst + m, n_tot + piece0 + used + m, k - 1, nc) for m in range(nc)]
+            used += (k - 1) * nc
+        else:
+            parts.append((dst, u, it, co))
+    order = sorted(range(len(parts)), key=lambda i: -len(parts[i][2]))
+    heap = [(0, t) for t in range(T)]
+    mine = [[] for _ in range(T)]
+    for i in order:
+        load, t = heapq.heappop(heap)
+        mine[t].append(i)
+        heapq.heappush(heap, (load + len(parts[i][2]), t))
+    steps = max((sum(len(parts[i][2]) for i in m) for m in mine), default=0)
+    steps = -(-steps // 8) * 8                              # the kernel loads 4 or 8 steps at a time
+    ntask = max((len(m) for m in mine), default=0)
+    k = tasks[0][4].shape[0] if tasks else nz
+    items, hdr, cols = np.zeros((steps, T), np.int64), np.zeros((ntask, T), np.int64), np.zeros((k, steps, T))
+    for t, m in enumerate(mine):
+        j = 0
+        for q, i in enumerate(sorted(m, key=lambda i: parts[i][0])):
+            dst, u, it, co = parts[i]
+            n = len(it)
+            items[j:j + n, t] = it
+            items[j + n - 1, t] |= END
+            cols[:, j:j + n, t] = co
+            hdr[q, t] = dst | (u << 16)
+            j += n
+    return items, hdr, cols, fixes, used
+
+
+def coupled_gpu_plan(model, T=None, check=True, real=8):
+    """(ints (n,), reals (NZ, N), threads): the coupled form for the GPU kernel's pass, blocks of T threads
+    (`coupled_threads`), every sum by the thread that owns its target (no atomic adds).
+
+    Six streams, each a list of items per thread stored by step (thread t's step j at T j + t), one coefficient
+    an item: the X values (item a | b << 15: X += c z_a z_b); the block rows, by the number nc = 1..GPU_NC of
+    components taken together (item v: g_{dst + m} += w z_{v + m}, m < nc, and the energy z_{u + m} g); dE/dA
+    (item x | a << 15: g_dst += c g_x z_a).  A task's target, and for the rows the z index its energy reads,
+    come from the stream's headers.  Long tasks are split (`_stream`), and after the rows and after dE/dA
+    the fix-ups (dst, first slot, pieces, stride) add the pieces in.
+
+    ints: T, n_a, n_x, piece slots, then per stream (steps, tasks, and the places of its items, headers and
+    coefficients (in reals)), per fix-up list (count, place), then the arrays.  reals, per centre species: the
+    linear weights, then each stream's coefficients."""
+    c = _coupled_terms(model, check)
+    n_a, n_tot, nz = c.n_a, c.n_a + c.n_x, c.nz
+    if n_tot + 4 * GPU_NC >= 1 << 15:
+        raise coupled.NoPlan(f"{n_tot} values of z: the GPU kernel's items take 15 bits")
+    T = T or int(os.environ.get("ACEJAX_CPL_T", 0)) or coupled_threads(c.ops, real)   # (the variable: development)
+    one = lambda v: np.tile(np.asarray(v, np.float64), (nz, 1))
+    t1, e = [], np.r_[0, np.cumsum(np.bincount(c.xt[:, 0] - n_a, minlength=c.n_x))]
+    for x in range(c.n_x):
+        sl = slice(e[x], e[x + 1])
+        t1.append((n_a + x, 0, 1, c.xt[sl, 1] | (c.xt[sl, 2] << 15), one(c.xc[sl])))
+    us, first, cnt = np.unique(c.ru, return_index=True, return_counts=True)
+    t2 = [[] for _ in range(GPU_NC)]
+    for u, f, n in zip(us.tolist(), first.tolist(), cnt.tolist()):
+        K = int(c.rK[f])
+        parts = -(-K // GPU_NC)
+        m0 = 0
+        for j in range(parts):
+            nc = K // parts + (j < K % parts)
+            t2[nc - 1].append((u + m0, u + m0, nc, c.rv[f:f + n] + m0, c.rw[:, f:f + n]))
+            m0 += nc
+    t3, e = [], np.r_[0, np.cumsum(np.bincount(c.tu[:, 0], minlength=n_a))]
+    for a in range(n_a):
+        if e[a + 1] > e[a]:
+            sl = slice(e[a], e[a + 1])
+            t3.append((a, 0, 1, c.tu[sl, 1] | (c.tu[sl, 2] << 15), one(c.ac[sl])))
+    work2 = sum(len(t[3]) for cl in t2 for t in cl)
+    cap = lambda work: max(8, int(np.ceil(COUPLED_SPLIT * work / T)))
+    streams, fixes, pieces = [_stream(t1, T, n_tot, 0, 0, nz)], [], 0
+    f2, used = [], 0
+    for cl in t2:
+        st = _stream(cl, T, n_tot, used, cap(work2 / GPU_NC), nz)
+        streams.append(st); f2 += st[3]; used += st[4]
+    fixes.append(f2); pieces = used
+    st = _stream(t3, T, n_tot, 0, cap(len(c.tu)), nz)
+    streams.append(st); fixes.append(st[3]); pieces = max(pieces, st[4])
+    if n_tot + pieces >= 1 << 16:
+        raise coupled.NoPlan("the coupled plan's targets take 16 bits")
+    head, ints, reals = [T, n_a, c.n_x, pieces, len(streams)], [], [c.lin]
+    off, roff = GPU_HEAD, n_a
+    for items, hdr, cols, _, _ in streams:
+        head += [items.shape[0], hdr.shape[0], off, off + items.size, roff]
+        ints += [items.ravel(), hdr.ravel()]
+        reals.append(cols.reshape(nz, -1))
+        off += items.size + hdr.size; roff += items.size
+    for fx in fixes:
+        fa = np.asarray(fx, np.int64).reshape(-1, 4)
+        head += [len(fa), off]
+        ints.append((np.stack([fa[:, 0] | (fa[:, 2] << 16), fa[:, 1] | (fa[:, 3] << 16)], 1)).ravel())
+        off += 2 * len(fa)
+    assert len(head) <= GPU_HEAD
+    ints = np.concatenate([np.r_[head, np.zeros(GPU_HEAD - len(head), np.int64)]] + ints)
+    return ints.astype(np.uint32).view(np.int32), np.ascontiguousarray(np.concatenate(reals, 1)), T
+
+
+def choose_form(model, form, n_nodes):
+    """"dag" or "coupled" for `form` (`FORMS`): auto is coupled where the model has a coupled plan with fewer
+    operations than `COUPLED_GAIN` x the DAG's (3 a node).  Returns (form, the coupled arrays or None)."""
+    form = FORM or form or "auto"
+    if form not in FORMS:
+        raise ValueError(f"ffi_form is one of {FORMS}, got {form!r}")
+    if form == "dag":
+        return "dag", None
+    try:
+        cp = coupled_plan(model)
+    except coupled.NoPlan:
+        if form == "coupled":
+            raise
+        return "dag", None
+    if form == "auto" and cp[2] > COUPLED_GAIN * 3 * n_nodes:
+        return "dag", None
+    return "coupled", cp
 
 
 def check_precision(precision):
@@ -352,7 +601,7 @@ def check_precision(precision):
     return precision == "mixed"
 
 
-def kernel_inputs(model, gpu=False, precision=None):
+def kernel_inputs(model, gpu=False, precision=None, form=None):
     """(attrs, consts) of the kernel for a lean ACEModel with a radial table, float64, or float32 on the GPU;
     the GPU kernel also takes the DAG's levels, n_st, the nodes before the last two levels, which it keeps,
     `pull_plan`'s lists and the leaves' coefficients in their two orders.
@@ -361,7 +610,12 @@ def kernel_inputs(model, gpu=False, precision=None):
     run the product-basis DAG and its adjoint in float32 (twice the sites a CPU register; the GPU pass's
     float32 form) with everything else float64. Forces differ from float64 by ~1e-5 eV/A; energies carry
     noise from the float32 node values (~0.1 meV in 200 atoms at o4d20), so optimisers that line-search on
-    energies can fail near a minimum (docs/dev/accuracy-cost-results.md)."""
+    energies can fail near a minimum (docs/dev/accuracy-cost-results.md).
+
+    form (`FORMS`, None = "auto"): the product basis as the DAG or in coupled form (`coupled_plan`, whose arrays
+    then take the DAG's operands: the plan for the groups, its reals for the readout; attribute form = 1).  The
+    On the GPU (`coupled_gpu_plan`: its streams for `pull`, their coefficients for `lc`, attributes n_st and
+    tile its X values and piece slots) only where asked: None is the DAG there."""
     from .model import ACEModel
     if not (isinstance(model, ACEModel) and model.energy_only and model.rtab_grid):
         raise ValueError("the FFI kernel needs a lean ACEModel with a radial table: "
@@ -378,10 +632,32 @@ def kernel_inputs(model, gpu=False, precision=None):
                  n_rnl=np.int64(model.rtab_coefs.shape[-1] - model.Wpair.shape[0]),
                  solid=np.int64(model.ysolid), n_leaf=np.int64(n_leaf))
     i32 = lambda a: jnp.asarray(a, jnp.int32)
+    if not gpu:
+        attrs["form"] = np.int64(0)
+        which, cp = choose_form(model, form, len(factor))
+        if which == "coupled":
+            attrs.update(form=np.int64(1), n_leaf=np.int64(0))
+            return attrs, (model.rtab_coefs, model.table_cutoffs(), i32(runs), i32(cp[0]), i32(np.zeros(1)),
+                           jnp.asarray(cp[1], dag), model.E0)
     consts = (model.rtab_coefs, model.table_cutoffs(), i32(runs), i32(groups), i32(factor),
               jnp.asarray(ct, dag), model.E0)
     if not gpu:
         return attrs, consts
+    gform = FORM or form                                   # the GPU's coupled form is opt-in for now
+    if gform in ("coupled", "auto"):
+        try:
+            if choose_form(model, gform, len(factor))[0] == "coupled":
+                ints, reals, T = coupled_gpu_plan(model, COUPLED_THREADS, real=jnp.dtype(dag).itemsize)   # the DAG's operands empty
+                if (2 * int(ints[1]) + int(ints[2]) + int(ints[3])) * jnp.dtype(dag).itemsize > COUPLED_SHARED:
+                    raise coupled.NoPlan("the coupled form's z does not fit a GPU block's shared memory")
+                return ({**attrs, "n_leaf": np.int64(0), "n_st": np.int64(ints[2]), "tile": np.int64(ints[3]),
+                         "lv": np.int64(0), "threads": np.int64(T), "form": np.int64(1)},   # n_st, tile: sizes
+                        (model.rtab_coefs, model.table_cutoffs(), i32(runs), i32(np.zeros((1, 2))),
+                         i32(np.zeros(0)), jnp.asarray(reals[:, :ints[1]], dag), model.E0, i32(np.zeros(1)),
+                         i32(ints), jnp.asarray(reals, dag)))
+        except coupled.NoPlan:
+            if gform == "coupled":
+                raise
     starts, n_a = np.r_[0, groups[:, 1]], ct.shape[1] - len(factor)
     n_st = starts[lev[-3]] if len(lev) > 2 else 0
     parent = np.repeat(groups[:, 0], np.diff(starts))
@@ -391,7 +667,7 @@ def kernel_inputs(model, gpu=False, precision=None):
     lv = 0 if flat else PULL_LV or 1
     lc = np.zeros((len(ct), pos.max() + 1 if n_leaf else 0)); lc[:, pos] = np.tile(ct[:, ct.shape[1] - n_leaf:], 2)
     return ({**attrs, "n_st": np.int64(n_st), "tile": np.int64(tile), "lv": np.int64(lv),
-             "threads": np.int64(T)},
+             "threads": np.int64(T), "form": np.int64(0)},
             consts + (i32(lev), i32(pull), jnp.asarray(lc, dag)))
 
 
