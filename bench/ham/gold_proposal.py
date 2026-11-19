@@ -1,6 +1,6 @@
 """One-panel figure of the gold comparison for a proposal: band error against the number of
 training structures for the largest ace-jax model, MACE-H and DeepH-E3, each line labelled with
-its one-core prediction cost (the speed-up without a second panel or axis).
+its one-core prediction cost (no second panel or axis).
     python bench/ham/gold_proposal.py <ace grid.jsonl> <other codes.jsonl> <timings.json> <figure stem> [nmax=32] [metric=aligned_rmse]
 Writes <stem>.png and <stem>.pdf.  A run listed in UNCONVERGED is drawn with an open marker."""
 import json
@@ -39,13 +39,12 @@ for name, col, mk, d, t in series:
     a.plot(n, [d[i] for i in n], color=col, lw=2, zorder=2)
     for i in n:
         a.plot([i], [d[i]], color=col, marker=mk, ms=5.5, mfc=SURF if (name, i) in UNCONVERGED else col, mew=1.5, zorder=3)
-    speed = "" if name == "ace-jax" else f", {t / t_ace:.0f}× slower"
-    a.annotate(f"{name}\n{t:.0f} ms/atom{speed}", (n[-1], d[n[-1]]), xytext=(7, 0), textcoords="offset points", va="center", fontsize=7.5, color=INK, linespacing=1.15)
+    a.annotate(f"{name}\n{t:.0f} ms/atom", (n[-1], d[n[-1]]), xytext=(7, 0), textcoords="offset points", va="center", fontsize=7.5, color=INK, linespacing=1.15)
 a.set_xscale("log", base=2); a.set_yscale("log")
 ns = sorted(big)
 a.set_xticks(ns); a.set_xticklabels([str(n) for n in ns]); a.xaxis.set_minor_formatter(NullFormatter())
 a.set_yticks([1, 2, 5, 10, 20, 50]); a.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}")); a.yaxis.set_minor_formatter(NullFormatter())
-a.set_xlim(ns[0] * 0.8, ns[-1] * 6.5); a.set_ylim(0.9, 60)
+a.set_xlim(ns[0] * 0.8, ns[-1] * 3.6); a.set_ylim(0.9, 60)
 a.set_xlabel("Training structures (64 Au atoms each)", fontsize=8.5, loc="left"); a.set_ylabel("Band error (RMSE) / meV", fontsize=8.5)
 a.tick_params(labelsize=8)
 a.grid(True, which="major", color=MUTED, lw=0.3, alpha=0.5)
