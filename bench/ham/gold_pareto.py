@@ -79,7 +79,8 @@ from matplotlib.ticker import FuncFormatter, NullFormatter
 a.set_yticks([1, 2, 5, 10, 20, 50, 100]); a.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}")); a.yaxis.set_minor_formatter(NullFormatter())
 b.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
 lo_x, hi_x = b.get_xlim()
-b.set_xticks([v for v in (0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000) if lo_x <= v <= hi_x]); b.xaxis.set_minor_formatter(NullFormatter())
+ticks = (0.1, 1, 10, 100, 1000, 10000, 100000) if hi_x / lo_x > 500 else (0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000)
+b.set_xticks([v for v in ticks if lo_x <= v <= hi_x]); b.xaxis.set_minor_formatter(NullFormatter())
 lo, hi = a.get_ylim(); a.set_ylim(max(lo, 0.5), hi)
 for ax in (a, b):
     ax.grid(True, which="major", color=MUTED, lw=0.3, alpha=0.5)
