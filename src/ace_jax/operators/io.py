@@ -11,7 +11,7 @@ coupling library and no rebuild, and `load(save(...))` predicts the same blocks 
                                     {"kind": "table", "grid": [r_min, h, n]} or {"kind": "tensor",
                                     radial_kind, rnl_basis, rnl_grid}
         bond                        null, or rcut_bond, n_bond, n_cpl, l_cpl, r_env, n_env, l_env,
-                                    n_ebond, l_ebond, env_emb
+                                    n_ebond, l_ebond, env_emb, env_core (absent: 0, the form of 0.7.0)
         info                        the caller's own dictionary (provenance, fit settings, errors)
     aspec_r, aspec_y                0-based A-basis indices (as the potential schema)
     aa_spec_{1..K}                  per-order A-index tuples
@@ -39,7 +39,7 @@ from .onsite import OnsiteModel
 from .orbitals import OrbitalBasis
 
 SCHEMA_VERSION = 1
-_BOND = ("rcut_bond", "n_bond", "n_cpl", "l_cpl", "r_env", "n_env", "l_env", "n_ebond", "l_ebond", "env_emb")
+_BOND = ("rcut_bond", "n_bond", "n_cpl", "l_cpl", "r_env", "n_env", "l_env", "n_ebond", "l_ebond", "env_emb", "env_core")
 _RADIAL_STATIC = ("radial_kind", "rnl_basis", "rnl_grid")
 
 
@@ -153,6 +153,7 @@ def load(path):
     off = None
     if "offsite_keys" in z:
         b = dict(meta["bond"])
+        b.setdefault("env_core", 0.0)                        # a file of ace-jax 0.7.0: the environment harmonics as they were
         b["env_emb"] = None if b["env_emb"] is None else tuple(tuple(float(v) for v in r) for r in b["env_emb"])
         off = OffsiteModel(bond=B.BondBasis(site=sb, **b), coef=_unpack(z, "offsite"), orbitals=orb, channels=ch)
     return OperatorFile(on, off, meta)

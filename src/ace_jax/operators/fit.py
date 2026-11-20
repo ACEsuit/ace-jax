@@ -66,7 +66,13 @@ def _evidence(fac, gamma, ridge, nc):
     rho = sigma^2 / sigma_c^2 alone, so right-hand sides are solved together by rho rounded to
     RHO_STEP decades (`fit.linear.objective.posterior_qr`).  Returns (mean (k, n_rhs) in the
     design's column order, hyper (n_rhs, 4): sigma, sigma_c at the maximum, the log evidence
-    there, and the sigma_c used after rounding)."""
+    there, and the sigma_c used after rounding).
+
+    The solve adds `ridge` to the prior precision of every column, as the fit with a given
+    sigma_c does.  A design with fewer rows than columns (a species pair with few bonds) can be
+    interpolated, the evidence then takes sigma to its lower bound, and gamma^2 sigma^2 /
+    sigma_c^2 alone is orders of magnitude below the ridge: the coefficients of nearly dependent
+    columns reached 1e13 (Ti-Ti in NbFeSb; docs/dev/ham-results.md)."""
     gamma = np.asarray(gamma, float)
     free = np.flatnonzero(gamma > 0)
     order = np.concatenate([free, np.flatnonzero(gamma <= 0)])            # smoothness columns first, fixed ones last
@@ -86,7 +92,7 @@ def _evidence(fac, gamma, ridge, nc):
     mean = np.zeros_like(c)
     for r in np.unique(rho):
         q = np.flatnonzero(rho == r)
-        lin = jnp.asarray(np.concatenate([prior.gamma ** 2 * 10.0 ** r, prior.e0_prec]))
+        lin = jnp.asarray(np.concatenate([ridge + prior.gamma ** 2 * 10.0 ** r, prior.e0_prec]))     # never weaker than the plain ridge
         mu = lo.posterior_qr(lin, [ls.Factor(jnp.asarray(R), jnp.asarray(c[:, q]), jnp.asarray(yy[q]), fac.n, jnp.zeros(()))], [0.0])[0]
         mean[np.ix_(order, q)] = np.asarray(mu)
     return mean, hyper
@@ -107,6 +113,8 @@ def _loo(fac, gamma, ridge, blocks, press):
     the noise that maximises it, or (`press`) minus their squared prediction error.  Residuals
     shared by the atoms of a structure count once per structure, where the evidence reads them
     as independent noise.  A rho at which a structure has leverage 1 within roundoff is skipped.
+    The solve adds `ridge` to every column (see `_evidence`); the rho values whose prior is below
+    it give the same fit, and of rho values that tie the largest is taken.
     Returns (mean, hyper) as `_evidence` (hyper[:, 2]: the criterion)."""
     gamma, n = np.asarray(gamma, float), float(fac.n)
     blocks = [_Spill.get(b) for b in blocks]
@@ -116,12 +124,14 @@ def _loo(fac, gamma, ridge, blocks, press):
     f = ls.Factor(jnp.asarray(fac.R), jnp.asarray(fac.c), jnp.asarray(fac.yy), fac.n, jnp.zeros(()))
     crit, s2, means = [], [], []
     for r in LOO_RHO:
-        quad, hld, pr, mean = (np.asarray(v) for v in loo.loo_terms(jnp.asarray(np.where(gamma > 0, gamma ** 2 * 10.0 ** r, ridge)), f, P, Y))
+        quad, hld, pr, mean = (np.asarray(v) for v in loo.loo_terms(jnp.asarray(ridge + gamma ** 2 * 10.0 ** r), f, P, Y))
         s2.append((quad + ee) / n); means.append(mean)
         with np.errstate(divide="ignore", invalid="ignore"):
             crit.append(-(pr + ee) if press else -0.5 * n * np.log(s2[-1]) + hld)
     crit = np.where(np.isfinite(crit), crit, -np.inf)
-    best, q = crit.argmax(0), np.arange(crit.shape[1])
+    top = crit.max(0)                                    # ties (every rho whose prior is below the ridge gives one fit): the largest rho
+    tied = crit >= top - 1e-9 * (1.0 + np.abs(np.where(np.isfinite(top), top, 0.0)))
+    best, q = len(LOO_RHO) - 1 - tied[::-1].argmax(0), np.arange(crit.shape[1])
     sig = np.sqrt(np.asarray(s2)[best, q])
     sc = sig / 10.0 ** (0.5 * LOO_RHO[best])
     return np.asarray(means)[best, :, q].T, np.stack([sig, sc, crit[best, q], sc], axis=1)
@@ -187,6 +197,7 @@ def _fit(designs, n_chunks, rows, nc, ridge, device=False, gamma=None, select=No
             g = None if groups is None else groups[i]
             if g != g0:
                 close(); g0 = g
+            make_room(25_000)                            # the row and merge programs of a new shape (`operators.maps`)
             for d, (A, Y, rows_d) in rows(i).items():
                 yy[d] += (Y ** 2).sum(0)
                 n[d] += rows_d

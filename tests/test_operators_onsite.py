@@ -295,3 +295,30 @@ def test_fit_leaving_structures_out(basis_spdf, select):
             return tot
         assert np.isclose(press(rho), -s.hyper[q, 2], rtol=1e-6)
         assert all(press(rho) <= press(r) * (1 + 1e-9) for r in LOO_RHO[::6])
+
+
+def test_selected_prior_is_never_weaker_than_the_ridge(monkeypatch):
+    """A design that the data cannot determine (fewer rows than columns, targets it can interpolate)
+    takes the evidence's noise to its lower bound, and gamma^2 sigma^2 / sigma_c^2 alone is then far
+    below the ridge of the fit without a prior: Ti-Ti coefficients of 1e13 on NbFeSb.  The solves of
+    the evidence and of leave-structure-out add the ridge to every column."""
+    import jax.numpy as jnp
+
+    from ace_jax.fit.linear import stats as ls
+    from ace_jax.operators import fit as F
+    rng = np.random.default_rng(1)
+    m, k, ridge = 30, 60, 1e-10
+    A = rng.normal(size=(m, 12)) @ rng.normal(size=(12, k)) + 1e-9 * rng.normal(size=(m, k))
+    Y = A @ rng.normal(size=(k, 2))                                       # interpolated exactly
+    Q, R = np.linalg.qr(np.vstack([A, np.zeros((k - m, k))]))
+    c = Q.T @ np.vstack([Y, np.zeros((k - m, 2))])
+    fac = ls.Factor(jnp.asarray(R), jnp.asarray(c), jnp.asarray((Y ** 2).sum(0)), jnp.asarray(float(m)), jnp.zeros(()))
+    gamma = np.linspace(1.0, 8.0, k)
+    seen = []
+    solve = F.lo.posterior_qr
+    monkeypatch.setattr(F.lo, "posterior_qr", lambda lin, *a, **kw: (seen.append(np.asarray(lin)), solve(lin, *a, **kw))[1])
+    mean, hyper = F._evidence(fac, gamma, ridge, 1)
+    rho = (hyper[:, 0] / hyper[:, 3]) ** 2
+    assert np.all(gamma.min() ** 2 * rho < ridge)                          # the prior alone would be weaker than the ridge here
+    assert seen and all(lin.min() >= ridge for lin in seen)                # ... and the solve does not go below it
+    assert np.abs(A @ mean - Y).max() < 1e-4 * np.abs(Y).max() and np.isfinite(mean).all()

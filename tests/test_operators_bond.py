@@ -5,6 +5,7 @@ jax.config.update("jax_enable_x64", True)
 
 import pathlib
 
+import jax.numpy as jnp
 import numpy as np
 import pytest
 
@@ -208,3 +209,47 @@ def test_bond_environment_knows_the_species_of_its_atoms(basis_env):
         bond.env_lists(basis_env, pos, cell)
     with pytest.raises(ValueError, match="one row per element"):
         bond.env_embedding(basis_env._replace(env_emb=((1.0,),)))
+
+
+def test_environment_features_are_smooth_at_the_bond_midpoint():
+    """An environment atom at the midpoint of a bond (a second-neighbour bond of a perfect lattice)
+    has no direction from it.  With `env_core` the features are smooth functions of its position
+    there: they do not depend on the side from which the atom arrives and their derivative is the
+    finite difference; with env_core = 0 (ace-jax 0.7.0) they jump by more than their own size.
+    The compiled rows (`design._env_half`) are the same functions."""
+    from types import SimpleNamespace as NS
+
+    from ace_jax.eval.harmonics import real_solid_harmonics, regular_solid_harmonics
+    from ace_jax.operators import design as D
+    v = jnp.asarray(np.random.default_rng(0).normal(size=(7, 3)))
+    assert np.allclose(regular_solid_harmonics(v, 5), real_solid_harmonics(v, 5), rtol=1e-12, atol=1e-13)       # the same functions
+    zero = np.asarray(regular_solid_harmonics(jnp.zeros((1, 3)), 4))[0]
+    assert zero[0] > 0 and np.all(zero[1:] == 0.0)                         # r^l Y_lm at the origin
+    J = np.asarray(jax.jacfwd(lambda x: regular_solid_harmonics(x[None], 2)[0])(jnp.zeros(3)))
+    assert np.allclose(np.abs(J[1:4]).sum(1), np.sqrt(3 / (4 * np.pi))) and np.all(J[4:] == 0.0)   # l = 1: linear; l = 2: flat
+    r = np.array([[4.0, 0.0, 0.0]])
+    emb = np.eye(1)
+
+    def env(mid):
+        return (np.array([[[2.0, 0.0, 0.0] + np.asarray(mid, float), [4.0, 0.0, 0.0], [1.0, 2.0, 0.5]]]), np.array([3]), np.array([[0, 0, 0]]))
+
+    def A(basis, mid):
+        return np.asarray(bond._env_side(basis, env(mid), np.array([0]), r)[0])
+
+    def Aj(basis, mid):
+        e = env(np.zeros(3))
+        e_rij = jnp.asarray(e[0]).at[0, 0].add(mid)
+        return D._env_half(basis, jnp.asarray(emb), e_rij, jnp.asarray(e[1]), jnp.asarray(e[2]), jnp.asarray([0]), jnp.asarray(r))[0]
+
+    new, old = (NS(site=NS(elements=(79,)), env_emb=None, r_env=5.0, rcut_bond=10.0, n_env=6, l_env=4, env_core=a) for a in (1.0, 0.0))
+    size = np.linalg.norm(A(new, [0.3, 0.0, 0.0]))
+    for eps in (1e-4, 1e-8):
+        assert np.linalg.norm(A(new, [eps, 0, 0]) - A(new, [0, -eps, 0])) < 20 * eps * size + 1e-12
+        assert np.linalg.norm(A(old, [eps, 0, 0]) - A(old, [0, -eps, 0])) > 0.5 * size          # the defect, kept for old files
+    assert np.allclose(A(new, [0, 0, 0]), A(new, [1e-9, 0, 0]), atol=1e-7) and np.isfinite(A(new, [0, 0, 0])).all()
+    for mid in ([0.0, 0.0, 0.0], [0.4, 1.9, -0.7]):                         # the compiled rows; the derivative at the midpoint
+        assert np.allclose(Aj(new, jnp.asarray(mid)), A(new, mid), atol=1e-12) and np.allclose(Aj(old, jnp.asarray(mid)), A(old, mid), atol=1e-12)
+    J = np.asarray(jax.jacfwd(lambda m: Aj(new, m))(jnp.zeros(3)))          # (channels n_env, nlm, 3)
+    h = 1e-5
+    fd = np.stack([(A(new, h * e) - A(new, -h * e)) / (2 * h) for e in np.eye(3)], axis=-1)
+    assert np.isfinite(J).all() and np.allclose(J, fd, atol=1e-7) and np.abs(J).max() > 1e-2
