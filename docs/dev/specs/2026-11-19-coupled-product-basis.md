@@ -264,3 +264,8 @@ pair radial), µs/atom-step, float64 / float32, this tree then main:
   and main's o3d8 1.39 ms where its kernels are 0.94. Symmetrix's whole o3d8 step is 0.54 ms. For the small models
   the next gain is in the path around the kernel (lammps-jax's neighbour matrix and call, `ace_count` /
   `ace_fill`), not in it.
+
+Sulis job 2295450 (the same A100, gpu011; this tree at 9025f71, recoupled), µs/atom-step, float64 / float32:
+o4d20 0.262 / 0.163, o4d16 0.121 / 0.091, o4d12 0.0615 / 0.048; o3d8 stopped at the same gate (1.28e-8). Against
+main on that GPU (job 2295415): 2.8x / 2.8x at o4d20, 1.6x / 1.5x at o4d16, 1.08x / 1.07x at o4d12. Symmetrix on
+it (job 2295397, before its recoupling update): 0.121 at o4d20, 0.056 at o4d16.
