@@ -2,8 +2,80 @@
 
 ## Unreleased
 
+## 0.7.1 (2026-11-20)
+
+**Highlights.** Two corrections to Hamiltonian models. The features of the atoms near a bond are now
+smooth at the bond midpoint, which makes the blocks of a perfect crystal obey its symmetry and decreases
+the errors. A prior that `--prior evidence`, `loo` or `press` selects can no longer be weaker than no prior.
+
+**Upgrading from 0.7.0.** A Hamiltonian model file from 0.7.0 loads and gives the same predictions as
+before. Fit the model again to get the corrections. Potentials are not affected.
+
+### Fixed
+
+- **Hamiltonian models: the features of the atoms near a bond are smooth at the bond midpoint.** These
+  features use spherical harmonics about the midpoint of the bond, and a harmonic with l > 0 has no value
+  at the origin. Thus the features changed abruptly when an atom was near the midpoint, and bonds of a
+  perfect crystal that are equivalent by symmetry got different blocks (up to 2.5 meV for bulk gold) when
+  an atom was exactly at the midpoint. The features now use `rho = sqrt(x^2 + a^2)` for an atom at `x`
+  from the midpoint: the radial variable is `rho - a` and the harmonics are regular solid harmonics of
+  `x / rho`. The new setting is `BondBasis.env_core` (`a`, 1 Å by default). This also decreases the
+  errors: for bulk gold with the default basis and 4 training structures, the band error decreases from
+  3.0 meV to 2.1 meV. A model file from 0.7.0 gives the same predictions as before; fit the model again
+  to get the correction.
+- **`--prior evidence`, `loo` and `press` cannot give a weaker prior than `--prior none`.** For a pair of
+  species with few bonds in the training set, the fit can go through the data exactly, and the prior
+  that the evidence selected was then many orders of magnitude weaker than the ridge of a fit with no
+  prior. Coefficients of 1e13 were the result (Ti-Ti blocks of a Ti-doped half-Heusler), with no message.
+  The fit now adds the ridge to the selected prior.
+- A fit of a Hamiltonian model on a CPU releases compiled programs also while it assembles the rows of
+  large structures (see 0.7.0, "Hamiltonian models of several elements on a CPU").
+
 ### Added
 
+- `ace_jax.eval.harmonics.regular_solid_harmonics` gives the solid harmonics as polynomials, with exact
+  values and derivatives at the origin.
+
+## 0.7.0 (2026-11-19)
+
+**Highlights.** ace-jax can now fit and use Hamiltonian models: linear ACE models of the Hamiltonian
+matrix H and the overlap matrix S of a structure in a basis of atomic orbitals, fitted to DFT matrices in
+closed form from a small number of structures. `aj ham fit`, `aj ham predict` and `aj ham bands` are the
+commands, and `HamiltonianCalculator` is the ASE calculator. This part is new, and its commands, options
+and model file can change in the next releases. The fitting and uncertainty code is in a new package
+structure, with no change of behaviour.
+
+**Upgrading from 0.6.0.** Saved potentials and the output files are unchanged, and the results of fits are
+bit-identical. The dependency `ace-jax-coupling` is now 0.3.0. Modules that moved in `ace_jax.fit` still
+import under their old names, with a `DeprecationWarning`, until 0.8. Hamiltonian models need the new
+`ham` extra: `pip install "ace-jax[ham]"`.
+
+### Added
+
+- **Hamiltonian models (`ace_jax.ham`, the `ham` extra).** A model predicts the blocks of H and S between
+  the orbitals of each atom and of each pair of atoms. The fit is linear least squares, with no training
+  loop.
+  - `aj ham fit --data DIR --out model.npz` fits a model to structures with blocks, in the DeepH file
+    layout or as ace-jax cache files. `--prior` sets a smoothness prior: a number, `evidence`, `loo` or
+    `press`. `--validation DIR` gives the errors of the fitted model.
+  - `aj ham predict` writes the H and S blocks of structures in the DeepH layout.
+  - `aj ham bands` gives the bands on a high-symmetry path and the density of states, as arrays and as a
+    figure, with the bands of the reference if the structure has blocks.
+  - `aj eval --model model.npz` gives the errors of a Hamiltonian model: the blocks, the bands at a common
+    energy zero and from the Fermi level of each spectrum, the Fermi level, the band energy and the
+    density of states (`ace_jax.ham.metrics`).
+  - `ace_jax.ham.calculator.HamiltonianCalculator` is an ASE calculator: eigenvalues, Fermi level, H and S
+    blocks, and the band energy with its forces and stress. The band energy is not a total energy.
+  - Collinear spin is two Hamiltonian channels (`H_up`, `H_dn`). There is no spin-orbit coupling.
+  - `docs/user/howto/hamiltonians.md` has the procedure and an example on bulk gold.
+- **`ace_jax.operators`**: equivariant block models of operators in a basis of atomic orbitals, which the
+  Hamiltonian models use. `fit_onsite` and `fit_offsite` fit them on `ace_jax.fit.linear`;
+  `operators.io.save` and `load` write and read one self-contained `.npz` model file.
+- **Equivariant couplings.** `ace_jax.basis.coupling.couple_equivariant` gives the coupling of features
+  that transform as a vector of angular momentum L (L ≤ 6) of each parity, from `ace-jax-coupling` 0.3.0.
+  `ace_jax.basis.cg` has the real Clebsch-Gordan tables.
+- **Leave-one-block-out for linear fits.** `ace_jax.fit.linear.loo` gives the residuals of a Bayesian
+  linear fit with one block of rows left out, in closed form, for many right-hand sides.
 - **A generic linear fit, `ace_jax.fit.linear`.** A row generator gives `(Phi, Y, w)` for each quantity of
   a batch, with one or more right-hand sides `Y`. `stats.qr_statistics` and `stats.gram_statistics` stream
   it into one `Factor` or `Gram` for each quantity (on the host with checkpoints and MPI, or on a device).
@@ -41,6 +113,13 @@
 ### Removed
 
 - `ace_jax.eval.ACECalculator`. Use `ace_jax.ACECalculator`.
+
+### Fixed
+
+- **Hamiltonian models of several elements on a CPU.** A fit or an evaluation of a model with four
+  elements stopped with `LLVM compilation error: Cannot allocate memory` when memory was free: the
+  compiled programs of the process reached the limit of the kernel on memory mappings
+  (`vm.max_map_count`). ace-jax now releases compiled programs before that limit.
 
 ## 0.6.0 (2026-11-13)
 

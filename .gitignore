@@ -28,3 +28,6 @@ docs/user/tutorials/bring-your-own-data.md
 docs/user/tutorials/surfaces.md
 docs/user/tutorials/curation.md
 docs/user/tutorials/*_files/
+
+# Quoll (ham/julia) pulls ASE through CondaPkg; keep it out of the tree with JULIA_CONDAPKG_ENV
+.CondaPkg/

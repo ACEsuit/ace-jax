@@ -3,6 +3,7 @@ ACE model, run the requested rungs of the ladder, write draws and the metrics
 table (per atom energies in meV/atom, forces in eV/A, virials in eV)."""
 import argparse
 import json
+import os
 import pathlib
 
 import jax
@@ -337,6 +338,64 @@ def _run_fit(a):
     return {key.split("/")[1]: m for key, m in res.preds.metrics.items() if key.startswith("test/")}
 
 
+def _is_operator(path):
+    """A model file written by `operators.io.save` (meta kind "operator")."""
+    if not str(path).endswith(".npz"):
+        return False
+    z = np.load(path)
+    return "meta_json" in z.files and json.loads(bytes(z["meta_json"]).decode()).get("kind") == "operator"
+
+
+def _eval_operator(a):
+    """`aj eval` of a Hamiltonian model file, through `HamiltonianCalculator`.
+
+    --data a directory of reference blocks (ace-jax operator caches *.npz, or subdirectories in
+    the DeepH layout): prints the block errors of every channel, on-site and off-site, and the
+    electronic-structure errors of the model's eigenvalues (its H and its S) against the
+    reference's on the --kpts grid, bands within --window of the reference Fermi level
+    (`ham.cli.score`, `ham.metrics`: band errors at a common zero and from own Fermi levels, Fermi
+    level, band energy, density of states; --metrics-out writes the per-structure records as JSON).
+    --data an extxyz file: the band energy, Fermi level, forces and stress of each structure;
+    --out writes them back as <prefix>band_energy, <prefix>free_energy, <prefix>fermi_level
+    (info), <prefix>forces (arrays) and <prefix>stress (info, periodic cells).
+    --blocks-out DIR: the predicted H and S of structure i in DIR/<i>, DeepH layout."""
+    from ase import Atoms
+    from ase.stress import voigt_6_to_full_3x3_stress
+    from .ham import cli as hc
+    calc = hc._calc(a, tuple(a.kpts))
+    p = a.prefix
+    if os.path.isdir(a.data):
+        hc.score(calc, a.data, a.window, a.metrics_out, a.blocks_out)
+        return
+
+    def blocks_out(i, at):
+        if a.blocks_out:
+            calc.write_results(os.path.join(a.blocks_out, f"{i:04d}"), at)
+
+    configs = load_configs(a.data, energy_key=a.energy_key, force_key=a.force_key, virial_key=a.virial_key, stress_key=a.stress_key)
+    frames = None
+    if a.out:
+        from ase_extxyz.io import read_cextxyz
+        frames = list(read_cextxyz(a.data, index=":", create_calc=False))
+    print("structure  atoms   band energy / atom   Fermi level   max |F|")
+    for i, c in enumerate(configs):
+        at = Atoms(numbers=c.numbers, positions=c.positions, cell=c.cell, pbc=c.pbc)
+        at.calc = calc
+        E, F = float(at.get_potential_energy()), np.asarray(at.get_forces())
+        print(f"{i:9d} {len(at):6d} {E / len(at):20.6f} {calc.get_fermi_level():13.6f} {np.abs(F).max():9.4f}")
+        if frames is not None:
+            f = frames[i]
+            f.info[f"{p}band_energy"], f.info[f"{p}free_energy"], f.info[f"{p}fermi_level"] = E, float(calc.results["free_energy"]), calc.get_fermi_level()
+            f.arrays[f"{p}forces"] = F
+            if at.pbc.all():
+                f.info[f"{p}stress"] = voigt_6_to_full_3x3_stress(np.asarray(at.get_stress()))
+        blocks_out(i, at)
+    if frames is not None:
+        from ase_extxyz.io import write_cextxyz
+        write_cextxyz(a.out, frames)
+        print(f"wrote {a.out}")
+
+
 def cmd_eval(a):
     """Evaluate a fitted/exported model on a dataset.  Prints the per-config-type E/F/V
     RMSE table (fit/report.py) for the labels present, and with --out writes the input
@@ -348,7 +407,11 @@ def cmd_eval(a):
     Without a posterior or GP, every config is evaluated in batches (`batch.BatchCalculator`:
     configs padded into size buckets, neighbour lists built on the device, one compile per
     bucket); with one, config by config through its calculator.  A linear model is evaluated
-    exactly (lean, never splined: spline_tol=None)."""
+    exactly (lean, never splined: spline_tol=None).
+
+    An operator model (`operators.io`, a Hamiltonian): `_eval_operator`."""
+    if _is_operator(a.model):
+        return _eval_operator(a)
     from ase import Atoms
     from ase.stress import voigt_6_to_full_3x3_stress
     from .fit.data import VOIGT
@@ -923,6 +986,18 @@ def _parser():
     ev.add_argument("--no-deriv-dtc", action="store_true",
                     help="gp_model.npz only: SoR-only forces_std, without the derivative-DTC term "
                          "(whose whole-cell (n, K, d, 3) arrays may not fit for a big cell)")
+    hm = ev.add_argument_group("operator (Hamiltonian) models: --data is a directory of reference blocks, or an extxyz file")
+    hm.add_argument("--kpts", type=int, nargs=3, default=[3, 3, 3], help="Gamma-centred k-point grid (default 3 3 3)")
+    hm.add_argument("--nelectrons", default=None,
+                    help="electrons the bands hold: a number per cell, or Z:n,Z:n per atom of each element (default: what the model "
+                         "file records from its fit, else the atomic numbers)")
+    hm.add_argument("--width", type=float, default=0.1, help="smearing width in the model's energy unit (default 0.1)")
+    hm.add_argument("--smearing", choices=["fermi-dirac", "gaussian"], default="fermi-dirac")
+    hm.add_argument("--window", type=float, nargs=2, default=[-12.0, 5.0],
+                    help="eigenvalues scored: from LO to HI of the reference Fermi level (default -12 5)")
+    hm.add_argument("--metrics-out", default=None, help="JSON file for the electronic-structure metrics of every reference structure")
+    hm.add_argument("--blocks-out", default=None, help="directory for the predicted H and S blocks of each structure (DeepH layout)")
+    hm.add_argument("--threads", type=int, default=1, help="threads of the off-site evaluation on a CPU (default 1)")
     cal = sub.add_parser("calibrate", help="recalibrate the per-group conformal scales of an ARD posterior "
                                            "on a labelled set (per-group replace by default)")
     cal.add_argument("--model", required=True); cal.add_argument("--posterior", required=True)
@@ -998,6 +1073,8 @@ def _parser():
     nat.add_argument("--gpu-flags", default=None,
                      help="the CUDA kernel's nvcc flags (default \"-O3 -arch=sm_XY\" for this GPU, or "
                           "ACEJAX_FFI_GPU_FLAGS)")
+    from .ham import cli as ham_cli
+    ham_cli.add_parser(sub)
     con = sub.add_parser("basis", help="author a new ACE basis: a frozen model (seeded radial init) saved as .npz")
     add_basis_args(con, fit=False)
     con.add_argument("--out", required=True)
@@ -1089,11 +1166,12 @@ def main(argv=None):
     import sys
 
     from .basis.coupling import BasisUnavailable
+    from .ham import cli as ham_cli
     a = _parse(argv)
     try:
         {"eval": cmd_eval, "basis": cmd_basis, "calibrate": cmd_calibrate, "export": cmd_export,
-         "native": cmd_native}.get(a.cmd, run)(a)
-    except (BasisUnavailable, UsageError) as e:       # a user-facing condition, not a crash
+         "native": cmd_native, "ham": ham_cli.run}.get(a.cmd, run)(a)
+    except (BasisUnavailable, UsageError, ham_cli.UsageError) as e:       # a user-facing condition, not a crash
         print(f"aj {a.cmd}: error: {e}", file=sys.stderr)
         raise SystemExit(2) from None
     return 0

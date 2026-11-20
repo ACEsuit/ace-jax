@@ -15,6 +15,8 @@ The commands, in the order of a typical workflow:
 - [`aj calibrate`](#aj-calibrate) recalibrates the per-atom force
   uncertainty of a `--uq ard` fit on labelled target-regime data.
 - [`aj basis`](#aj-basis) builds a basis and saves it on its own.
+- [`aj ham`](#aj-ham) fits and uses Hamiltonian models: `aj ham fit`,
+  `aj ham predict` and `aj ham bands`.
 
 Each command exits with status 0 if it is successful. The default label
 keys are `energy`, `forces` and `virial`. For other names, use
@@ -85,3 +87,22 @@ the C++ kernel and the neighbour list. `--build` compiles the kernel. See
 ## aj basis
 
 <!-- aj-help basis -->
+
+## aj ham
+
+Fits a Hamiltonian model to the H and S blocks of DFT structures, predicts the
+blocks of new structures, and calculates bands and the density of states. See
+[Hamiltonian models](../howto/hamiltonians.md). `aj eval` gives the errors of
+a Hamiltonian model on reference structures.
+
+### aj ham fit
+
+<!-- aj-help ham fit -->
+
+### aj ham predict
+
+<!-- aj-help ham predict -->
+
+### aj ham bands
+
+<!-- aj-help ham bands -->

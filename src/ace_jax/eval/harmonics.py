@@ -102,6 +102,37 @@ def real_spherical_harmonics(xyz, l_max):
     return _harmonics(xyz, l_max, solid=False)
 
 
+def regular_solid_harmonics(xyz, l_max):
+    """r^l Y_lm as polynomials of x, y, z: the values of `real_solid_harmonics`, same shape and
+    ordering, by the recurrence in z and r^2 with no square root and no division by r, so that
+    the function and its derivatives of every order are exact at the origin and near it (where
+    `real_solid_harmonics` takes r = 1, u = 0).  With S_l^m = r^(l-m) Rbar_l^m(z / r):
+        S_m^m = (2m-1)!!,  S_{m+1}^m = (2m+1) z S_m^m,
+        S_l^m = [(2l-1) z S_{l-1}^m - (l+m-1) r^2 S_{l-2}^m] / (l-m)."""
+    x, y, z = xyz[..., 0], xyz[..., 1], xyz[..., 2]
+    r2 = x * x + y * y + z * z
+    A, B = [jnp.ones_like(x)], [jnp.zeros_like(x)]
+    for m in range(1, l_max + 1):
+        A.append(x * A[m - 1] - y * B[m - 1])
+        B.append(x * B[m - 1] + y * A[m - 1])
+    S, dfact = {}, 1.0
+    for m in range(l_max + 1):
+        if m > 0:
+            dfact *= (2 * m - 1)
+        S[(m, m)] = jnp.full_like(x, dfact)
+        if m + 1 <= l_max:
+            S[(m + 1, m)] = (2 * m + 1) * z * S[(m, m)]
+        for l in range(m + 2, l_max + 1):
+            S[(l, m)] = ((2 * l - 1) * z * S[(l - 1, m)] - (l + m - 1) * r2 * S[(l - 2, m)]) / (l - m)
+    root2 = math.sqrt(2.0)
+    out = [None] * ((l_max + 1) ** 2)
+    for l in range(l_max + 1):
+        for m in range(-l, l + 1):
+            am = abs(m)
+            out[l * l + l + m] = _norm(l, am) * (root2 if m != 0 else 1.0) * S[(l, am)] * (A[am] if m >= 0 else B[am])
+    return jnp.stack(out, axis=-1)
+
+
 def real_solid_harmonics(xyz, l_max):
     """Real solid harmonics r^l * Y_lm, same shape and ordering."""
     return _harmonics(xyz, l_max, solid=True)
