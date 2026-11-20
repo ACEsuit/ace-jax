@@ -52,6 +52,13 @@ for code, col in (("MACE-H", MACEH), ("DeepH-E3", DEEPH)):
     a.plot(n, [oth[code][i] for i in n], color=col, lw=2, marker="s", ms=5)
     if n:
         a.annotate(code, (n[-1], oth[code][n[-1]]), xytext=(6, 0), textcoords="offset points", va="center", fontsize=8, color=INK)
+ser = {}                                                 # ACEhamiltonians.jl: its largest basis size scored at several n
+for (sz, m), v in small.get("ACEhamiltonians", {}).items():
+    ser.setdefault(sz, {})[m] = v
+if ser:
+    sz = max(ser, key=lambda k: (len(ser[k]), k)); n = sorted(ser[sz])
+    a.plot(n, [ser[sz][i] for i in n], color=ACEH, lw=2, marker="s", ms=5)
+    a.annotate(f"ACEhamiltonians.jl, degrees {sz.replace('-', '/')}", (n[0], min(ser[sz].values())), xytext=(0, -7), textcoords="offset points", va="top", fontsize=8, color=INK)
 a.set_xscale("log", base=2); a.set_yscale("log"); a.set_xlabel("Training structures (64 atoms each)"); a.set_ylabel(NAME.get(metric, metric))
 a.set_xticks([1, 2, 4, 8, 16, 32, 64, 152]); a.set_xticklabels(["1", "2", "4", "8", "16", "32", "64", "152"])
 nb = 32                                                 # cost panel: every code at 32 training structures
