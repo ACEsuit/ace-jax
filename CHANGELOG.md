@@ -17,6 +17,15 @@
   calculations of the same structure is a measured value for it: approximately 1e-7 eV for off-site blocks
   and 3e-6 eV for on-site blocks (FHI-aims, `sc_accuracy_rho 1e-5`, aluminium).
 
+## 0.7.1 (2026-11-20)
+
+**Highlights.** Two corrections to Hamiltonian models. The features of the atoms near a bond are now
+smooth at the bond midpoint, which makes the blocks of a perfect crystal obey its symmetry and decreases
+the errors. A prior that `--prior evidence`, `loo` or `press` selects can no longer be weaker than no prior.
+
+**Upgrading from 0.7.0.** A Hamiltonian model file from 0.7.0 loads and gives the same predictions as
+before. Fit the model again to get the corrections. Potentials are not affected.
+
 ### Fixed
 
 - **Hamiltonian models: the features of the atoms near a bond are smooth at the bond midpoint.** These
