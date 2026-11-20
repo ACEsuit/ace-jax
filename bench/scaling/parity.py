@@ -250,11 +250,13 @@ def _mace_ef(path, at, device, head=None):
     return a.get_potential_energy(), a.get_forces()
 
 
-def _tol_kw(m):
+def _tol_kw(m, radial=None):
     """The reference's lean options as the bundle's: the row's spline_tol; under ACEJAX_EXPORT_FFI (the FFI
-    kernel bundles) the radial table those turn on, so the gate holds the kernel to roundoff."""
+    kernel bundles) the radial table those turn on, so the gate holds the kernel to roundoff.  radial: the
+    bundle's `ace_jax.ffi["radial"]`; "analytic" (the CUDA kernel evaluating the radial itself) is held to the
+    model without a table, which the table is ~1e-8 eV/A from."""
     return ({"spline_tol": m["spline_tol"]} if "spline_tol" in m else {}) | (
-        {"radial_table": True} if os.environ.get("ACEJAX_EXPORT_FFI") else {})
+        {"radial_table": True} if os.environ.get("ACEJAX_EXPORT_FFI") and radial != "analytic" else {})
 
 
 BUNDLE_LAYOUTS = ("matrix", "dense", "sparse")

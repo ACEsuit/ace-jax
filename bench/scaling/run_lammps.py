@@ -509,6 +509,11 @@ def _run_lammps(row, style, model, data, work, n_atoms, dtype, device, lmp, rank
         out["aa_dag"] = os.environ["ACEJAX_EXPORT_AA_DAG"]
     if style == "acejax" and os.environ.get("ACEJAX_EXPORT_FFI"):
         out["ffi"] = True
+        try:                                     # the kernel's product-basis form and radial (`eval.ffi.describe`)
+            kern = json.loads(pathlib.Path(model).read_text())["ace_jax"].get("ffi") or {}
+            out.update({"ffi_" + k: kern[k] for k in ("form", "radial") if k in kern})
+        except (OSError, ValueError, KeyError):
+            pass
         if os.environ.get("ACEJAX_EXPORT_FFI_PRECISION"):
             out["ffi_precision"] = os.environ["ACEJAX_EXPORT_FFI_PRECISION"]
     if cmd[0] == "mpirun" and mpirun_args():

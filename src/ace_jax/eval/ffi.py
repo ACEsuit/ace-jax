@@ -577,9 +577,11 @@ def coupled_gpu_plan(model, T=None, check=True, real=8):
 
 
 ANALYTIC_LMAX = 8                                     # the degrees the kernel's analytic force pass is made for
-# "analytic" (opt-in until timed in LAMMPS): the GPU kernel evaluates a polynomial tensor radial itself
-# (`analytic_plan`) in its force pass, a lane per neighbour, and for few A in float64 in its A pass too; the
-# default, None or "table", reads the radial table.  Forces then differ from the table's by its error (~1e-8).
+# The GPU kernel's radial: None or "auto" is analytic where the model has `analytic_plan` (a polynomial tensor
+# radial and an analytic pair radial, evaluated by the kernel itself in its force pass, a lane per neighbour, and
+# for few A in float64 in its A pass too), else the radial table; "table" always the table; "analytic" raises
+# where there is no plan.  Where only the force pass is analytic the energy is the table's and the forces the
+# model's: they differ from the table energy's gradient by the table's error (~1e-8 eV/A).
 RADIAL = os.environ.get("ACEJAX_FFI_RADIAL") or None
 
 
@@ -687,9 +689,11 @@ def kernel_inputs(model, gpu=False, precision=None, form=None):
     energies can fail near a minimum (docs/dev/accuracy-cost-results.md).
 
     form (`FORMS`, None = "auto"): the product basis as the DAG or in coupled form (`coupled_plan`, whose arrays
-    then take the DAG's operands: the plan for the groups, its reals for the readout; attribute form = 1).  The
-    On the GPU (`coupled_gpu_plan`: its streams for `pull`, their coefficients for `lc`, attributes n_st and
-    tile its X values and piece slots) only where asked: None is the DAG there."""
+    then take the DAG's operands: the plan for the groups, its reals for the readout; attribute form = 1).  On
+    the GPU `coupled_gpu_plan`: its streams for `pull`, their coefficients for `lc`, attributes n_st and tile
+    its X values and piece slots; auto also keeps the DAG where z does not fit a block's shared memory.
+    The GPU's radial is analytic where the model has `analytic_plan` (`RADIAL` "table" keeps the table).
+    `describe(attrs)` names what was taken."""
     from .model import ACEModel
     if not (isinstance(model, ACEModel) and model.energy_only and model.rtab_grid):
         raise ValueError("the FFI kernel needs a lean ACEModel with a radial table: "
@@ -707,9 +711,11 @@ def kernel_inputs(model, gpu=False, precision=None, form=None):
                  solid=np.int64(model.ysolid), n_leaf=np.int64(n_leaf))
     i32 = lambda a: jnp.asarray(a, jnp.int32)
     if gpu:                                                # the radial: the table, or (asked for) analytic
-        if RADIAL not in (None, "table", "analytic"):
-            raise ValueError(f"ffi.RADIAL is 'table' or 'analytic', got {RADIAL!r}")
-        an = analytic_plan(model, runs) if RADIAL == "analytic" else None   # where the model has one
+        if RADIAL not in (None, "auto", "table", "analytic"):
+            raise ValueError(f"ffi.RADIAL is 'auto', 'table' or 'analytic', got {RADIAL!r}")
+        an = analytic_plan(model, runs) if RADIAL != "table" else None      # where the model has one
+        if an is None and RADIAL == "analytic":
+            raise ValueError("ffi.RADIAL = 'analytic': this model has no analytic plan (`analytic_plan`)")
         radial = (i32(an[0]), jnp.asarray(an[1], model.E0.dtype)) if an else (i32(np.zeros(1)), jnp.zeros(1, model.E0.dtype))
         attrs["nq"], attrs["npq"] = np.int64(an[2] if an else 0), np.int64(an[3] if an else 0)
     if not gpu:
@@ -723,7 +729,7 @@ def kernel_inputs(model, gpu=False, precision=None, form=None):
               jnp.asarray(ct, dag), model.E0)
     if not gpu:
         return attrs, consts
-    gform = FORM or form                                   # the GPU's coupled form is opt-in for now
+    gform = FORM or form or "auto"
     if gform in ("coupled", "auto"):
         try:
             if choose_form(model, gform, len(factor))[0] == "coupled":
@@ -749,6 +755,13 @@ def kernel_inputs(model, gpu=False, precision=None, form=None):
     return ({**attrs, "n_st": np.int64(n_st), "tile": np.int64(tile), "lv": np.int64(lv),
              "threads": np.int64(T), "form": np.int64(0)},
             consts + (i32(lev), i32(pull), jnp.asarray(lc, dag)) + radial)
+
+
+def describe(attrs):
+    """{"form": "coupled" | "dag", "radial": "analytic" | "table"} of `kernel_inputs`' attributes (a dict or
+    (name, value) pairs): what the kernel runs (the CPU kernel's radial is always the table)."""
+    a = dict(attrs)
+    return {"form": "coupled" if int(a.get("form", 0)) else "dag", "radial": "analytic" if int(a.get("nq", 0)) else "table"}
 
 
 PULL_TILE = 2048                                      # leaf parents per tile
@@ -1006,7 +1019,9 @@ def lammps_fns(model, n_species, type_map, rcut, gpu=False, precision=None):
         return -call(positions, species, graph, ct)[1], None, None
 
     energy_fn.defvjp(fwd, bwd)
-    return energy_fn, (lambda *a: call(*a)[1])
+    force_fn = lambda *a: call(*a)[1]
+    force_fn.kernel = describe(attrs)                      # what the kernel runs (export_lammps records it)
+    return energy_fn, force_fn
 
 
 @functools.lru_cache(maxsize=64)

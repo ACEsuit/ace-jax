@@ -198,8 +198,8 @@ def test_gpu_plan_emulated_equals_the_reference(name, T):
 
 @pytest.mark.parametrize("elements,order,degree", [(("Si",), 3, 8), (("Si", "Ge"), 3, 6), (("Si",), 4, 12)])
 def test_gpu_analytic_radial_matches_the_model(backend_kernel, monkeypatch, elements, order, degree):  # noqa: F811
-    """The CUDA kernel with the tensor and pair radials evaluated analytically (`ffi.RADIAL`, a lane per
-    neighbour) against the JAX model without a radial table, for bases `build_basis` makes (polynomial radials)
+    """The CUDA kernel with the tensor and pair radials evaluated analytically (the default where the model
+    has `ffi.analytic_plan`; a lane per neighbour) against the JAX model without a radial table, for bases `build_basis` makes (polynomial radials)
     with a random readout: energy, forces and stress to roundoff, where the table kernel is good to ~1e-8.
     One and two elements; few A (the analytic A pass too) and more (the table's)."""
     import dataclasses
@@ -218,10 +218,13 @@ def test_gpu_analytic_radial_matches_the_model(backend_kernel, monkeypatch, elem
     at = bulk("Si", "diamond", a=5.43, cubic=True).repeat(2)
     at.numbers = np.asarray([int(z) for z in meta["elements"]])[np.arange(len(at)) % len(elements)]
     at.rattle(0.08, seed=1)
-    monkeypatch.setattr(ffi, "RADIAL", "analytic")
+    monkeypatch.setattr(ffi, "RADIAL", "table")
+    assert ACECalculator(model, meta, ffi=True).ffi["radial"] == "table"
+    monkeypatch.setattr(ffi, "RADIAL", None)                # the default: analytic where the model has a plan
     monkeypatch.setattr(ffi, "FORM", "coupled")
     k, j = ACECalculator(model, meta, ffi=True), ACECalculator(model, meta)
     assert dict(k.eval_model.attrs)["nq"] > 0 and j.ffi is None
+    assert k.ffi["radial"] == "analytic" and k.ffi["form"] == "coupled"
     a1, a2 = at.copy(), at.copy()
     a1.calc, a2.calc = k, j
     F2 = a2.get_forces()

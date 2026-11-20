@@ -300,7 +300,7 @@ def build(ar, ay, specs, cost=PAIR_COST, ilp_seconds=0.0, recouple=False):
     # Per multiset: its candidates (with `recouple`, of every pairing, more than its invariants: the choice
     # among them is what shares X blocks), their expansions B over its monomials, and the independent ones kept.
     work = []
-    for it, (k, g, cols, keys) in enumerate(items):
+    for it, (k, g, _cols, keys) in enumerate(items):
         if k >= 3 and choice[it] is None:
             raise NoPlan(f"no coupling for the blocks {g}")
         pairings = [lab for lab, _ in _options(g, bl)] if recouple and k >= 3 else [choice.get(it)]
@@ -334,7 +334,7 @@ def build(ar, ay, specs, cost=PAIR_COST, ilp_seconds=0.0, recouple=False):
                 for x in needs(cands[c][0]):
                     use[x] = use.get(x, 0) + 1
     lin, quad, pr, pc, pv = [], [], [], [], []
-    for (k, g, cols, keys), (cands, B, trow, tinv, keep) in zip(items, work):
+    for (_k, g, cols, _keys), (cands, B, trow, tinv, keep) in zip(items, work):
         if not keep:
             raise NoPlan(f"no invariant for the blocks {g}")
         pinv = np.linalg.pinv(B[:, keep])[:, trow]         # (kept, target monomials)
