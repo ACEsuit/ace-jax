@@ -4,7 +4,7 @@ data, for the ace-jax grid (`gold_grid.sh`), MACE-H and DeepH-E3 (`maceh_train.p
 ten test structures:
     python bench/ham/gold_pareto.py <ace grid.jsonl> <other codes.jsonl> <timings.json> <figure.png> [metric=aligned_rmse]
 <timings.json>: {"machine": text, "ace": {model tag: ms per atom}, "MACE-H": ms or {network size: ms},
-"DeepH-E3": the same}, of one machine (`model_time.py`, `maceh_time.py`).  Network sizes: "full"
+"DeepH-E3": the same, "<code>, type-stable": {size: ms} (optional: a second cost for the same fits, drawn dashed)}, of one machine (`model_time.py`, `maceh_time.py`).  Network sizes: "full"
 (the authors' gold network; runs `gold_<code>_n<N>`) and the smaller ones of
 `sulis/train_gold_size.sh`, or ACEhamiltonians.jl's basis sizes (`aceh_gold.jl`; runs
 `gold_<code>_n<N>_<size>`), drawn where a scored run exists.  ace-jax's points are named by
@@ -46,7 +46,8 @@ show = {order[0]: "two-centre only", [t for t in order if "env_5" in t][0]: "sma
 for t, label in show.items():                           # ace-jax: one hue, three model sizes named on the lines
     n = sorted(ace[t])
     a.plot(n, [ace[t][i] for i in n], color=ACE, lw=2, marker="o", ms=5)
-    a.annotate(f"ace-jax, {label}", (n[-1], ace[t][n[-1]]), xytext=(-4, 6), textcoords="offset points", ha="right", fontsize=8, color=INK)
+    below = "smallest" in label                           # ACEhamiltonians.jl's line and label lie just above this one
+    a.annotate("ace-jax, smallest with\nbond environment" if below else f"ace-jax, {label}", (n[-1], ace[t][n[-1]]), xytext=(-4, -6 if below else 6), textcoords="offset points", ha="right", va="top" if below else "baseline", fontsize=8, color=INK)
 for code, col in (("MACE-H", MACEH), ("DeepH-E3", DEEPH)):
     n = sorted(oth.get(code, {}))
     a.plot(n, [oth[code][i] for i in n], color=col, lw=2, marker="s", ms=5)
@@ -58,7 +59,7 @@ for (sz, m), v in small.get("ACEhamiltonians", {}).items():
 if ser:
     sz = max(ser, key=lambda k: (len(ser[k]), k)); n = sorted(ser[sz])
     a.plot(n, [ser[sz][i] for i in n], color=ACEH, lw=2, marker="s", ms=5)
-    a.annotate(f"ACEhamiltonians.jl, degrees {sz.replace('-', '/')}", (n[0], min(ser[sz].values())), xytext=(0, -7), textcoords="offset points", va="top", fontsize=8, color=INK)
+    a.annotate(f"ACEhamiltonians.jl, {sz.replace('-', '/')}", (n[-1], ser[sz][n[-1]]), xytext=(4, 7), textcoords="offset points", ha="right", fontsize=8, color=INK)
 a.set_xscale("log", base=2); a.set_yscale("log"); a.set_xlabel("Training structures (64 atoms each)"); a.set_ylabel(NAME.get(metric, metric))
 a.set_xticks([1, 2, 4, 8, 16, 32, 64, 152]); a.set_xticklabels(["1", "2", "4", "8", "16", "32", "64", "152"])
 nb = 32                                                 # cost panel: every code at 32 training structures
@@ -66,8 +67,8 @@ na = nb if all(nb in v for v in ace.values()) else max(next(iter(ace.values())))
 xs = [T["ace"][t] for t in order]
 b.plot(xs, [ace[t][na] for t in order], color=ACE, lw=2, marker="o", ms=5)
 for i, t in enumerate(order):                           # each point's architecture, sides alternating where points crowd
-    left = i >= 3 and i % 2 == 1
-    b.annotate(arch[t], (T["ace"][t], ace[t][na]), xytext=(-6 if left else 6, 0), textcoords="offset points", ha="right" if left else "left",
+    left, dy = i == 3, {len(order) - 2: 4, len(order) - 1: -5}.get(i, 0) if len(order) > 5 else 0
+    b.annotate(arch[t], (T["ace"][t], ace[t][na]), xytext=(-6 if left else 6, dy), textcoords="offset points", ha="right" if left else "left",
                va="center", fontsize=6.5, color=INK)
 b.annotate("ace-jax", (xs[0], ace[order[0]][na]), xytext=(0, 9), textcoords="offset points", fontsize=8, color=INK)
 for code, col in OTHERS:                                # the other codes: every network or basis size scored at nb, joined in cost order
@@ -81,6 +82,11 @@ for code, col in OTHERS:                                # the other codes: every
                 b.annotate(sz, (x, y), xytext=(6, 0), textcoords="offset points", va="center", fontsize=6.5, color=INK)
         top = max(pts, key=lambda q: q[1])
         b.annotate(code + (".jl" if code == "ACEhamiltonians" else ""), top[:2], xytext=(0, 9), textcoords="offset points", ha="center", fontsize=8, color=INK)
+    alt = T.get(code + ", type-stable", {})              # the same fits at the cost measured with a type instability in the code's evaluation removed
+    pts = sorted((alt[sz], v, sz) for (sz, m), v in small.get(code, {}).items() if m == nb and sz in alt)
+    if pts:
+        b.plot([q[0] for q in pts], [q[1] for q in pts], color=col, marker="s", ms=6, mfc="white", mew=1.5, ls="--", lw=1.5)
+        b.annotate("type instability\nremoved", max(pts, key=lambda q: q[1])[:2], xytext=(-8, 0), textcoords="offset points", ha="right", va="center", fontsize=7, color=INK, linespacing=1.1)
 b.set_xscale("log"); b.set_xlabel(f"Block prediction / ms per atom\n({T.get('machine', 'one CPU core')}; {nb} training structures)")
 from matplotlib.ticker import FuncFormatter, NullFormatter
 a.set_yticks([1, 2, 5, 10, 20, 50, 100]); a.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}")); a.yaxis.set_minor_formatter(NullFormatter())

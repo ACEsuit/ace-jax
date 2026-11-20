@@ -896,3 +896,24 @@ FHI-aims 261002 on 16 MPI ranks (its own time accounting) against the model rout
 - The model's cost is its eigensolver: 88-96 % of the total. JAX's `eigh` on a CPU takes 0.28 s per k-point at 896 functions where FHI-aims (ELPA, k-points over ranks) takes 0.48 s for all 8, so the speed-up to bands is a lower bound that a LAPACK/ELPA solve would raise (Al: 481 / (0.29 + 0.48) = 620, an estimate, not measured).
 - Large cells: both routes become the eigensolver, and the ratio tends to the number of SCF cycles (30-61 here) times (functions of the DFT / functions of the model)^3 where the model is valence-only (NbFeSb: 6.4).
 - Not like for like: the model returns eigenvalues, the DFT also eigenvectors, density and total energy; GPU prediction is not used.
+
+## Gold: the figure with 0.7.1, 64-structure networks and ACEhamiltonians.jl (2026-11-20)
+
+`figures/ham-gold-pareto.png` redrawn from the grid refitted with 0.7.1 (`gold_grid3`, all 56 points), the networks retrained to their learning-rate floor on Blythe L40s, and ACEhamiltonians.jl @ 9ff1572 (`aceh_gold.jl`, its own assembly and LSQR). Band RMSE from own Fermi levels, ten test structures; block prediction on one core of a Xeon Gold 6130.
+
+| Model | Training structures | ms per atom | Band RMSE / meV |
+|---|---|---|---|
+| ace-jax 2c + site(2,2) + env(6,4,4,4) (default) | 32 | 14.3 | 2.15 |
+| ace-jax 2c + site(4,4) + env(8,4,6,4), 20/16 radials | 32, 64, 152 | 17.8 | 1.27, 1.27, 1.26 |
+| MACE-H, full network | 32, 64 | 258 | 4.11, 3.76 |
+| MACE-H, half, quarter | 32 | 126, 68 | 4.57, 6.56 |
+| DeepH-E3, full network | 32, 64 | 264 | 8.40, 7.02 |
+| DeepH-E3, half, quarter | 32 | 134, 76 | 8.87, 14.09 |
+| ACEhamiltonians.jl, on-site/off-site degrees 4/4, 6/6, 6/8, 8/10 | 32 | 1,400, 4,176, 10,409, 23,655 | 112.2, 37.9, 27.8, 15.9 |
+| the same with the type instability removed | 32 | 532, 967, 1,822, 3,152 | the same (8/10: 15.96) |
+| ACEhamiltonians.jl 8/10 | 1, 2, 4, 8, 16 | | 16.4, 14.8, 15.0, 15.0, 15.2 |
+
+- ace-jax's times are those of the 0.7.0 models to 2 % (the midpoint fix costs nothing); the accuracies are those of the midpoint section.
+- The networks gain little from 32 to 64 structures (MACE-H 4.11 to 3.76 meV); the 5.32 meV of the earlier table was a run stopped by its time limit.
+- **ACEhamiltonians.jl is basis-limited at these degrees**: 8/10 does not improve from 1 to 32 structures. The paper's degrees (10/12 to 14/14) are running.
+- **A type instability in ACE.jl 0.12.22** (`evaluate!(AA, basis::PIBasis, config)`: the one-particle values are inferred as an abstract `Vector`, so each of the products dispatches dynamically) is 2.6 to 7.5 times of its cost. A function barrier removes it (overrides kept outside the repository; dashed line of the figure). On the full training set the 8/10 predictions with and without it differ by at most 2.6 meV in a block (RMS 0.23 on-site, 0.06 off-site: LSQR, not the basis values, which agree to 6e-17), and the band error is the same. With it ACEhamiltonians.jl 8/10 is 180 times ace-jax's largest model in cost, at 12 times its error.
