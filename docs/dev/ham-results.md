@@ -882,3 +882,17 @@ Ti-Ti off-site blocks of the 24 NbFeSb cells alone (304 bonds, fewer rows than c
 | no bound on rho, sigma >= 1e-7 eV / 3e-6 eV / 1e-4 eV | 1.8e3, 280 / 1.7e3, 102 / 102, 35 |
 
 A noise floor at the measured SCF level removes the divergence but leaves a prior weaker than the ridge; the bound on rho is what holds the prior at the ridge. Both are in the search now (`noise=` optional, the rho bound always), and the solve is the model the evidence was computed for. The 0.7.1 form changed 532 of 533 off-site coefficient blocks of the NbFeSb model (predictions by at most 0.9 meV; Ti on-site by 24 meV; no score moved).
+
+## Speed-up over the DFT calculation, same cores (2026-11-20)
+
+FHI-aims 261002 on 16 MPI ranks (its own time accounting) against the model route on 16 threads of the same node type (NbFeSb: the same node, Xeon Gold 6230; the Al DFT ran on another node): predict every H and S block, then one generalised eigensolve per k-point (eigenvalues; `ham-ref/work/speedup/speed.py`).
+
+| Cell | DFT: SCF cycles, total, of which eigensolver | Model: predict, eigensolve, total | Speed-up to bands | Speed-up to H and S |
+|---|---|---|---|---|
+| Al, 64 atoms, 896 functions, 8 k | 30, 481 s, 14.5 s | 0.29 s, 2.24 s, 2.53 s | 190 | 1,660 |
+| NbFeSb:Ti, 24 atoms, 846 functions (model 464), 36 k | 46, 292 s, 99 s | 0.21 s, 3.97 s, 4.18 s | 70 | 1,390 |
+| NbFeSb:Ti, 96 atoms, 3,447 functions (model 1,856), 8 k | 61, 2,136 s, 1,066 s | 0.64 s, 13.9 s, 14.5 s | 147 | 3,340 |
+
+- The model's cost is its eigensolver: 88-96 % of the total. JAX's `eigh` on a CPU takes 0.28 s per k-point at 896 functions where FHI-aims (ELPA, k-points over ranks) takes 0.48 s for all 8, so the speed-up to bands is a lower bound that a LAPACK/ELPA solve would raise (Al: 481 / (0.29 + 0.48) = 620, an estimate, not measured).
+- Large cells: both routes become the eigensolver, and the ratio tends to the number of SCF cycles (30-61 here) times (functions of the DFT / functions of the model)^3 where the model is valence-only (NbFeSb: 6.4).
+- Not like for like: the model returns eigenvalues, the DFT also eigenvectors, density and total energy; GPU prediction is not used.
