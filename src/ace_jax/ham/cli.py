@@ -184,8 +184,8 @@ def cmd_fit(a):
     print(f"{len(train)} structures, {sum(len(d.numbers) for d in train)} atoms, elements {els}, channels {', '.join(ch)}; "
           f"site cutoff {a.site_rcut:g}, bond cutoff {rcut:g}; prior {a.prior}", flush=True)
     t = time.perf_counter()
-    on, rep_on = fit_onsite(sb, train, channels=ch, ridge=a.ridge, sigma_c=prior)
-    off, rep_off = fit_offsite(basis, [_subset(d, a.bonds, a.seed + i) for i, d in enumerate(train)], channels=ch, ridge=a.ridge, sigma_c=prior)
+    on, rep_on = fit_onsite(sb, train, channels=ch, ridge=a.ridge, sigma_c=prior, noise=a.noise_floor)
+    off, rep_off = fit_offsite(basis, [_subset(d, a.bonds, a.seed + i) for i, d in enumerate(train)], channels=ch, ridge=a.ridge, sigma_c=prior, noise=a.noise_floor)
     fit_s = time.perf_counter() - t
     n_coef = int(sum(np.asarray(c).size for m in (on, off) for c in m.coef.values()))
     resid = {}
@@ -381,6 +381,9 @@ def add_parser(sub):
                         "largest harmonic of the bond it couples with (default 5 6 4 4 4)")
     f.add_argument("--no-env", action="store_true", help="no bond-environment features (faster, less accurate)")
     f.add_argument("--prior", default="none", help="smoothness prior: none (default), its scale as a number, or evidence, loo, press")
+    f.add_argument("--noise-floor", type=float, default=None, metavar="SIGMA",
+                   help="with --prior evidence: the smallest noise of H the evidence may select, in the data's unit "
+                        "(the scatter of H between SCF runs; approximately 1e-7 eV to 3e-6 eV for sc_accuracy_rho 1e-5)")
     f.add_argument("--ridge", type=float, default=1e-10, help="ridge on every coefficient (default 1e-10)")
     _add_spectrum_args(f, [3, 3, 3])
     p = hs.add_parser("predict", help="write the predicted H and S blocks of structures (DeepH layout)", description=cmd_predict.__doc__)
