@@ -15,6 +15,7 @@ using ACEhamiltonians.DataSets: DataSet
 using ACEhamiltonians.Fitting: fit!, _evaluate_real, solve_ls
 using ACEhamiltonians.Predicting: predict
 using ACE: ACEConfig, evaluate, scaling
+haskey(ENV, "ACEH_PATCH") && include(ENV["ACEH_PATCH"])           # benchmark-side overrides of slow methods (function barriers), to measure them
 
 function structure(g)
    pos = read(g["positions"]); cell = read(g["cell"]); Z = Int.(read(g["numbers"]))     # HDF5.jl reverses numpy's axes
