@@ -16,7 +16,7 @@ grid, other, timings, stem = sys.argv[1:5]
 kw = dict(a.split("=") for a in sys.argv[5:])
 nmax, metric = int(kw.get("nmax", 32)), kw.get("metric", "aligned_rmse")
 ACE, MACEH, DEEPH, MUTED, INK, SURF = "#2a78d6", "#eb6834", "#1baf7a", "#8a8f98", "#0b0b0b", "#ffffff"
-UNCONVERGED = {("MACE-H", 32)}                           # stopped at its time limit: its best model so far
+UNCONVERGED = set()                                    # runs stopped at a time limit (none now: MACE-H at 32 was rerun to convergence)
 T = json.load(open(timings))
 big = {}
 for line in open(grid):
