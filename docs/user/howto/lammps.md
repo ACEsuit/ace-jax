@@ -224,7 +224,7 @@ same cache.
 
 In float64, the requirements are the same as for the CPU kernel.
 On an NVIDIA A100 with 32,768 silicon atoms, the GPU kernel is 7 to 13
-times faster than the compiled JAX program. The model o4d20 runs at 0.24
+times faster than the compiled JAX program. The model o4d20 runs at 0.25
 µs/atom-step in float64 and at 0.15 in float32. See the
 [benchmarks](../benchmarks.md).
 

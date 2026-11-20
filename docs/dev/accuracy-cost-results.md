@@ -980,6 +980,24 @@ A100-PCIE-40GB (gpu002, jobs 2295567 order 4, 2295568 order 3; `runs/symmetrix-a
 Rows: `sulis-gpu-cudak.jsonl` (replaced: the plotted kernel lines), main's same-job rows
 `sulis-gpu-cudak-main-2295567.jsonl` (not plotted; they repeat the earlier gpu020 rows within 0.5%).
 
+Retime at 81536af with main 0.7.1 merged (the analytic A pass whose lanes share a row's A values, and no batch sort
+for one species): job 2296065 on gpu005, the whole ladder, no control in the job. These rows are now
+`sulis-gpu-cudak.jsonl` and the plotted lines; the table above stays as the same-job comparison with main.
+
+| size | dcd094f (gpu002) | 81536af (gpu005) |
+|---|---|---|
+| o4d20 | 0.245 / 0.149 | 0.245 / 0.145 |
+| o4d16 | 0.106 / 0.075 | 0.109 / 0.070 |
+| o4d14 | 0.078 / 0.058 | 0.080 / 0.053 |
+| o4d12 | 0.056 / 0.042 | 0.055 / 0.043 |
+| o3d12 | 0.053 / 0.043 | 0.052 / 0.041 |
+| o3d10 | 0.045 / 0.033 | 0.043 / 0.034 |
+| o3d8 | 0.039 / 0.032 | 0.036 / 0.028 |
+
+Only o3d8 moves clearly (8% in float64, 15% in float32) and float32 o4d14 to o4d20 by 3 to 8%. Float64 o4d14 and
+o4d16 are 3% slower, on another node, where the A pass alone was 22% faster on a Modal A100 (774 to 607 µs at o4d16):
+that pass is a small part of the step at these sizes, and the two nodes are not compared in one job.
+
 CPU, 128 x 1, 4,096 Si (node008, job 2295569, `ladder-cpu.sbatch`: new float64, new mixed, main float64, main mixed,
 then the two new ones again). The timed loops are 0.1 to 0.3 s, and repeats on this node differ by up to 45%
 (o4d16 float64 0.262 then 0.181; o4d14 mixed 0.149 then 0.231; o3d10 float64 0.181 then 0.178 against main's 0.148),
