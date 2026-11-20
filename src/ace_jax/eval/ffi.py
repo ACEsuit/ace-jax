@@ -591,7 +591,8 @@ def analytic_plan(model, runs):
     transform), or None.  `runs`: `plan(model, gpu=True)`'s, each of one degree l.  ints: per species pair and
     degree the first entry of each q (NZ^2 (L + 1) (nq + 1)), then each entry's first A (of its run's 2l + 1);
     then the same per centre species (the A pass sums a warp's lanes together, so its entries cannot depend on
-    the neighbour: their weights, last in reals, are per neighbour species);
+    the neighbour: their weights, last in reals, are per neighbour species); then per centre species each A
+    value's first term (NZ (n_a + 1)) and the terms, entry << 14 | q << 8 | lm (what the A pass reads);
     reals: per pair the transform's 7 and the envelope's 5 parameters; per pair the folded pair radial's
     transform (7), its envelope's cutoff, r0 and power and its kind (0 "ace1_poly1sr", 1 "poly1sr"), then 0;
     the recursion's A, B, C (nq each); the pair radial's (npq each) and its coefficients per pair; the entries'
@@ -611,7 +612,8 @@ def analytic_plan(model, runs):
     nq = int(used.max()) + 1 if len(used) else 1
     deg = np.sqrt(runs[:, 2]).astype(np.int64)             # each run's degree
     L = int(model.lmax)
-    if L > ANALYTIC_LMAX or not (np.array_equal(runs[:, 2], deg * deg) and np.array_equal(runs[:, 3], 2 * deg + 1)):
+    if L > ANALYTIC_LMAX or nq > 63 or not (np.array_equal(runs[:, 2], deg * deg)
+                                            and np.array_equal(runs[:, 3], 2 * deg + 1)):   # nq: 6 bits of a term
         return None
     ptr, ents, vals, off = [], [], [], 0
     for pz in range(nz * nz):
@@ -625,6 +627,8 @@ def analytic_plan(model, runs):
             off += len(o)
     dptr, dents, dvals, off = [], [], [], 0                 # pass 1: per centre species, weights per neighbour's
     W4 = W[..., :nq]
+    n_a = int((runs[:, 0] + runs[:, 3]).max())
+    terms = [[[] for _ in range(n_a)] for _ in range(nz)]   # per centre species and A value: entry, q, lm
     for zc in range(nz):
         for l in range(L + 1):
             u = np.flatnonzero(deg == l)
@@ -632,7 +636,13 @@ def analytic_plan(model, runs):
             o = np.lexsort((n, q))
             dptr.append(off + np.r_[0, np.cumsum(np.bincount(q, minlength=nq))])
             dents.append(runs[u, 0][n[o]]); dvals.append(W4[zc][:, runs[u, 1][n[o]], q[o]].T.ravel())
+            for e, (first, qq) in enumerate(zip(runs[u, 0][n[o]], q[o]), off):   # the same entries by A value
+                for mm in range(2 * l + 1):
+                    terms[zc][first + mm].append(e << 14 | int(qq) << 8 | (l * l + mm))
             off += len(o)
+    aptr = np.cumsum([0] + [len(t) for tz in terms for t in tz])
+    aptr = np.concatenate([aptr[zc * n_a:(zc + 1) * n_a + 1] for zc in range(nz)])   # (NZ, n_a + 1)
+    aitem = np.array([c for tz in terms for t in tz for c in t], np.int64)
     par = np.concatenate([np.asarray(model.rnl_transform, np.float64).reshape(nz * nz, 7),
                           np.asarray(model.rnl_envelope, np.float64).reshape(nz * nz, 5)], 1)
     abc = np.concatenate([np.asarray(a, np.float64)[:nq] for a in (model.polys_A, model.polys_B, model.polys_C)])
@@ -646,7 +656,7 @@ def analytic_plan(model, runs):
     pabc = np.concatenate([np.asarray(a, np.float64)[:npq]
                            for a in (model.pair_polys_A, model.pair_polys_B, model.pair_polys_C)])
     return (np.concatenate([np.concatenate(ptr), np.concatenate(ents), np.concatenate(dptr),
-                            np.concatenate(dents)]).astype(np.int32),
+                            np.concatenate(dents), aptr, aitem]).astype(np.int32),
             np.concatenate([par.ravel(), ppar.ravel(), abc, pabc, pc.ravel(), np.concatenate(vals),
                             np.concatenate(dvals)]), nq, npq)
 

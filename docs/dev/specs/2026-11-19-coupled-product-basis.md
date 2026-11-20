@@ -296,3 +296,27 @@ it (job 2295397, before its recoupling update): 0.121 at o4d20, 0.056 at o4d16.
   force passes, not the path. Its per-kernel profile at o3d8/o4d12/o4d16 is job 2295841 (`prof-symx.sbatch`).
   Candidates: lanes spent on skin pairs, the radial evaluated twice per neighbour, the force pass's occupancy, the
   analytic A pass outside float64 with n_a <= 64.
+
+## Symmetrix's per-kernel profile, the A pass and the export (2026-11-20, afternoon)
+
+Nsight Systems on symmetrix/ace/kk (job 2295841, gpu007, A100-PCIE, float64, 32,768 atoms; its runs are 200 steps
+and the first steps are up to 1.5x slower, so minima), µs per step, ours (job 2295570) then Symmetrix:
+
+| | A | product basis | forces | sum |
+|---|---|---|---|---|
+| o3d8 | 332 / 140 | 87 / 60 | 341 / 243 | 760 / 443 |
+| o4d12 | 442 / 237 | 387 / 191 | 625 / 357 | 1454 / 785 |
+| o4d16 | 767 / 406 | 1314 / 845 | 968 / 474 | 3049 / 1725 |
+
+Outside the kernels our o3d8 step has 0.43 ms and Symmetrix's best step ~0.10 ms: the path's fixed cost is ~0.33
+ms a step, about half of the o3d8 gap. Hence `aj export --format symmetrix` (`export/symmetrix.py`): a call of the
+installed Symmetrix's `extract_acejax_data`, no copy of the format here (the converter is not in a Symmetrix
+release yet).
+
+A pass: the analytic lane pass ran only for n_a <= 64 in float64, so o4d12 up were on the table pass. Its sum over
+neighbours was a warp shuffle reduction per A value (five double shuffles a value); now each lane stores env P_q and
+Y_lm, and the lanes share the A values, 32 multiply-adds each (`aptr`/`aitem` in the analytic plan). Modal A100,
+µs, table pass then the new one: float64 o3d8 348 -> 204, o4d12 442 -> 337, o4d16 774 -> 607, o4d20 984 -> 1269
+(kept on the table: `kAnDensity` 200); float32 291 -> 175, 362 -> 246, 609 -> 360, 782 -> 707 (always analytic).
+Register caps on the lane kernels (`__launch_bounds__(32, n)`, n 12-32): density -16% at o3d8 only, forces mostly
+slower; default off. Not yet retimed in LAMMPS on Sulis. Open: the force pass (1.4-2x Symmetrix's), o4d20's A pass.

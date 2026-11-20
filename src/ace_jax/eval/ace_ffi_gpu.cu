@@ -45,6 +45,12 @@ namespace ffi = xla::ffi;
 namespace {
 
 constexpr int kThreads = 256;                             // per block of the DAG pass, at most
+#ifndef ACEJAX_DENS_BLOCKS
+#define ACEJAX_DENS_BLOCKS 1                              // blocks an SM must hold: caps the lane kernels' registers
+#endif
+#ifndef ACEJAX_FORCE_BLOCKS
+#define ACEJAX_FORCE_BLOCKS 1
+#endif
 constexpr int kChunk = 32;                                // lanes per shuffle
 constexpr int kAhead = 8;                                 // list steps the DAG pass loads at a time (float32)
 constexpr int kShared = 48 << 10;                         // pair-pass shared memory without opt-in
@@ -271,7 +277,8 @@ __global__ void __launch_bounds__(T)
 template <typename R>
 struct AnLane {                                           // one neighbour's state
   const R *wA, *Ys, *gz, *gp, *gm, *pA, *pB, *pC, *wv, *qA, *qc;   // qA: the pair radial's recursion, qc its sums
-  const int32_t *qp, *ent, *dqp, *dent;                   // dqp, dent, dw: pass 1's entries, per centre species
+  const int32_t *qp, *ent, *dqp, *dent, *aptr, *aitem;    // dqp, dent, dw: pass 1's entries, per centre species;
+                                                          // aptr, aitem: per A value its terms (entry, q, lm)
   const R *dw;
   int zn, nz;
   R x, dx, env, denv, ir, hat[3];
@@ -315,6 +322,7 @@ __device__ __forceinline__ void an_setup(const Model<R> &m, AnLane<R> &a) {
   a.ent = m.ai + np * (m.L + 1) * (m.nq + 1);
   const int tot = a.ent[-1];                              // pass 3's entries; then pass 1's lists and weights
   a.dqp = a.ent + tot; a.dent = a.dqp + m.nz * (m.L + 1) * (m.nq + 1); a.dw = a.wv + tot; a.nz = m.nz;
+  a.aptr = a.dent + a.dent[-1]; a.aitem = a.aptr + m.nz * (m.n_a + 1);
   a.nq = m.nq; a.npq = m.npq; a.L = m.L; a.solid = m.solid;
 }
 
@@ -363,33 +371,15 @@ __device__ __forceinline__ void an_pair(const Model<R> &m, const AnLane<R> &a, i
   dV = denv * S + env * dS * dx;
 }
 
-// Pass 1 for an analytic tensor radial, a lane per neighbour and a warp per block (as ace_forces_lane): per
-// degree the recursion once, each env P_q W times the lane's harmonics summed over the warp into the A of the
-// radial columns that read it.  The entries are the centre species' (dqp, the same for every lane: the warp sums
-// together), their W the lane's neighbour species' (zero where its radial does not read P_q).  The live lists,
-// E0 and the pair energy as ace_density.
-template <int LL, typename R>
-__device__ __forceinline__ void an_density(const AnLane<R> &a, R *As) {
-  constexpr int K = 2 * LL + 1;
-  const int32_t *qp = a.dqp + LL * (a.nq + 1);
-  R P1 = 0, P2 = 0;
-  for (int k = 0; k < a.nq && qp[k] < qp[a.nq]; ++k) {
-    const R t = a.pA[k] * a.x + a.pB[k];
-    const R P = k == 0 ? a.pA[0] : k == 1 ? t : t * P1 + a.pC[k] * P2;
-    for (int e = qp[k]; e < qp[k + 1]; ++e) {
-      const R wP = a.dw[e * a.nz + a.zn] * a.env * P;
-      R s[K];
-      for (int m = 0; m < K; ++m) s[m] = wP * a.Ys[(LL * LL + m) * a.st];
-      for (int o = kChunk / 2; o > 0; o /= 2)
-        for (int m = 0; m < K; ++m) s[m] += SHFL_XOR(s[m], o);
-      if (threadIdx.x < K) As[a.dent[e] + threadIdx.x] += s[threadIdx.x];   // lane m adds the sum of m
-    }
-    P2 = P1; P1 = P;
-  }
-}
-
+// Pass 1 for an analytic tensor radial, a lane per neighbour and a warp per block (as ace_forces_lane).  Per
+// 32 neighbours each lane leaves env P_q (its column of Ps) and its harmonics (Ys) in shared memory; then the
+// lanes share the row's A values, each the sum over the neighbours of P_q Y_lm times W for the value's terms
+// (the plan's aptr, aitem per centre species: one term where a radial column is one polynomial).  A lane reads
+// the neighbours from its own offset on, so a warp's loads fall in different banks.  Work per A value is 32
+// multiply-adds, where a shuffle reduction per value took the warp five double shuffles: it bound the pass
+// above ~64 A values.  The live lists, E0 and the pair energy as ace_density.
 template <typename R, bool E, int LM>
-__global__ void __launch_bounds__(kChunk)
+__global__ void __launch_bounds__(kChunk, ACEJAX_DENS_BLOCKS)
     ace_density_lane(Model<R> m, const R *x, const int32_t *z, const int32_t *nb, const int32_t *cnt, Edges<R> ed,
                      int atoms, int K, int rows, R *Ag, int32_t *lists, R *eo, int *broken) {
   constexpr int T = kChunk;
@@ -397,7 +387,9 @@ __global__ void __launch_bounds__(kChunk)
   const int na = m.n_a, nY = (m.L + 1) * (m.L + 1), F = m.F, t = threadIdx.x, L = m.L, nq = m.nq;
   const int np = m.nz * m.nz;
   R *norm = reinterpret_cast<R *>(sh), *ca = norm + nY, *cb = ca + nY, *As = cb + nY, *Ys = As + na + t;
-  int *flag = reinterpret_cast<int *>(As + na + nY * T), *live = flag + K;
+  R *Ps = As + na + nY * T;
+  const R *Y0 = As + na;
+  int *flag = reinterpret_cast<int *>(Ps + nq * T), *live = flag + K, *zsh = live + K;
   AnLane<R> a;
   a.Ys = Ys;
   a.st = T;
@@ -467,15 +459,34 @@ __global__ void __launch_bounds__(kChunk)
       an_pair(m, a, pz, r, has, V, dV);
       e += V;
       for (int mm = 0; mm <= L; ++mm) harmonics(L, m.solid, mm, norm, ca, cb, v, r, ir, Ys, T);
-      an_density<0, R>(a, As);
-      if constexpr (LM >= 1) an_density<1, R>(a, As);
-      if constexpr (LM >= 2) an_density<2, R>(a, As);
-      if constexpr (LM >= 3) an_density<3, R>(a, As);
-      if constexpr (LM >= 4) an_density<4, R>(a, As);
-      if constexpr (LM >= 5) an_density<5, R>(a, As);
-      if constexpr (LM >= 6) an_density<6, R>(a, As);
-      if constexpr (LM >= 7) an_density<7, R>(a, As);
-      if constexpr (LM >= 8) an_density<8, R>(a, As);
+      R P1 = 0, P2 = 0;
+      for (int k = 0; k < nq; ++k) {
+        const R tt = a.pA[k] * a.x + a.pB[k];
+        const R P = k == 0 ? a.pA[0] : k == 1 ? tt : tt * P1 + a.pC[k] * P2;
+        Ps[k * T + t] = a.env * P;                        // zero for a lane without a neighbour in the cutoff
+        P2 = P1; P1 = P;
+      }
+      zsh[t] = zn;
+      __syncthreads();
+      const int cn = nl - s0 < T ? nl - s0 : T, j0 = t % cn;
+      const int32_t *ap = a.aptr + zc * (na + 1);
+      for (int q = t; q < na; q += T) {
+        R acc = 0;
+        for (int it = ap[q]; it < ap[q + 1]; ++it) {
+          const int c = a.aitem[it], en = c >> 14;
+          const R *Pr = Ps + ((c >> 8) & 63) * T, *Yr = Y0 + (c & 255) * T;
+          R sum = 0;
+          if (a.nz == 1) {
+            for (int jj = 0, j = j0; jj < cn; ++jj, j = j + 1 == cn ? 0 : j + 1) sum += Pr[j] * Yr[j];
+            sum *= a.dw[en];
+          } else
+            for (int jj = 0, j = j0; jj < cn; ++jj, j = j + 1 == cn ? 0 : j + 1)
+              sum += a.dw[en * a.nz + zsh[j]] * Pr[j] * Yr[j];
+          acc += sum;
+        }
+        As[q] += acc;
+      }
+      __syncthreads();
     }
     a.dqp = dq0;
     __syncthreads();
@@ -526,10 +537,17 @@ __device__ __forceinline__ void an_degree(const AnLane<R> &a, R &sc, R *g) {
 }
 
 constexpr int kAnL = 8;                                   // the degrees an_degree is made for
-constexpr int kAnDensity = 64;                            // A entries up to which pass 1 takes the analytic radial
+#ifndef ACEJAX_AN_DENSITY
+#define ACEJAX_AN_DENSITY 200
+#endif
+// A values up to which pass 1 takes the analytic radial in float64 (always in float32).  A100, 32,768 Si rows,
+// us, the table pass then this one: o3d8 (25 values) 348, 204; o4d12 (75) 442, 337; o4d16 (166) 774, 607; o4d20
+// (323) 984, 1269 (its shared memory, (nY + nq) 32 reals a block, leaves an SM too few blocks); float32 291, 175;
+// 362, 246; 609, 360; 782, 707.
+constexpr int kAnDensity = ACEJAX_AN_DENSITY;
 
 template <typename R, bool E, int LM>                   // LM: the model's lmax (its registers are the degree's sums)
-__global__ void __launch_bounds__(kChunk)
+__global__ void __launch_bounds__(kChunk, ACEJAX_FORCE_BLOCKS)
     ace_forces_lane(Model<R> m, const R *x, const int32_t *z, const int32_t *nb, const R *wt, Edges<R> ed,
                     int atoms, int K, int rows, const int32_t *lists, const R *wAg, const int *broken, R *eo,
                     R *fo) {
@@ -1259,12 +1277,12 @@ ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBu
   const bool lanes = c.nq > 0;                            // an analytic radial: the forces a lane per neighbour
   if (lanes && lmax > kAnL) return ffi::Error::InvalidArgument("the analytic radial's force pass takes lmax up to 8");
   const size_t s3l = (6 * nY + n_a + nY * kChunk) * sz;
-  const size_t s1l = (3 * nY + n_a + nY * kChunk) * sz + (2 * K + 1) * sizeof(int);
+  const size_t s1l = (3 * nY + n_a + (nY + c.nq) * kChunk) * sz + (2 * K + 1 + kChunk) * sizeof(int);
   // Pass 1 a lane per neighbour only for few A (its sums over the warp: A100 float64, table then analytic,
   // ms at 32,768 atoms: n_a 25 0.35, 0.23; 166 0.77, 1.07; 323 0.98, 2.54) and in float64 (in float32 the
   // transform loses the pair term's digits: o3d8 2e-3 eV/atom).  Its energy then is the analytic radial's, as
   // the forces; with the table it is the table's, which the forces differ from by the table's error (~1e-8).
-  const bool dlanes = lanes && sz == 8 && n_a <= kAnDensity;
+  const bool dlanes = lanes && (sz == 4 || n_a <= kAnDensity);
   const size_t s1 = dlanes ? s1l : density_shared(T1), s2 = cpl ? cpl_shared(GA) : dag_shared(GA, mode);
   const size_t s3 = lanes ? s3l : forces_shared(T3);
   if (std::max({s1, s2, s3}) > static_cast<size_t>(optin))
