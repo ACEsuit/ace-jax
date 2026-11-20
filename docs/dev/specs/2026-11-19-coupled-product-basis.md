@@ -269,3 +269,30 @@ Sulis job 2295450 (the same A100, gpu011; this tree at 9025f71, recoupled), µs/
 o4d20 0.262 / 0.163, o4d16 0.121 / 0.091, o4d12 0.0615 / 0.048; o3d8 stopped at the same gate (1.28e-8). Against
 main on that GPU (job 2295415): 2.8x / 2.8x at o4d20, 1.6x / 1.5x at o4d16, 1.08x / 1.07x at o4d12. Symmetrix on
 it (job 2295397, before its recoupling update): 0.121 at o4d20, 0.056 at o4d16.
+
+## Defaults, the full ladder and the step profile (2026-11-20)
+
+- GPU defaults (dcd094f): form auto (`choose_form`), radial analytic where the model has a plan; `ffi.describe`,
+  `calc.ffi` and the bundle record both. The benchmark gate compares an analytic-radial kernel with the exact model.
+- Full Sulis ladder, A100 and CPU, with main in the same jobs: `docs/dev/accuracy-cost-results.md`, last section
+  (A100 o4d20 3.05x, o4d16 1.8x, order 3 1.0-1.3x; CPU o4d20 3.1-3.9x, the rest inside the node's scatter).
+- Rows per block in the coupled pass, Modal A100, o4d20 float64: GA 4 5.70 ms, GA 1 5.20, GA 2 (the default) 4.15.
+- Mixed precision in coupled form has the DAG's errors (o4d20, 216 atoms: dF 0.041 against 0.043 meV/Å).
+- Nsight Systems on the LAMMPS step (job 2295570, gpu002, float64, 32,768 atoms, medians per step):
+
+  | | step | A | product basis | forces | count + fill | LAMMPS Kokkos | idle before our first kernel |
+  |---|---|---|---|---|---|---|---|
+  | o3d8 | 1.19 ms | 0.335 | 0.089 | 0.344 | 0.07 | ~0.07 | ~0.18 (of ~0.28 idle) |
+  | o4d12 | 1.83 | 0.451 | 0.391 | 0.632 | 0.07 | ~0.07 | ~0.2 |
+  | o4d16 | 3.46 | 0.780 | 1.338 | 0.984 | 0.07 | ~0.07 | ~0.2 |
+
+  About 14 `cudaDeviceSynchronize`, 5 memcpys and 22 launches a step. Our first kernel starts 0.36 ms into the
+  step: LAMMPS's and lammps-jax's small kernels to ~0.18 ms, then the PJRT dispatch. The fixed cost of the
+  JAX -> lammps-jax -> FFI path is ~0.25 ms a step (21% at o3d8, 7% at o4d16, 3% at o4d20), of which 0.07 ms was
+  `ace_count`/`ace_fill` (every atomic add on one counter for one species): one species now takes `ace_iota`
+  (GPU tests pass; not yet timed on an A100). The kernels are ~30% slower on Sulis's A100-PCIE than on Modal's
+  A100-SXM4, which an earlier estimate here counted as overhead.
+- Symmetrix's whole o3d8 step is 0.54 ms, less than our three passes (0.77 ms): the small-model gap is the A and
+  force passes, not the path. Its per-kernel profile at o3d8/o4d12/o4d16 is job 2295841 (`prof-symx.sbatch`).
+  Candidates: lanes spent on skin pairs, the radial evaluated twice per neighbour, the force pass's occupancy, the
+  analytic A pass outside float64 with n_a <= 64.

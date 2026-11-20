@@ -145,7 +145,11 @@ calculation, use `aj native --build`.
 ## GPU kernel
 
 On a CUDA GPU, `ffi=True` uses a CUDA kernel. It calculates the same
-quantities as the [CPU kernel](#cpu-kernel), with the same accuracy.
+quantities as the [CPU kernel](#cpu-kernel). For a model with polynomial
+radials (the default of `aj fit`), it calculates the radial functions
+directly in the force calculation. The forces then agree with the JAX model
+to approximately 1e-11 eV/Å. For other models, it uses the radial table, with
+the accuracy of the CPU kernel.
 
 1. Install the `cuda` extra. It installs `nvcc`, which compiles the kernel.
 2. Make the calculator with `ffi=True`:
@@ -158,6 +162,10 @@ The kernel also calculates in float32. For float32, add `dtype="float32"`.
 It also has the mixed-precision mode of the CPU kernel
 (`ffi_precision="mixed"`).
 `calc.ffi["platform"]` is `"cuda"` when the calculator uses the CUDA kernel.
+`calc.ffi["radial"]` is `"analytic"` or `"table"`. `calc.ffi["form"]` is the
+form of the product basis that the kernel uses (`"coupled"` or `"dag"`). The
+kernel selects the form with fewer operations for the model. The two forms
+give the same energies and forces.
 
 ## Site descriptors
 

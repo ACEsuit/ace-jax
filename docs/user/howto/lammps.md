@@ -222,9 +222,27 @@ same cache.
     lmp -k on g 1 -sf kk -pk kokkos newton on neigh half -in in.lammps
     ```
 
-In float64, the requirements and the accuracy are the same as for the CPU kernel.
-On an A100, the kernel is 4.8 to 8.2 times faster than the compiled JAX
-program, for silicon models from o3d8 to o4d20 with 32,768 atoms.
+In float64, the requirements are the same as for the CPU kernel.
+On an NVIDIA A100 with 32,768 silicon atoms, the GPU kernel is 7 to 13
+times faster than the compiled JAX program. The model o4d20 runs at 0.24
+µs/atom-step in float64 and at 0.15 in float32. See the
+[benchmarks](../benchmarks.md).
+
+The GPU kernel selects two things for each model. The bundle records them in
+`ace_jax.ffi`:
+
+- `radial` is `"analytic"` or `"table"`. For a model with polynomial radials
+  (the default of `aj fit`), the kernel calculates the radial functions
+  directly in the force calculation. The forces then agree with the XLA
+  program to approximately 1e-11 eV/Å. For other models (learned radials,
+  splined radials), the kernel uses the radial table, with the accuracy of
+  the CPU kernel.
+- `form` is `"coupled"` or `"dag"`. It is the form of the
+  [product basis](../concepts.md#terms) that has fewer operations for the
+  model. The two forms give the same energies and forces.
+
+To use the radial table for all models, set `ACEJAX_FFI_RADIAL=table` before
+the export.
 
 The GPU kernel also runs float32 bundles. To export one, add `--dtype float32`.
 The kernel then calculates in float32, with the accuracy of the float32 XLA

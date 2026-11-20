@@ -634,6 +634,12 @@ __global__ void ace_fill(const int32_t *z, int n_rows, int *cnt, int32_t *perm) 
     perm[atomicAdd(&cnt[z[i]], 1)] = i;
 }
 
+// One species: the batches are the rows in order (count and fill would put every atomic add on one counter:
+// 0.07 ms a step at 32,768 rows on an A100, 6% of an o3d8 step).
+__global__ void ace_iota(int n_rows, int32_t *perm) {
+  for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n_rows; i += gridDim.x * blockDim.x) perm[i] = i;
+}
+
 // Pass 2: the energy and dE/dA from the rows' A, a block per batch of GA rows of one species: a thread reads
 // each term of ffi.pull_plan's lists once and applies it to the batch's rows, whose values lie side by side
 // (index GA + row). Every sum is by the thread that owns its target (no atomic adds, so deterministic).
@@ -1327,9 +1333,13 @@ ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBu
       else
         density<<<b1, T1, s1, stream>>>(m, x, zs, nb, cnt, ed, i32(atoms), i32(K), i32(rows), Ag, lists, eo, broken);
       const int bc = i32(std::min<int64_t>((n_rows + 255) / 256, 4 * sms));
-      ace_count<<<bc, 256, 0, stream>>>(zs, i32(n_rows), per_z);
-      ace_base<<<1, 1, 0, stream>>>(nz, GA, per_z);
-      ace_fill<<<bc, 256, 0, stream>>>(zs, i32(n_rows), per_z, perm);
+      if (nz == 1)
+        ace_iota<<<bc, 256, 0, stream>>>(i32(n_rows), perm);
+      else {
+        ace_count<<<bc, 256, 0, stream>>>(zs, i32(n_rows), per_z);
+        ace_base<<<1, 1, 0, stream>>>(nz, GA, per_z);
+        ace_fill<<<bc, 256, 0, stream>>>(zs, i32(n_rows), per_z, perm);
+      }
       if (cpl)
         coupled<<<b2, i32(TD), s2, stream>>>(c.pull.typed_data(), c.lc.typed_data<Rd>(), i32(c.lc.dimensions()[1]),
                                              zs, perm, i32(n_batches), Ag, wAg, D, per_batch, eo);

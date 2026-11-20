@@ -956,3 +956,39 @@ GRACE-2L does not fit at 128 ranks (each rank holds the model). The float32 MACE
 PyTorch reference is its CPU copy (`timing.cases`; the first run, job 2290209, failed that gate at loading).
 
 Not done: a float64 GRACE timing (the native `grace/2l/kk` style on the foundation `kokkos.npz`).
+
+## Coupled product basis and analytic radial: the kernel lines retimed (2026-11-20)
+
+Branch `perf/symmetrix-ace` at dcd094f (spec `specs/2026-11-19-coupled-product-basis.md`): the kernels take the
+coupled form where `ffi.choose_form` picks it (o4d12 to o4d20 on this ladder) and, on the GPU, the analytic radial.
+The GPU bundles are exported with unsplined analytic radials, so the kernel has an `ffi.analytic_plan`; the gate then
+compares it with the exact JAX model (`parity._tol_kw`), forces within 2e-11 eV/Å. Rows carry `ffi_form`/`ffi_radial`.
+
+A100-PCIE-40GB (gpu002, jobs 2295567 order 4, 2295568 order 3; `runs/symmetrix-ace/sulis/ladder-gpu.sbatch`), LAMMPS,
+32,768 Si, µs/atom-step, float64 / float32, this kernel then main 7ad4803 in the same job:
+
+| size | new | main | ratio |
+|---|---|---|---|
+| o4d20 | 0.245 / 0.149 | 0.746 / 0.448 | 3.05 / 3.00 |
+| o4d16 | 0.106 / 0.075 | 0.191 / 0.133 | 1.81 / 1.77 |
+| o4d14 | 0.078 / 0.058 | 0.115 / 0.085 | 1.48 / 1.47 |
+| o4d12 | 0.056 / 0.042 | 0.068 / 0.054 | 1.21 / 1.29 |
+| o3d12 | 0.053 / 0.043 | 0.059 / 0.045 | 1.12 / 1.03 |
+| o3d10 | 0.045 / 0.033 | 0.045 / 0.039 | 1.00 / 1.18 |
+| o3d8 | 0.039 / 0.032 | 0.043 / 0.043 | 1.12 / 1.33 |
+
+Rows: `sulis-gpu-cudak.jsonl` (replaced: the plotted kernel lines), main's same-job rows
+`sulis-gpu-cudak-main-2295567.jsonl` (not plotted; they repeat the earlier gpu020 rows within 0.5%).
+
+CPU, 128 x 1, 4,096 Si (node008, job 2295569, `ladder-cpu.sbatch`: new float64, new mixed, main float64, main mixed,
+then the two new ones again). The timed loops are 0.1 to 0.3 s, and repeats on this node differ by up to 45%
+(o4d16 float64 0.262 then 0.181; o4d14 mixed 0.149 then 0.231; o3d10 float64 0.181 then 0.178 against main's 0.148),
+so only o4d20 (0.396 and 0.495 against main's 1.531; mixed 0.296 and 0.354 against 1.092) is resolved well. The row
+files hold the second repeat. They are added beside the earlier rows (`sulis-cpu-128x1-ffi-coupled{,-mixed}.jsonl`;
+`make_cost` takes the fastest gated row for each size, so o3d10 and mixed o4d14 keep the earlier rows); main's
+same-node rows are `sulis-cpu-128x1-ffi-main-2295569{,-mixed}.jsonl` (excluded by the `ffi-main` pattern). The order-3
+CPU path did not change. Mixed o3d8 fails the gate on both kernels (max dF 1.3e-4 eV/Å), as before.
+
+At the target (o4d20): A100 0.24 (float32 0.15), CPU 0.49 (mixed 0.35); MACE c16L0 in Symmetrix 0.3.0 is 0.65 and
+0.59. Against patched ML-PACE on the A100 4.6-9.9x (o4d12 to o4d20), against the XLA program 7.0-12.8x; CPU against
+XLA 18-102x.

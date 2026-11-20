@@ -265,6 +265,12 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
   wheels (no compiler needed); elsewhere, or with `ACEJAX_FFI_FLAGS`, compiled on first use (C++17 compiler,
   cached). `ffi="auto"` falls back to the JAX model with `calc.ffi_reason`. Derivatives in positions only:
   for parameter gradients or second derivatives keep `ffi=False` (the default).
+  The kernels choose the product basis' form per model (`calc.ffi["form"]`, bundle `ace_jax.ffi["form"]`):
+  `"coupled"` (order <= 4, where it has fewer operations: from about o4d12) or `"dag"`; same results to
+  roundoff. `ACEJAX_FFI_FORM=dag|coupled` forces one. On a CUDA GPU the kernel evaluates a polynomial radial
+  itself in its force pass (`calc.ffi["radial"] == "analytic"`: forces ~1e-11 eV/A from the JAX model, not
+  the table's ~1e-8) for analytic, unsplined radials with lmax <= 8; learned/splined radials and PACE-shaped
+  bases keep the table (`"table"`). `ACEJAX_FFI_RADIAL=table` forces the table.
   `ffi_precision="mixed"` (off by default; float64 only; CPU and CUDA kernels, the same library): the
   product basis in float32, everything else float64. Worth it only for large models (o4d20: 1.4x in LAMMPS
   on 128 cores, 1.4x on an A100; nothing below o4d14). Forces within ~5e-5 eV/A (o4d20), but the energy

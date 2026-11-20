@@ -63,8 +63,8 @@ At the target, in microseconds per atom-step:
 | model | A100 GPU | CPU node (128 cores) |
 |---|---|---|
 | linear ACE o4d20, ace-jax with lammps-jax (XLA program) | 3.12 | 50.5 |
-| linear ACE o4d20, ace-jax kernel with lammps-jax (CUDA on the GPU, C++ on the CPU) | 0.75 | 1.52 |
-| linear ACE o4d20, ace-jax kernel in reduced precision (float32 on the GPU, mixed precision on the CPU) | 0.44 | 1.13 |
+| linear ACE o4d20, ace-jax kernel with lammps-jax (CUDA on the GPU, C++ on the CPU) | 0.24 | 0.49 |
+| linear ACE o4d20, ace-jax kernel in reduced precision (float32 on the GPU, mixed precision on the CPU) | 0.15 | 0.35 |
 | linear ACE o4d20, ML-PACE | 4.13 | 5.31 |
 | linear ACE o4d20, ACEpotentials.jl | – | 10.8 |
 | MACE c16L0, Symmetrix 0.3.0 | 0.65 | 0.59 |
@@ -74,10 +74,11 @@ At the target, in microseconds per atom-step:
 | GRACE-1L c64l4, grace-runtime (mixed precision) | 1.68 | 1.88 |
 | GRACE-2L 2l_c16, grace-runtime (mixed precision) | 1.47 | 0.81 |
 
-MACE c16L0 in Symmetrix 0.3.0 has the lowest cost at the target, on the
-A100 and on the CPU. Symmetrix 0.3.0 is 3 to 4 times faster than the
-earlier Symmetrix version for these MACE models. On the A100, it is
-1.9 times faster than the ace-jax GPU kernel at the target.
+On the A100, linear ACE o4d20 in the ace-jax GPU kernel has the lowest cost
+at the target. It is 2.6 times faster than MACE c16L0 in Symmetrix 0.3.0.
+On the CPU, these two have approximately the same cost (0.49 and 0.59
+µs/atom-step). Symmetrix 0.3.0 is 3 to 4 times faster than the earlier
+Symmetrix version for these MACE models.
 
 In these ladders, PACE (pacemaker), ACE with learned radials, PACE-shaped
 ACE, NEP, the GAP refits and GRACE-FS do not reach the target. GRACE-1L
@@ -85,8 +86,8 @@ reaches the target only at its largest size (c64l4, 445,793 parameters).
 At that size, its cost is approximately 3 times the cost of MACE c16L0.
 GRACE-2L has two message-passing layers. It reaches the target at all of
 its sizes. Its smallest size (2l_c16, 98,882 parameters) costs
-approximately 1.4 (CPU) to 2.3 (A100) times the cost of MACE c16L0. On the
-CPU, it costs less than linear ACE o4d20 in the ace-jax kernel. GRACE-2L
+approximately 1.4 (CPU) to 2.3 (A100) times the cost of MACE c16L0. Linear
+ACE o4d20 in the ace-jax kernel costs less on the CPU and on the A100. GRACE-2L
 2l_small has a QoI error of 0.31, the same as the largest MACE L = 1 models. PACE reaches the force
 error of GAP-18 with fewer parameters than linear ACE, but not the QoI target.
 NEP has the lowest cost on the A100 (0.04 to 0.22 µs/atom-step), in mixed
@@ -103,17 +104,16 @@ On the CPU, the ACEpotentials.jl compiled library is the fastest code for
 linear ACE up to o4d14. It has the same speed as ML-PACE at o4d16. At
 o4d20 it is 2 times slower than ML-PACE.
 
-On the CPU, the ace-jax [C++ kernel](howto/lammps.md#cpu-kernel) is 17 to 33
-times faster than the compiled JAX program. At o4d20 it is 3.5 times faster
-than ML-PACE (1.52 against 5.31 µs/atom-step).
+On the CPU, the ace-jax [C++ kernel](howto/lammps.md#cpu-kernel) is 18 to 100
+times faster than the compiled JAX program. At o4d20 it is 11 times faster
+than ML-PACE (0.49 against 5.31 µs/atom-step).
 
 On the A100, ace-jax runs linear ACE o4d20 faster than ML-PACE (3.12
 against 4.13 µs/atom-step). The ace-jax [GPU kernel](howto/lammps.md#gpu-kernel)
-runs the same model at 0.75 µs/atom-step. It is the fastest linear ACE code
+runs the same model at 0.24 µs/atom-step. It is the fastest linear ACE code
 on the A100 for all models from o3d8 to o4d20. Against patched ML-PACE, it
-is 2.9 to 3.7 times faster (o4d12 to o4d20). It is 4.8 to 8.2 times faster
-than the compiled JAX program. The speed-up is largest for the smallest
-models.
+is 4.6 to 9.9 times faster (o4d12 to o4d20). It is 7 to 13 times faster
+than the compiled JAX program. The speed-up is largest for o4d20.
 
 ### Foundation models
 
