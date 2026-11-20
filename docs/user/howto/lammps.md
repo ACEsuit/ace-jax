@@ -314,3 +314,40 @@ version of the Python package, or export with `layout="dense"`.
   `aj export --dtype float32` does this check on `--structure`.
 - `ffi_precision="mixed"` is for a float64 bundle with the kernel. The kernel
   then calculates the product basis in float32. The default is `"float64"`.
+
+## Export to Symmetrix
+
+[Symmetrix](https://github.com/wcwitt/symmetrix) has a LAMMPS pair style for
+linear ACE, `symmetrix/ace`. On an NVIDIA A100, its kernels are 1.4 to 2.4
+times faster than the ace-jax GPU kernel for the silicon models of the
+[benchmarks](../benchmarks.md). It also has no fixed cost for each step from
+lammps-jax. Thus it is the faster selection for small models.
+
+Symmetrix does the conversion. ace-jax calls the converter of the installed
+Symmetrix package.
+
+1. Install a Symmetrix version that has the ACE converter
+   (`symmetrix.extract_ace_data`).
+2. Export the model:
+
+    ```bash
+    aj export --model fit/model.npz --out model.symmetrix.json --format symmetrix
+    ```
+
+3. Use the two LAMMPS lines that the command prints:
+
+    ```
+    pair_style symmetrix/ace
+    pair_coeff * * model.symmetrix.json Si
+    ```
+
+In Python, the function is `ace_jax.export.symmetrix.export_symmetrix(model_path, out)`.
+
+!!! warning "Give `--format symmetrix`"
+    An `--out` name that ends in `.json` gives a lammps-jax bundle by
+    default. The two files are different.
+
+The converter accepts only some models. At this time, the model must have
+one element, analytic radials and a pair term. For other models, the command
+stops with the message from Symmetrix. Symmetrix tabulates the radials, and
+the export reports the table error.

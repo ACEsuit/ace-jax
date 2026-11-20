@@ -598,8 +598,28 @@ def _int_list(s):
 _EXPORT_FORMATS = {".yace": "yace", ".json": "lammps"}
 
 
+def _export_symmetrix(a, out):
+    """`aj export --format symmetrix`: the model file through Symmetrix's own converter."""
+    if a.structure or a.delta is not None or a.aa_dag != "auto":
+        raise UsageError("--structure, --delta and --aa-dag are for the other formats; a Symmetrix model needs none")
+    from .export.symmetrix import SymmetrixUnavailable, export_symmetrix
+    if out.parent and str(out.parent) != ".":
+        out.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        info = export_symmetrix(a.model, out)
+    except SymmetrixUnavailable as e:
+        raise UsageError(str(e)) from None
+    except (ValueError, KeyError) as e:           # the converter's refusals; a KeyError is an array it needs
+        raise UsageError(f"Symmetrix cannot convert {a.model}: {e}") from None
+    print(f"symmetrix: elements {' '.join(info['elements'])}, lmax {info['lmax']}, "
+          f"{sum(info['monomials'])} products{'' if all(info['coupled']) else ', no coupled form'} -> {out}")
+    print(f"LAMMPS: pair_style symmetrix/ace; pair_coeff * * {out} {' '.join(info['elements'])}")
+    return info
+
+
 def cmd_export(a):
-    """`aj export`: a model as an ML-PACE .yace (`write_yace`) or a lammps-jax bundle (`export_lammps`)."""
+    """`aj export`: a model as an ML-PACE .yace (`write_yace`), a lammps-jax bundle (`export_lammps`) or a
+    Symmetrix JSON model (`export_symmetrix`, the conversion by the installed Symmetrix)."""
     if a.print_env is not None:
         return _export_print_env(a)
     if not a.model or not a.out:
@@ -609,9 +629,11 @@ def cmd_export(a):
     out = pathlib.Path(a.out).expanduser()
     fmt = a.format or _EXPORT_FORMATS.get(out.suffix)
     if fmt is None:
-        raise UsageError(f"{a.out}: give --format yace|lammps, or an --out ending in .yace or .json")
+        raise UsageError(f"{a.out}: give --format yace|lammps|symmetrix, or an --out ending in .yace or .json")
     if fmt == "yace" and a.aa_dag != "auto":
         raise UsageError("--aa-dag sets a lammps-jax bundle's product basis; a .yace needs none")
+    if fmt == "symmetrix":
+        return _export_symmetrix(a, out)
     model, meta, extra = load(a.model)
     aa_dag = None if a.aa_dag == "chain" else a.aa_dag
     if out.parent and str(out.parent) != ".":
@@ -914,13 +936,15 @@ def _parser():
     mode.add_argument("--append", action="store_true", help="pool U with the stored T_val scores in every group")
     mode.add_argument("--replace", action="store_true", help="use U only in every group")
     cal.add_argument("--out", required=True)
-    exp = sub.add_parser("export", help="write a model for LAMMPS: an ML-PACE .yace (pair_style pace) or a "
-                                        "lammps-jax bundle (.json, pair_style jax)")
+    exp = sub.add_parser("export", help="write a model for LAMMPS: an ML-PACE .yace (pair_style pace), a "
+                                        "lammps-jax bundle (.json, pair_style jax) or a Symmetrix model "
+                                        "(--format symmetrix, pair_style symmetrix/ace)")
     exp.add_argument("--model", default=None, help="a model .npz (linear ACE) or .yace (required)")
     exp.add_argument("--out", default=None, help="the file to write: .yace or .json (else give --format; required)")
-    exp.add_argument("--format", choices=["yace", "lammps"], default=None,
-                     help="yace: ML-PACE C-tilde (exact, tabulated radials); lammps: a lammps-jax bundle "
-                          "(default: from the --out extension)")
+    exp.add_argument("--format", choices=["yace", "lammps", "symmetrix"], default=None,
+                     help="yace: ML-PACE C-tilde (exact, tabulated radials); lammps: a lammps-jax bundle; "
+                          "symmetrix: a Symmetrix JSON model, converted by the installed Symmetrix "
+                          "(default: from the --out extension, .json being a lammps-jax bundle)")
     exp.add_argument("--delta", type=float, default=None,
                      help="yace: radial table spacing and ML-PACE deltaSplineBins in Å (default 0.001; "
                           "the cutoff must be a whole number of it)")

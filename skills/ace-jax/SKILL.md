@@ -59,6 +59,7 @@ aj eval --model out_gp/gp_model.npz  --data new.xyz $K --out pred.xyz   # adds a
 aj eval --model model.yace --data new.xyz $K                            # PACE works too; --prefix renames ace_
 aj export --model out_linear/model.npz --out model.yace                # ML-PACE .yace (exact; tabulated radials)
 aj export --model out_linear/model.npz --out bundle.json --structure start.xyz   # lammps-jax bundle
+aj export --model out_linear/model.npz --out m.symmetrix.json --format symmetrix  # Symmetrix `pair_style symmetrix/ace` (needs Symmetrix with its ACE converter; one element, analytic radials, a pair term; fastest on a GPU, esp. small models)
 ```
 
 Per-order caps: `--nmax-by-order 15,6,4,3,2,2 --lmax-by-order 0,4,3,2,1,0` (pacemaker's
