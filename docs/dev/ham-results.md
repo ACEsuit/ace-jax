@@ -858,3 +858,27 @@ Bulk gold, 10 test structures, all bonds, H only (`deeph_fit.py`), band RMSE fro
 - Perfect fcc supercell, spread of the block norm over symmetry-equivalent bonds: 2.5 meV at (0,2,2) and 1.7 meV at (0,0,4) (an atom at the midpoint) with the 0.7.0 model, 0 on the ten other vector classes; 0 everywhere after the refit.
 - `aj ham fit` (H and S, default basis, 32 structures, CPU, no wrapper): 2.14 meV on the 4x4x4 grid, 2.04 meV on 7x7x7 at 1000 K; H off-site MAE 0.28 meV. The fit took 398 s on 16 threads of a CPU (70 s on the GPU before); it is the first full fit on a CPU with the memory-map guard in the library.
 - MACE-H at half size, 32 structures, converged (2,294 epochs, lestrade): H MAE 0.421 meV, bands 4.57 meV, 126 ms per atom on one core: better in bands than the full-size run that hit its time limit (5.32 meV).
+
+## SCF noise of the blocks, and the bounds of the evidence (2026-11-20)
+
+Two 64-atom rattled Al cells (bcc_010, fcc_010 of `al_small`; FHI-aims 261002, the dataset's settings), each rerun with other SCF settings and compared with a run at `sc_accuracy_rho 1e-8` (two such runs with different mixing agree to the files' digits). H difference in meV, RMS (largest); S is identical in every run.
+
+| Run | Cycles | On-site | Off-site |
+|---|---|---|---|
+| `sc_accuracy_rho 1e-4` | 23-24 | 0.013-0.018 (0.29) | 0.0005-0.0012 (0.056) |
+| dataset settings, 1e-5 | 30-31 | 0.002-0.003 (0.04) | 0.0001 (0.006) |
+| 1e-5, mixing 0.05 / mixing 0.4 with 4 Pulay steps / 12 Pulay steps | 17-31 | 0.001-0.004 (0.04) | 0.0001-0.0003 (0.014) |
+| 1e-6 | 37-39 | 0.0003-0.0004 (0.005) | < 0.0001 (0.001) |
+
+The rigid part (a multiple of S) is at most 0.009 meV. So the data are noise-free on the scale of the model errors (off-site MAE 0.13 meV at best on gold): the sigma the evidence finds is misfit. Inputs and script: `ham-ref/work/noise/` (`analyse.py`).
+
+Ti-Ti off-site blocks of the 24 NbFeSb cells alone (304 bonds, fewer rows than columns), `sigma_c="evidence"`, largest |coefficient| (no prior: 51.5):
+
+| Form | Largest, next |
+|---|---|
+| 0.7.0: sigma >= 1e-9 of the target's rms, no bound on rho | 4.7e13 |
+| 0.7.1: ridge added in the solve after the selection | 50.9, 7.7 |
+| rho >= ridge / gamma_min^2 inside the search (`_rho_floor`) | 64, 21 |
+| no bound on rho, sigma >= 1e-7 eV / 3e-6 eV / 1e-4 eV | 1.8e3, 280 / 1.7e3, 102 / 102, 35 |
+
+A noise floor at the measured SCF level removes the divergence but leaves a prior weaker than the ridge; the bound on rho is what holds the prior at the ridge. Both are in the search now (`noise=` optional, the rho bound always), and the solve is the model the evidence was computed for. The 0.7.1 form changed 532 of 533 off-site coefficient blocks of the NbFeSb model (predictions by at most 0.9 meV; Ti on-site by 24 meV; no score moved).

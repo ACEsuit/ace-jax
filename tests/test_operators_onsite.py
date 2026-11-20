@@ -267,7 +267,7 @@ def test_fit_leaving_structures_out(basis_spdf, select):
     import jax.numpy as jnp
 
     from ace_jax.fit.linear import objective as lo
-    from ace_jax.operators.fit import LOO_RHO
+    from ace_jax.operators.fit import LOO_RHO, _rho_floor
     require_optional("h5py")
     d = deeph.read(FIX)
     rng = np.random.default_rng(0)
@@ -278,7 +278,8 @@ def test_fit_leaving_structures_out(basis_spdf, select):
     for key, s in st.items():
         assert np.allclose(s.factor.G, st0[key].factor.G, atol=1e-9 * np.abs(np.asarray(s.factor.G)).max())
         rho = 2.0 * np.log10(s.hyper[:, 0] / s.hyper[:, 3])
-        assert np.abs(rho[:, None] - LOO_RHO[None]).min(1).max() < 1e-6
+        floor = np.log10(_rho_floor(basis_spdf.smoothness(key[1], key[2]), 1e-10))       # the grid starts at the floor of rho
+        assert np.abs(rho[:, None] - np.concatenate([[floor], LOO_RHO])[None]).min(1).max() < 1e-6 and rho.min() > floor - 1e-6
     if select == "press":                              # one design, by refits without each structure
         key = next(k for k in st if k[1] == 1)
         s, (_, L, p) = st[key], key
@@ -294,14 +295,14 @@ def test_fit_leaving_structures_out(basis_spdf, select):
                 tot += float(((np.asarray(f.R) @ mu - np.asarray(f.c)[:, q]) ** 2).sum() + f.yy[q] - (np.asarray(f.c)[:, q] ** 2).sum())
             return tot
         assert np.isclose(press(rho), -s.hyper[q, 2], rtol=1e-6)
-        assert all(press(rho) <= press(r) * (1 + 1e-9) for r in LOO_RHO[::6])
+        assert all(press(rho) <= press(r) * (1 + 1e-9) for r in LOO_RHO[::6] if r > floor)
 
 
-def test_selected_prior_is_never_weaker_than_the_ridge(monkeypatch):
+def test_selected_prior_is_never_weaker_than_the_ridge():
     """A design that the data cannot determine (fewer rows than columns, targets it can interpolate)
-    takes the evidence's noise to its lower bound, and gamma^2 sigma^2 / sigma_c^2 alone is then far
-    below the ridge of the fit without a prior: Ti-Ti coefficients of 1e13 on NbFeSb.  The solves of
-    the evidence and of leave-structure-out add the ridge to every column."""
+    takes the evidence's noise to its lower bound, and gamma^2 sigma^2 / sigma_c^2 then fell far
+    below the ridge of the fit without a prior: Ti-Ti coefficients of 1e13 on NbFeSb.  rho is
+    bounded below inside the search (`fit._rho_floor`), so the solve is the evidence's own model."""
     import jax.numpy as jnp
 
     from ace_jax.fit.linear import stats as ls
@@ -314,11 +315,25 @@ def test_selected_prior_is_never_weaker_than_the_ridge(monkeypatch):
     c = Q.T @ np.vstack([Y, np.zeros((k - m, 2))])
     fac = ls.Factor(jnp.asarray(R), jnp.asarray(c), jnp.asarray((Y ** 2).sum(0)), jnp.asarray(float(m)), jnp.zeros(()))
     gamma = np.linspace(1.0, 8.0, k)
-    seen = []
-    solve = F.lo.posterior_qr
-    monkeypatch.setattr(F.lo, "posterior_qr", lambda lin, *a, **kw: (seen.append(np.asarray(lin)), solve(lin, *a, **kw))[1])
+    floor = F._rho_floor(gamma, ridge)
+    assert np.isclose(floor, ridge)                                        # gamma_min = 1
     mean, hyper = F._evidence(fac, gamma, ridge, 1)
-    rho = (hyper[:, 0] / hyper[:, 3]) ** 2
-    assert np.all(gamma.min() ** 2 * rho < ridge)                          # the prior alone would be weaker than the ridge here
-    assert seen and all(lin.min() >= ridge for lin in seen)                # ... and the solve does not go below it
+    assert np.all((hyper[:, 0] / hyper[:, 1]) ** 2 >= floor * (1 - 1e-6))  # the maximum is inside the bound ...
+    assert np.all((hyper[:, 0] / hyper[:, 3]) ** 2 >= floor * (1 - 1e-6))  # ... and so is the rho solved with
     assert np.abs(A @ mean - Y).max() < 1e-4 * np.abs(Y).max() and np.isfinite(mean).all()
+
+
+def test_noise_floor_bounds_the_evidence_noise(basis_spdf):
+    """noise=: the evidence's sigma of the H right-hand sides is not below it (channels innermost),
+    the overlap's is not bounded by a number, and a channel that is not fitted is refused."""
+    require_optional("h5py")
+    d = deeph.read(FIX)
+    _, _, free = fit_onsite(basis_spdf, [d], sigma_c="evidence", stats=True)
+    _, _, st = fit_onsite(basis_spdf, [d], sigma_c="evidence", stats=True, noise=1e-6)
+    assert any((s.hyper[0::2, 0] < 1e-6).any() for s in free.values())                # the bound is active on this data
+    assert all((s.hyper[0::2, 0] >= 1e-6 * (1 - 1e-6)).all() for s in st.values())
+    assert all(np.allclose(st[k].hyper[1::2, 0], free[k].hyper[1::2, 0], rtol=1e-2) for k in st)
+    _, _, both = fit_onsite(basis_spdf, [d], sigma_c="evidence", stats=True, noise={"S": 1e-9})
+    assert all((s.hyper[1::2, 0] >= 1e-9 * (1 - 1e-6)).all() for s in both.values())
+    with pytest.raises(ValueError, match="no channel"):
+        fit_onsite(basis_spdf, [d], sigma_c="evidence", noise={"H_up": 1e-3})

@@ -2,14 +2,20 @@
 
 ## Unreleased
 
-## 0.7.1 (2026-11-20)
+### Changed
 
-**Highlights.** Two corrections to Hamiltonian models. The features of the atoms near a bond are now
-smooth at the bond midpoint, which makes the blocks of a perfect crystal obey its symmetry and decreases
-the errors. A prior that `--prior evidence`, `loo` or `press` selects can no longer be weaker than no prior.
+- **`--prior evidence`, `loo` and `press`: the limit on the prior is part of the selection.** In 0.7.1
+  the fit added the ridge to the prior after the selection, so the coefficients were not those of the
+  model that the evidence was calculated for. The selection now has a lower limit on the ratio of the
+  noise to the prior scale, such that the prior is at least the ridge on each coefficient. The results
+  of such fits change slightly from 0.7.1.
 
-**Upgrading from 0.7.0.** A Hamiltonian model file from 0.7.0 loads and gives the same predictions as
-before. Fit the model again to get the corrections. Potentials are not affected.
+### Added
+
+- `aj ham fit --noise-floor SIGMA` (`noise=` of `fit_onsite` and `fit_offsite`) sets the smallest noise
+  of H that `--prior evidence` can select, in the unit of the data. The difference of H between SCF
+  calculations of the same structure is a measured value for it: approximately 1e-7 eV for off-site blocks
+  and 3e-6 eV for on-site blocks (FHI-aims, `sc_accuracy_rho 1e-5`, aluminium).
 
 ### Fixed
 
