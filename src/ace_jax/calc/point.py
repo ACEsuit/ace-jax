@@ -67,6 +67,12 @@ POSTERIOR_PROPS = ("forces_std", "forces_cov", "forces_q", "forces_q_mahal", "fo
                    "forces_support")       # uq.force.PROPS (not imported here: ase-free import path)
 
 
+def _kernel_runs(attrs):
+    """`eval.ffi.describe` of a KernelModel's attributes: the kernel's product-basis form and radial."""
+    from ..eval import ffi as kernel
+    return kernel.describe(attrs)
+
+
 class ACECalculator(Calculator):
     implemented_properties = ["energy", "free_energy", "forces", "stress",
                               "site_descriptors", *POSTERIOR_PROPS]
@@ -333,7 +339,7 @@ class ACECalculator(Calculator):
             self.reset()
         gpu = "target" in dict(getattr(eval_model, "attrs", ()))   # KernelModel.of(..., gpu=True)
         self._ffi = ({"library": str(ffi_lib), "threads": self._ffi_threads, "platform": "cuda" if gpu else "cpu",
-                      "precision": self._ffi_precision}
+                      "precision": self._ffi_precision, **_kernel_runs(eval_model.attrs)}
                      if ffi_lib else None)
         self._ffi_reason = ffi_reason
         self._model, self._eval_model, self._splined = model, eval_model, splined
@@ -405,8 +411,9 @@ class ACECalculator(Calculator):
 
     @property
     def ffi(self):
-        """The kernel in use: {"library", "threads", "platform"} ("cpu": the C++ kernel; "cuda": the CUDA
-        kernel, where threads does not apply); None for the JAX model."""
+        """The kernel in use: {"library", "threads", "platform", "precision", "form", "radial"} ("cpu": the
+        C++ kernel; "cuda": the CUDA kernel, where threads does not apply; form "coupled" or "dag" and radial
+        "analytic" or "table": `eval.ffi.describe`); None for the JAX model."""
         return self._ffi
 
     @property

@@ -294,7 +294,10 @@ def gate_tol(style, code, row):
     """parity.TOL for a gate: a splined ace-jax model, or a kernel bundle (ACEJAX_EXPORT_FFI: its radial tabulated
     in r, reference and bundle alike), at "acejax-splined" -- a fine table amplifies float64 noise in r and in its
     samples by ~1/h, so two evaluations of the same table differ by ~1e-9 eV/A (o3d8's 4000-interval table: 1.0e-9
-    XLA CPU vs GPU, 1.2e-9 the CUDA kernel vs XLA; 7.7e-12 analytic), and its error vs the analytic model is ~1e-8."""
+    XLA CPU vs GPU, 1.2e-9 the CUDA kernel vs XLA; 7.7e-12 analytic), and its error vs the analytic model is ~1e-8.
+    A kernel bundle whose radial is analytic (the CUDA kernel, `ace_jax.ffi["radial"]`) is gated against the model
+    without a table (`parity._tol_kw`), at the same bound: its forces are the model's to ~1e-11, and its energy
+    is the table's where the A pass keeps it."""
     from scaling import parity
     if style == "acejax" and os.environ.get("ACEJAX_EXPORT_FFI_PRECISION") == "mixed":
         return parity.TOL["acejax-mixed"]
@@ -338,14 +341,16 @@ def gate_model(row, device, env, work):
             chk = {"cell": k, **({"layout": lay} if lay else {})}
             try:
                 if style == "acejax":
-                    E0, F0 = parity._acejax_ef(row["path"], at, **parity._tol_kw(row))   # the model the bundle exports
                     cpu = {"procs": [1, 1, 1], "device_memory": 4 * 2**30} if device == "cpu" else {}
                     if row.get("bundle"):
                         bundle = row["bundle"]
-                        used = json.loads(pathlib.Path(bundle).read_text())["ace_jax"]["layout"]
                     else:
-                        bundle, used, _ = export_bundle({**row, **cpu}, at, "float64", w, layout=lay)
-                    chk["layout_used"] = used
+                        bundle, _, _ = export_bundle({**row, **cpu}, at, "float64", w, layout=lay)
+                    aj = json.loads(pathlib.Path(bundle).read_text())["ace_jax"]
+                    chk["layout_used"] = aj["layout"]
+                    kern = aj.get("ffi") or {}
+                    chk.update({k: kern[k] for k in ("form", "radial") if k in kern})
+                    E0, F0 = parity._acejax_ef(row["path"], at, **parity._tol_kw(row, kern.get("radial")))   # the model the bundle exports
                     lmp_aj, pjrt = lammps_for(code, device, env)
                     E1, F1 = parity._lammps_ef("acejax", bundle, row["elements"], at, device, lmp_aj, w, pjrt)
                 elif style == "mlpace":                                # a converted model: its source

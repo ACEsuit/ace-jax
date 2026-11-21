@@ -469,7 +469,8 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     list slot, so `aa_dag`, `k_dense` and `block_rows` do not apply (recorded as "greedy", None, None).
     LAMMPS loads the kernel through LAMMPS_JAX_FFI_HANDLERS, set to `ace_jax.ffi["handlers"]`, with a
     lammps-jax whose plugin registers handlers for the bundle's platform.  Recorded as `ace_jax.ffi`:
-    {"target", "library", "handlers"} (None for the XLA program).  ffi_precision="mixed" (off by
+    {"target", "library", "handlers", "form", "radial"} (None for the XLA program; form and radial:
+    `eval.ffi.describe`).  ffi_precision="mixed" (off by
     default; a float64 bundle with the kernel): the kernel's product basis in float32, the rest float64
     (`eval.ffi.kernel_inputs`): faster for large models, forces within ~1e-5 eV/A, energies with ~0.1 meV
     of noise in 200 atoms (minimise with a force-based `min_style` such as fire, not a line search).
@@ -573,7 +574,8 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
         target = kernel.TARGET_GPU if gpu else kernel.TARGET
         energy_fn, force_fn = kernel.lammps_fns(model, n_species, type_map, rcut, gpu, ffi_precision)
         lib = Path(kernel.library(gpu=gpu) if ffi is True else ffi).resolve()   # first: fail early
-        ffi_meta = {"target": target, "library": str(lib), "handlers": kernel.handlers(lib, gpu)}
+        ffi_meta = {"target": target, "library": str(lib), "handlers": kernel.handlers(lib, gpu),
+                    **force_fn.kernel}            # "form", "radial": what the kernel runs (`eval.ffi.describe`)
     else:
         energy_fn = make_energy_fn(model, n_species, layout, k_dense,
                                    None if type_map == list(range(len(model_z))) else type_map,

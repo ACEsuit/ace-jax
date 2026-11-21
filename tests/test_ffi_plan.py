@@ -113,6 +113,12 @@ def emulate(attrs, consts, zc, A_in):
     return e, wA
 
 
+@pytest.fixture(autouse=True)
+def dag_form(monkeypatch):
+    """These tests are of the DAG pass: the GPU's default form is coupled where that has fewer operations."""
+    monkeypatch.setattr(ffi, "FORM", "dag")
+
+
 @pytest.fixture(scope="module", params=NAMES)
 def model(request):
     m, _, _ = load(str(FIXTURES / f"{request.param}.npz"))
@@ -156,7 +162,7 @@ def dag_pass_digest():
     import hashlib
     import re
     src = ffi.GPU_SOURCE.read_text()
-    body = src[src.index("    ace_dag(Model<R> m"):src.index("// Pass 3:")]
+    body = src[src.index("    ace_dag(Model<R> m"):src.index("// Pass 2 in coupled form")]   # (emulated in test_coupled)
     return hashlib.sha256(re.sub(r"\s+", "", re.sub(r"//[^\n]*", "", body)).encode()).hexdigest()[:16]
 
 

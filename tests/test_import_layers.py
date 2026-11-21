@@ -25,7 +25,7 @@ LAYERS = [
     *[(f"basis.{m}", FRAMEWORK, None) for m in
       ("spec", "coupling", "prior", "export", "embedding", "radial_init", "radial_ace1", "cg")],
     *[(f"eval.{m}", FRAMEWORK, None) for m in
-      ("harmonics", "radial", "splinify", "nlist", "aa_dag", "product", "features", "pace_radial")],
+      ("harmonics", "radial", "splinify", "nlist", "aa_dag", "product", "features", "pace_radial", "cg", "coupled")],
     ("_moved", FRAMEWORK, None),
     ("fit.linear", LINEAR, None), ("fit.linear.*", LINEAR, None),
     ("uq", UQ, None), ("uq.*", UQ, None),

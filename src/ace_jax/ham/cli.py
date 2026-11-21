@@ -239,7 +239,7 @@ def band_structure(calc, atoms, path=None, npoints=200, reference=None):
     bp = atoms.cell.bandpath(path, npoints=npoints, pbc=atoms.pbc)
     x, ticks, labels = bp.get_linear_kpoint_axis()
     p = calc.predictor
-    prep = p.prepare(atoms.positions, np.asarray(atoms.cell), atoms.numbers, atoms.pbc)
+    prep = p.prepare_auto(atoms.positions, np.asarray(atoms.cell), atoms.numbers, atoms.pbc)
     nel = calc.electrons(atoms.numbers)
     mu = lambda e: float(smeared_occupations(jnp.asarray(e), jnp.asarray(calc.weights), nel, calc.width, calc.smearing, calc.degeneracy)[1])
     out = dict(x=x, ticks=ticks, labels=np.asarray(labels), kpts=bp.kpts, grid_kpts=calc.kpts, grid_weights=calc.weights,

@@ -104,9 +104,7 @@ class HamiltonianCalculator(Calculator):
     def _blocks(self, atoms):
         p = self.predictor
         make_room(45_000)                                # a program per species pair (`operators.maps`)
-        on = p.onsite(atoms.positions, np.asarray(atoms.cell), atoms.numbers, atoms.pbc)
-        off = p.offsite(atoms.positions, np.asarray(atoms.cell), atoms.numbers, atoms.pbc)
-        return {c: {**off[c], **on[c]} for c in p.channels}
+        return p.blocks(atoms.positions, np.asarray(atoms.cell), atoms.numbers, atoms.pbc)
 
     # -- electronic structure, in the names ASE's band-structure and DOS tools call
     def get_hamiltonian(self, atoms=None):

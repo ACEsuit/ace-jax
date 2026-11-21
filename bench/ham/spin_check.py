@@ -47,7 +47,7 @@ print(f"{len(d.numbers)} atoms, {n} orbitals, {len(d.blocks['S'])} blocks")
 worst = 0.0
 for tag, ch in (("Spin-up eigenvalues", "H_up"), ("Spin-down eigenvalues", "H_dn")):
     k, ref = listed(tag)
-    e = eigh(bloch(d.blocks[ch], k), bloch(d.blocks["S"], k), eigvals_only=True)[:len(ref)]
+    e = eigh(bloch(d.blocks[ch], k), bloch(d.blocks["S"], k), eigvals_only=True, driver="gvx")[:len(ref)]
     worst = max(worst, np.abs(e - ref).max())
     print(f"  {ch} at k = {k}: {len(ref)} eigenvalues listed by FHI-aims, largest difference {np.abs(e - ref).max():.1e} eV")
 N = {"H_up": 0.0, "H_dn": 0.0}
@@ -55,7 +55,7 @@ ks = np.array([[a, b, c] for a in range(nk) for b in range(nk) for c in range(nk
 for k in ks:
     S = bloch(d.blocks["S"], k)
     for ch in N:
-        N[ch] += 0.5 * erfc((eigh(bloch(d.blocks[ch], k), S, eigvals_only=True) - mu) / width).sum() / len(ks)
+        N[ch] += 0.5 * erfc((eigh(bloch(d.blocks[ch], k), S, eigvals_only=True, driver="gvx") - mu) / width).sum() / len(ks)
 print(f"  electrons at FHI-aims' chemical potential: {N['H_up'] + N['H_dn']:.5f} (nuclear charge {int(d.numbers.sum())}); "
       f"moment {N['H_up'] - N['H_dn']:.4f} (FHI-aims prints {moment:.4f})")
 assert worst < 2e-5 and abs(N["H_up"] + N["H_dn"] - d.numbers.sum()) < 1e-3

@@ -47,7 +47,7 @@ def reference(name):
 
 
 def spectrum(H, S):
-    return scipy.linalg.eigh(0.5 * (H + H.T), 0.5 * (S + S.T), eigvals_only=True, check_finite=False)
+    return scipy.linalg.eigh(0.5 * (H + H.T), 0.5 * (S + S.T), eigvals_only=True, driver="gvx", check_finite=False)
 
 
 def compare(e, ref, n_occ):
