@@ -2,6 +2,47 @@
 
 ## Unreleased
 
+## 0.7.2 (2026-11-21)
+
+**Highlights.** The C++ and CUDA kernels for linear ACE are faster for models of correlation order 4. For
+the silicon model o4d20, LAMMPS is 3 times faster on an A100 (0.75 to 0.25 µs/atom-step in float64) and on
+128 CPU cores (1.53 to 0.49). On the A100, this model is now the lowest-cost model that reaches the accuracy
+target of the silicon benchmark. `aj export --format symmetrix` writes a model for the Symmetrix pair style.
+
+**Upgrading from 0.7.1.** Saved models and the output files are unchanged. No setting is necessary to get
+the speed-up in `ACECalculator`, `BatchCalculator` and JAX-MD. Export a LAMMPS bundle again to get the
+speed-up in LAMMPS. Energies and forces of the kernels agree with 0.7.1 to roundoff, with one exception:
+on a GPU, a model with analytic radials now uses those radials and not a table, so its forces change by
+the error of the table (approximately 1e-8 of the largest force). Set `ACEJAX_FFI_RADIAL=table` to get the
+table, and `ACEJAX_FFI_FORM=dag` to get the product basis of 0.7.1. The CUDA kernel compiles again on first
+use.
+
+### Changed
+
+- **Faster product basis in the C++ and CUDA kernels** (#182). For correlation order 4, the kernels now
+  calculate the product basis from coupled pairs of one-particle functions, and no longer from one node for
+  each product. The silicon model o4d20 has 68,335 nodes in the old form and 1,879 pair values in the new
+  form. The kernels select the form by operation count: the new form from o4d12 on the silicon ladder,
+  and the old form for order 3 and for orders above 4. LAMMPS on 128 cores of an EPYC 7742 (4,096 Si
+  atoms): o4d20 goes from 1.53 to 0.49 µs/atom-step in float64, and from 1.09 to 0.35 in mixed precision.
+  `calc.ffi` and the bundle's `ace_jax.ffi` record the form (`form`) and the radial (`radial`).
+- **The CUDA kernel uses analytic radials** (#182). For a model with a polynomial radial basis that is not
+  splined (maximum l of 8), the CUDA kernel calculates the radial functions and the harmonics in registers,
+  with no radial table. On an A100 with 32,768 Si atoms in LAMMPS, in µs/atom-step, float64 then float32:
+  o4d20 goes from 0.75 to 0.25 and from 0.45 to 0.15; o4d16 from 0.19 to 0.11 and from 0.13 to 0.07; o3d8
+  from 0.043 to 0.036 and from 0.043 to 0.028. Models with learned (splined) radials keep the table. The
+  kernel also does not sort the atoms by species when the model has one species.
+- The benchmark page and its cost-accuracy figure show the new timings (`docs/user/benchmarks.md`).
+
+### Added
+
+- **Export to Symmetrix** (#182). `aj export --format symmetrix` and
+  `ace_jax.export.symmetrix.export_symmetrix` write a linear ACE model as the JSON file that the
+  `symmetrix/ace` pair style of [Symmetrix](https://github.com/wcwitt/symmetrix) reads. ace-jax calls the
+  converter of the installed Symmetrix package and has no copy of the format. The command stops with a
+  message if the installed Symmetrix has no converter for ace-jax models. See
+  `docs/user/howto/lammps.md`.
+
 ## 0.7.1 (2026-11-20)
 
 **Highlights.** Two corrections to Hamiltonian models. The features of the atoms near a bond are now
