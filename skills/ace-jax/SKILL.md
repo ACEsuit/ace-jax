@@ -400,6 +400,9 @@ structures. User page: `docs/user/howto/hamiltonians.md`; measurements: `docs/de
   `aj eval` then prints their coverage, `HamiltonianCalculator.eigenvalue_half_widths(atoms, level=0.9, joint=False)` returns
   them. Constant per energy band, valid for structures like the calibration set only. An H-only model is scored (and calibrated)
   with the data's S for both spectra; the calculator then refuses to give half-widths (its eigenvalues use S = 1).
+  The same command calibrates the matrix elements: a half-width per channel, species pair, distance band (`--distance-bands`,
+  default 6; on-site separate) and shell pair, and one for a whole block; `aj eval` prints that coverage too, and
+  `HamiltonianCalculator.block_half_widths(atoms, channel=None, level=0.9, whole=False)` returns `{block key: array or number}`.
 - `aj ham fit --data DIR --out model.npz [--validation DIR] [--prior none|loo|evidence|press|<number>]`
   (`--site-rcut`, `--site-radials`, `--bond-radials`, `--bond-rcut`, `--coupled N L`, `--env R N L NB LB` or
   `--no-env`, `--bonds N` to subsample off-site blocks). The bond-environment group gives most of the

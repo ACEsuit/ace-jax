@@ -184,6 +184,26 @@ overlap of the calibration set. `eigenvalue_half_widths` then gives an error,
 because the eigenvalues of the calculator have no overlap. Fit H and S to get
 intervals from the calculator.
 
+### Intervals for the matrix elements
+
+`aj ham calibrate` also calibrates the errors of the matrix elements of each
+channel. `aj eval` prints the coverage of these intervals.
+
+```python
+h = calc.block_half_widths(atoms, level=0.9)               # an array for each block of H
+w = calc.block_half_widths(atoms, level=0.9, whole=True)   # one number for each block
+```
+
+- The half-width of an element is constant for a group. A group is one channel,
+  the species of the two atoms, one distance band and one pair of shells.
+  On-site blocks are a group of their own.
+- `--distance-bands` sets the number of distance bands (6 by default). Each
+  band has the same number of calibration blocks.
+- With `whole=True`, the number is a limit for the largest element error of
+  the block.
+- A half-width is infinite for a species pair that the calibration set does
+  not have, and for a group with too few blocks for the level.
+
 !!! warning
     The intervals are correct only for structures that are similar to the
     calibration set. They do not show that a structure is different from the

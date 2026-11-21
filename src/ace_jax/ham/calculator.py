@@ -138,6 +138,19 @@ class HamiltonianCalculator(Calculator):
                              "with that S (ham.uq.half_width on such eigenvalues), not for this calculator's")
         return uq.half_width(self.calibration, self.get_property("eigenvalues", atoms) - self.get_property("fermi_level", atoms), level, joint)
 
+    def block_half_widths(self, atoms=None, channel=None, level=0.9, whole=False):
+        """{block key: half-widths} of the calibrated intervals of the matrix elements of `channel`
+        (default: the Hamiltonian channel) at `level`, for the blocks of `get_hamiltonian`: an array
+        in each block's shape, or with `whole` one number for the block's largest element error
+        (`ham.uq.BlockErrors`: constant per species pair, distance band and shell pair)."""
+        from . import uq
+        if not (self.calibration and self.calibration.get("blocks")):
+            raise ValueError("this model has no block calibration: run `aj ham calibrate`")
+        atoms = self.atoms if atoms is None else atoms
+        c = channel or self.channel
+        return uq.block_half_widths(self.calibration["blocks"], self.predictor.orbitals, atoms.numbers, atoms.positions, np.asarray(atoms.cell),
+                                    self._blocks(atoms)[c], c, level, whole)
+
     def get_fermi_level(self):
         return self.get_property("fermi_level")
 
