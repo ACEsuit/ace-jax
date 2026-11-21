@@ -182,13 +182,23 @@ def _canonical(pack, Fa, ga, Aenv, dj, n_cpl, l_cpl):
                 Phi = (ph[:, None, :, None, None] * Z[:, :, None, :, :]).reshape(y.shape[0], -1, 2 * L + 1)
                 return jnp.einsum("xk,KkM->KxM", We, Phi)                # (K, c Q, M)
 
-            part = part + jax.lax.map(one, (Y, Aenv, phi2)).reshape(n, K, nc, Q, 2 * L + 1)
+            part = part + _rows(one, (Y, Aenv, phi2)).reshape(n, K, nc, Q, 2 * L + 1)
         P = jnp.moveaxis(part.reshape(n, K, nc, Q * (2 * L + 1)), -1, 0)          # (Q M, n, K, c)
         add = jax.ops.segment_sum(P[pack.Gq[k]] * pack.Gv[k][:, None, None, None], pack.Gij[k], num_segments=na * nb)
         flat = add if flat is None else flat + add
     if flat is None:
         return jnp.zeros((n, K, 1, na, nb), phi0.dtype)
     return jnp.moveaxis(flat, 0, -1).reshape(n, K, -1, na, nb)
+
+
+ROW_BATCH = 16      # atoms per step of the bond-environment loops on a GPU (RTX 4000 Ada, gold, float32: 303 us per atom one at a time, 86 at 16, 96 at 64, 112 all at once)
+
+
+def _rows(f, xs):
+    """f over the leading (atom) axis.  On a CPU one atom at a time: its (bonds x environment
+    atoms) intermediates fit the cache, where all atoms at once is a pass over hundreds of MB per
+    operation.  On a GPU that loop is sequential steps of a small program, so `ROW_BATCH` atoms a step."""
+    return jax.lax.map(f, xs) if jax.default_backend() == "cpu" else jax.lax.map(f, xs, batch_size=ROW_BATCH)
 
 
 @highest
@@ -210,7 +220,7 @@ def _env_side(e_rij, e_live, e_ch, rvec, mask, r_env, rmax, n_env, l_env, env_co
         R = _radial(jnp.clip(t, 0.0, 1.0), n_env)
         return jnp.einsum("Ken,ec,Key->Kcny", w[..., None] * R, ch, Yx).reshape(r.shape[0], -1, nlm)
 
-    return jax.lax.map(one, (e_rij, e_live, e_ch, rvec, mask))
+    return _rows(one, (e_rij, e_live, e_ch, rvec, mask))
 
 
 @highest

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Changed
+
+- **Hamiltonian models: block prediction on a GPU is approximately 2.8 times faster.** The features of
+  the atoms near a bond are now calculated for 16 atoms at a time on a GPU, not for one atom at a time.
+  `HamiltonianPredictor.prepare_device` now builds one neighbour list, at the largest cutoff, and gets the
+  other lists from it on the device. For bulk gold (64 atoms, default basis, RTX 4000 Ada, float32) the
+  time from the positions to all blocks decreases from 26.5 ms to 9.5 ms. `aj ham predict`, `aj ham bands`
+  and the `hamiltonian` property of `HamiltonianCalculator` use this path when JAX runs on a GPU and
+  matscipy-neighbours is built with CUDA. The new methods are `HamiltonianPredictor.blocks`,
+  `prepare_auto` and `device_lists`. Predictions on a CPU do not change.
+
 ## 0.7.1 (2026-11-20)
 
 **Highlights.** Two corrections to Hamiltonian models. The features of the atoms near a bond are now
