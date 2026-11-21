@@ -1213,3 +1213,62 @@ The intervals are 2 to 3 points under their level on average, and the spread bet
 is narrower than for the old default (0.48 to 0.91 at 0.68 with the leave-one-out spectra above; 40
 structures there, 10 here, so the comparison is weak).
 The bands away from the Fermi level are twice as wide as the one at it.
+
+## Calibration with the reference S, and of the matrix elements (2026-11-21)
+
+`aj eval` and `aj ham calibrate` now score a model of H alone with the data's S (both spectra),
+not S = 1. Gold, 10 test structures, window -12 to 5 eV: old default 2.14 meV (2.19 with S = 1).
+The calibration of the new default above was made with S = 1; with the reference S (30
+calibration structures, window -10 to 5 eV, 320,912 eigenvalues; test band RMSE 1.39 meV):
+
+| | 0.68 | 0.90 | 0.95 |
+|---|---|---|---|
+| half-width, every energy / meV | 1.28 | 2.25 | 2.81 |
+| half-width, whole window (joint) / meV | 9.16 | 10.35 | 11.19 |
+| test: eigenvalues inside | 0.696 | 0.907 | 0.953 |
+| test: range over structures | 0.57 to 0.83 | 0.82 to 0.98 | 0.90 to 0.99 |
+| test: structures wholly inside the joint width | 7 of 10 | 8 of 10 | 8 of 10 |
+
+Matrix elements (`ham.uq.BlockErrors`). Which groups the half-width of an element needs, coverage
+on the test structures at level 0.90 across the 42 groups distance band x angular-momentum pair
+(`ham-ref/work/blockcal/`):
+
+| groups of the calibration | number | coverage of the fine groups | of structures |
+|---|---|---|---|
+| one | 1 | 0.03 to 1.00 | 0.894 to 0.913 |
+| on-site, off-site | 2 | 0.26 to 1.00 | 0.894 to 0.914 |
+| distance bands | 7 | 0.54 to 1.00 | 0.890 to 0.924 |
+| angular-momentum pairs | 12 | 0.42 to 1.00 | 0.893 to 0.912 |
+| distance bands x angular-momentum pairs | 42 | 0.88 to 0.90 | 0.886 to 0.928 |
+
+Half-widths of the stored calibration (all shell pairs pooled, then a whole block), meV:
+
+| blocks | element 0.68 | 0.90 | 0.95 | whole block 0.68 | 0.90 | 0.95 |
+|---|---|---|---|---|---|---|
+| on-site | 3.18 | 7.66 | 11.63 | 20.29 | 28.45 | 32.13 |
+| to 5.36 Å | 0.453 | 1.212 | 1.857 | 3.47 | 6.29 | 7.73 |
+| 5.36 to 6.90 Å | 0.148 | 0.316 | 0.426 | 0.70 | 1.04 | 1.29 |
+| 6.90 to 7.84 Å | 0.094 | 0.198 | 0.263 | 0.44 | 0.57 | 0.64 |
+| 7.84 to 8.69 Å | 0.076 | 0.162 | 0.218 | 0.38 | 0.50 | 0.55 |
+| 8.69 to 9.32 Å | 0.055 | 0.111 | 0.146 | 0.25 | 0.33 | 0.37 |
+| beyond 9.32 Å | 0.029 | 0.065 | 0.087 | 0.14 | 0.19 | 0.22 |
+
+At one distance the off-site half-width at 0.90 differs fourfold between angular-momentum pairs
+(0.14 meV d-d to 0.59 meV p-p); on-site 4.5 (p-d) to 15.7 meV (s-s). Test coverage of the stored
+calibration: elements 0.679 / 0.900 / 0.950, single structures 0.656 to 0.726 / 0.886 to 0.928 /
+0.941 to 0.967, whole blocks 0.678 / 0.900 / 0.950. The elements of a structure do not share
+their error as its eigenvalues do, so constant widths per group serve here.
+
+Two further tests of model pairs, from the saved spectra and models (`ham-ref/work/views/`):
+
+- The converse of the disagreement score: with the largest model as the one in use, |e_A - e_B|
+  against a cheaper B ranks nothing per eigenvalue (Spearman 0.00 to 0.10, signed correlation
+  -0.04 to -0.15) and tracks the error per structure at 0.24 to 0.64; as a conformal width it
+  is wider on average (2.2 to 2.4 meV against 2.07 constant at 0.90). The difference is that of
+  the two errors and follows the worse model.
+- First-order perturbation theory from the cheaper model's eigenvectors, de = c^dag (H_B - H_A) c
+  (`pt.py`, 10 test structures, band RMSE / meV): old default 2.14 -> largest 1.28: first order
+  1.29, within 0.08 meV of the second solve; -> new default 1.39: 1.39 (0.07). No environment
+  55.2 -> new default 1.39: first order 5.78, second order (gaps damped at 2 meV) 3.65;
+  two-centre 66.4 -> largest 1.29: 31.1 and 17.2. At 576 functions the product costs 0.014 s a
+  k-point and a second eigenvalue-only solve 0.020 s, so it saves nothing at this size.
