@@ -4,6 +4,13 @@
 
 ### Changed
 
+- **Hamiltonian eigenvalues on a CPU come from LAPACK on the host.** `HamiltonianPredictor.bands`,
+  `block_bands` and the band energy (`band_energy`, `band_energy_fn`, `HamiltonianCalculator`) now
+  solve H(k) c = e S(k) c with `potrf`, `hegst` and `heevr` (blocked workspace) through a host
+  callback when JAX runs on a CPU. The compiled XLA solve took 4 times as long for eigenvalues at
+  2,304 functions on one core. `spectrum_fn` and `bands_fn`, which differentiate the eigenvalues,
+  and every GPU path are unchanged.
+
 - **`--prior evidence`, `loo` and `press`: the limit on the prior is part of the selection.** In 0.7.1
   the fit added the ridge to the prior after the selection, so the coefficients were not those of the
   model that the evidence was calculated for. The selection now has a lower limit on the ratio of the
