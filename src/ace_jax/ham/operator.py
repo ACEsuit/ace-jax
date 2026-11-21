@@ -10,6 +10,7 @@ from typing import NamedTuple
 import jax
 import jax.numpy as jnp
 import numpy as np
+import scipy.linalg as sla
 
 from ..eval.nlist import dense_graph, have_matscipy_neighbours, sparse_graph
 from ..operators import bond as B
@@ -54,8 +55,44 @@ def _eigvals_impl(H, S):
     return jnp.linalg.eigvalsh(0.5 * (Ht + Ht.conj().T))
 
 
-_eigvals = jax.jit(_eigvals_impl)
-_eigvals_k = jax.jit(jax.vmap(_eigvals_impl))             # a batch of k-points in one call
+def _host_eig(H, S, vectors=False):
+    """`_eigvals_impl` (or, with vectors, `_geig`) of NumPy matrices (..., n, n) by LAPACK on the host:
+    potrf, hegst and heevr with the workspace of its query.  On a CPU this is what the solvers
+    below call: XLA's CPU eigh took 4 times as long for eigenvalues (29.5 s against 7.8 s at
+    n = 2,304 on one core), and SciPy's own `eigh` passes the minimum workspace to its "gvd" and "evr"
+    drivers, with which LAPACK's tridiagonalisation is unblocked (1.6 times at n = 4,608)."""
+    H, S = np.asarray(H), np.asarray(S)
+    cplx, n = np.iscomplexobj(H), H.shape[-1]
+    potrf, gst, evr, lw = sla.get_lapack_funcs(("potrf", "hegst", "heevr", "heevr_lwork") if cplx else ("potrf", "sygst", "syevr", "syevr_lwork"), (H, S))
+    work = dict(zip(("lwork", "lrwork", "liwork") if cplx else ("lwork", "liwork"), sla.lapack._compute_lwork(lw, n, lower=1)))
+    E, C = np.empty(H.shape[:-1], S.real.dtype), np.empty(H.shape, H.dtype) if vectors else None
+    for i in np.ndindex(H.shape[:-2]):
+        L, info = potrf(S[i], lower=1)
+        if info:
+            raise np.linalg.LinAlgError(f"S(k) is not positive definite (potrf info {info})")
+        A, info = gst(H[i], L, itype=1, lower=1)             # L^-1 H L^-H, lower triangle
+        w, z, _, _, info = evr(A, compute_v=int(vectors), lower=1, overwrite_a=1, **work)
+        if info:
+            raise np.linalg.LinAlgError(f"heevr info {info}")
+        E[i] = w
+        if vectors:
+            C[i] = sla.solve_triangular(L, z, lower=True, trans="C", check_finite=False)
+    return (E, C) if vectors else E
+
+
+def _on_host():
+    return jax.default_backend() == "cpu"
+
+
+_eigvals_dev, _eigvals_k_dev = jax.jit(_eigvals_impl), jax.jit(jax.vmap(_eigvals_impl))
+
+
+def _eigvals(H, S):
+    return jnp.asarray(_host_eig(H, S)) if _on_host() else _eigvals_dev(H, S)
+
+
+def _eigvals_k(H, S):                                     # a batch of k-points in one call
+    return jnp.asarray(_host_eig(H, S)) if _on_host() else _eigvals_k_dev(H, S)
 
 
 @highest
@@ -269,6 +306,15 @@ def _geig(H, S):
     return e, jax.scipy.linalg.solve_triangular(L.conj().T, U, lower=False)
 
 
+def _geig_k(H, S):
+    """`_geig` of a batch of k-points: on a CPU a host callback to LAPACK (`_host_eig`), which the
+    trace form allows since the eigensolver is not differentiated."""
+    if not _on_host():
+        return jax.vmap(_geig)(H, S)
+    out = (jax.ShapeDtypeStruct(H.shape[:-1], jnp.finfo(H.dtype).dtype), jax.ShapeDtypeStruct(H.shape, H.dtype))
+    return jax.pure_callback(lambda h, s: _host_eig(h, s, vectors=True), out, H, S)
+
+
 @highest
 def _band_energy(hs, pos, occ, wk, volume):
     """`BandEnergy` of hs(positions, strain) -> (H(k), S(k)) by the trace form: the eigenproblem is
@@ -277,7 +323,7 @@ def _band_energy(hs, pos, occ, wk, volume):
     straining positions and cell together does; the Bloch phases depend on the cells only."""
     def trace(x):
         H, S = hs(*x)
-        e, C = jax.vmap(_geig)(jax.lax.stop_gradient(H), jax.lax.stop_gradient(S))
+        e, C = _geig_k(jax.lax.stop_gradient(H), jax.lax.stop_gradient(S))
         f, mu, mts = jax.tree.map(jax.lax.stop_gradient, occ(e, wk))
         f = f * wk[:, None]
         rho = jnp.einsum("kin,kn,kjn->kij", C, f, C.conj())
