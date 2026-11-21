@@ -995,8 +995,20 @@ for one species): job 2296065 on gpu005, the whole ladder, no control in the job
 | o3d8 | 0.039 / 0.032 | 0.036 / 0.028 |
 
 Only o3d8 moves clearly (8% in float64, 15% in float32) and float32 o4d14 to o4d20 by 3 to 8%. Float64 o4d14 and
-o4d16 are 3% slower, on another node, where the A pass alone was 22% faster on a Modal A100 (774 to 607 µs at o4d16):
-that pass is a small part of the step at these sizes, and the two nodes are not compared in one job.
+o4d16 are 3% slower than the gpu002 rows, so the two A passes were timed against each other on one GPU (gpu028, job
+2296138, `pair-gpu.sbatch`: the default, then `ACEJAX_FFI_GPU_FLAGS="-O3 -arch=sm_80 -DACEJAX_AN_DENSITY=0"`, the
+table A pass; float64, alternating, two repeats; µs/atom-step):
+
+| size | analytic A pass | table A pass | gain |
+|---|---|---|---|
+| o4d16 | 0.1094, 0.1094 | 0.1113, 0.1117 | 1.9% |
+| o4d14 | 0.0799, 0.0791 | 0.0826, 0.0836 | 4.3% |
+| o4d12 | 0.0540, 0.0516 | 0.0538, 0.0551 | 3.0% |
+| o3d8 | 0.0361, 0.0378 | 0.0380, 0.0385 | 3.4% |
+
+The analytic pass is faster at each size, so `kAnDensity` stays at 200. gpu028 repeats gpu005 (o4d16 0.109): the 3% is
+the difference between gpu002 and those nodes, not the pass. The gain in the step is 2 to 4%, less than the pass's own
+22% on a Modal A100 (774 to 607 µs at o4d16) gives by its share of the step (5%).
 
 CPU, 128 x 1, 4,096 Si (node008, job 2295569, `ladder-cpu.sbatch`: new float64, new mixed, main float64, main mixed,
 then the two new ones again). The timed loops are 0.1 to 0.3 s, and repeats on this node differ by up to 45%
