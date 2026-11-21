@@ -1158,8 +1158,8 @@ Eigenvalues (40 structures): score |e_A - e_B|.
   accuracy give nothing, and no score narrows the spread of coverage between structures (0.43 to
   0.89 at nominal 0.68, as with a constant width).
 - So the eigenvalue error of the default model is a bias that models of similar size share, and that
-  a larger basis removes in part. The off-site score does not carry over to eigenvalues, whose error
-  follows the on-site blocks.
+  a larger basis removes in part. The off-site score does not carry over to eigenvalues (a guess,
+  not tested here: their error follows the on-site blocks, where no pair disagrees usefully).
 - Side result: with these fits (first 32 structures by name, plain ridge) the band error is 1.28 meV
   for the largest architecture and 1.62 for the 4 Å environment against 2.14 for the default; the
   6 Å environment is worse (2.97).
