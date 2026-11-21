@@ -1072,3 +1072,44 @@ Joint (one score per structure, quantile of the 30 calibration scores), nominal 
 
 All of this is in distribution (bulk gold from one molecular-dynamics ensemble). Not done: block-level
 grouped scales (the saved block scores carry no group labels), and a test out of distribution.
+
+## Gold: H and S from one model (2026-11-21)
+
+Default model, 32 training structures, `aj ham fit` with channels H and S (7,974 coefficients, twice
+those of H alone; fit 69 s against 68 s on an RTX 4000 Ada). Ten test structures, 27 k-points, 11
+electrons per atom:
+
+| | S block RMSE | bands from own Fermi levels / meV | Fermi level / meV | DoS distance / meV |
+|---|---|---|---|---|
+| H predicted, S = 1 for model and reference (what `aj eval` does for a model without S) | | 2.19 | 3.85 | 4.18 |
+| H and S predicted, reference H and S | on-site 6.6e-6, off-site 1.2e-5 | 2.02 | 4.33 | 4.34 |
+
+On one structure (`ham-ref/work/gold_hs/diag.py`), against the reference H and S: predicted H with the
+reference S 2.79 meV; reference H with predicted S 0.27 meV; both predicted 2.60 meV. The overlap's
+error is a tenth of the Hamiltonian's in the bands, so S can be predicted with H at no cost in
+accuracy. Its blocks cost nothing more to evaluate than a further channel of the same features.
+
+`aj ham fit --validation` without `--nelectrons` counted 79 electrons per atom in the 9 valence
+functions, which put the Fermi level above the last band and the window on the highest states
+(reported band error 33.6 meV with S, 3.5 without). `HamiltonianCalculator.electrons` now raises when
+the electrons do not fit the orbitals.
+
+## MACE-H's Hermiticity violation as an error score, on gold (2026-11-21)
+
+MACE-H predicts a block and its reverse separately and symmetrises afterwards; its paper proposes
+the difference as a label-free error score. On our MACE-H predictions for gold (network trained on
+32 structures, unsymmetrised output, 10 test structures; `ham-ref/work/uq/hermiticity.py`):
+
+- mean |block - reverse^T| 0.25 meV against a mean block error of 0.41 meV (0.39 after symmetrising);
+- Spearman(violation, error of the symmetrised block) 0.89 over all blocks. Most of that is the bond
+  length (Spearman of error with bond length -0.93: short bonds have large elements and large
+  errors). Within bond-length bands it is 0.47 (below 3.5 Å), 0.58, 0.55, 0.76 and 0.67 (above
+  7 Å); on-site blocks 0.22;
+- per structure, mean violation against mean block error: Spearman 0.95 (10 structures).
+
+Our blocks are Hermitian by construction, so this score is zero. What it measures is the disagreement
+of two predictions of one quantity from different inputs (the messages at either end), which follows
+the model's bias; our posterior and jackknife spreads follow the variance only, and on gold the
+error is bias. The analogue to try here is a pair of predictions that differ in what they see
+(the site-coupled features of one end against the other; a smaller environment or degree against
+the full one), scaled by the conformal step.

@@ -74,6 +74,12 @@ def test_electron_counts():
     for spec, want in ((None, 14 + 6 + 14), (7.0, 7.0), ({14: 4, 6: 4}, 12.0)):
         c.nelectrons = spec
         assert c.electrons(np.array([14, 6, 14])) == want
+    from types import SimpleNamespace
+    c.predictor, c.degeneracy, c.nelectrons = SimpleNamespace(orbitals=SimpleNamespace(n_orb=lambda z: 4)), 2.0, None
+    with pytest.raises(ValueError, match="do not fit"):     # every electron of the atoms, a valence-only basis: 34 into 24 states
+        c.electrons(np.array([14, 6, 14]))
+    c.nelectrons = {14: 4, 6: 4}
+    assert c.electrons(np.array([14, 6, 14])) == 12.0
 
 
 def test_core_bands_are_left_out_of_the_energy_and_its_derivatives(setup):
