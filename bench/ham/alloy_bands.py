@@ -62,7 +62,7 @@ def fit(folder, out, n_test=16, projected=1, n_bonds=3000, threads=8):
         for name, ks in (("path", path.kpts), ("grid", monkhorst_pack(n))):
             S = bloch(t, t.blocks["S"], ks)
             for tag, blocks in (("dft", t.blocks["H"]), ("model", Hp)):
-                r[f"{name}_{tag}"] = np.array([eigh(h, s, eigvals_only=True) for h, s in zip(bloch(t, blocks, ks), S)])
+                r[f"{name}_{tag}"] = np.array([eigh(h, s, eigvals_only=True, driver="gvx") for h, s in zip(bloch(t, blocks, ks), S)])
         for tag in ("dft", "model"):
             e = r[f"grid_{tag}"]
             r[f"mu_{tag}"] = brentq(lambda m, e=e, nel=nel: erfc((e - m) / WIDTH).sum() / len(e) - nel, e.min(), e.max())

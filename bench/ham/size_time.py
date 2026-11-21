@@ -62,9 +62,9 @@ else:
     from scipy.linalg import eigh
     h, s = np.asarray(Hk[0], np.complex128), np.asarray(Sk[0], np.complex128)
     if len(h) > 3000:                                     # minutes on one core: once
-        t = time.perf_counter(); e = eigh(h, s, eigvals_only=True); rec["eig_s"] = time.perf_counter() - t
+        t = time.perf_counter(); e = eigh(h, s, eigvals_only=True, driver="gvx"); rec["eig_s"] = time.perf_counter() - t
     else:
-        rec["eig_s"], e = best(lambda: eigh(h, s, eigvals_only=True))
+        rec["eig_s"], e = best(lambda: eigh(h, s, eigvals_only=True, driver="gvx"))
 rec["e_min"] = float(np.min(e))
 rec["eig_peak_bytes"] = peak()
 print(json.dumps(rec), flush=True)
