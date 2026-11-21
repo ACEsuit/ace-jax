@@ -1013,7 +1013,7 @@ block. Eigenvalues: block dictionary, Bloch sums of H and S and the 8 generalise
 | 2c + site(2,2) + env(6,4,4,4) (default) | 0.89 | 2.39 | 12,100 | 4,500 |
 | 2c + site(4,4) + env(8,4,6,4), 20/16 radials | 1.12 | 2.62 | 9,600 | 4,100 |
 
-The block times are the difference of the two timed calls (0.87 and 0.92 s for the default model
-from `model_time.py` on the 152-structure fit agree). Against one SCF cycle (337 s) the default model's
+The block times are the difference of the two timed calls (`model_time.py` gave 0.92 s for the
+default model of the 152-structure fit). Against one SCF cycle (337 s) the default model's
 factors are 380 and 140. The eigensolves are now most of ace-jax's time at this size: all 8 k-points
 of this grid are time-reversal invariant, so real matrices would roughly halve them.
