@@ -395,10 +395,15 @@ structures. User page: `docs/user/howto/hamiltonians.md`; measurements: `docs/de
 - Data: a directory of DeepH-layout subdirectories (`hamiltonians.h5`, `overlaps.h5`; `up/` + `dn/` inside =
   collinear spin, channels `H_up`, `H_dn`, `S`) or of operator caches (`ace_jax.ham.cache.save`), one orbital
   basis for all. FHI-aims output goes through Quoll.jl (`ham/julia/ingest.jl`).
+- `aj ham calibrate --model model.npz --data DIR` (structures the fit did not use; same `--kpts`, `--nelectrons`, `--width` as
+  later predictions): split-conformal half-widths of the eigenvalues per energy band and level, stored in the model file;
+  `aj eval` then prints their coverage, `HamiltonianCalculator.eigenvalue_half_widths(atoms, level=0.9, joint=False)` returns
+  them. Constant per energy band, valid for structures like the calibration set only.
 - `aj ham fit --data DIR --out model.npz [--validation DIR] [--prior none|loo|evidence|press|<number>]`
   (`--site-rcut`, `--site-radials`, `--bond-radials`, `--bond-rcut`, `--coupled N L`, `--env R N L NB LB` or
   `--no-env`, `--bonds N` to subsample off-site blocks). The bond-environment group gives most of the
-  accuracy and most of the cost. With many elements or nearly dependent overlaps use `--prior evidence`:
+  accuracy and most of the cost. Default `--env 5 8 4 6 4`; `5 6 4 4 4` (the default to 0.7.2) is ~1.2x faster to predict,
+  ~2x to fit, with 1.5x (gold) to 2.7x (aluminium) the band error. With many elements or nearly dependent overlaps use `--prior evidence`:
   without a prior one spurious eigenvalue can appear that the block errors do not show (`loo` did not remove
   it on the four-element alloy, and costs hours and tens of GB of scratch there). `--noise-floor SIGMA`
   (data units; the SCF scatter of H, ~1e-7 to 3e-6 eV at `sc_accuracy_rho 1e-5`) bounds the evidence's noise

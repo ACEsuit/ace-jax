@@ -4,6 +4,13 @@
 
 ### Changed
 
+- **`aj ham fit` has a larger default bond environment: `--env 5 8 4 6 4` (was `5 6 4 4 4`).** Fits with
+  the default options change. With 32 training structures the band error from own Fermi levels decreased
+  from 2.15 to 1.41 meV on bulk gold, and from 18.8 to 6.9 meV on bulk aluminium (34 structures, H and S).
+  The cost increased: 17.2 against 14.3 ms per atom for the blocks on one CPU core, and 1.5 to 2.2 times
+  the fit time. `--env 5 6 4 4 4` gives the basis of 0.7.2. `BondBasis` in Python has no bond environment
+  unless given one, and does not change.
+
 - **`--prior evidence`, `loo` and `press`: the limit on the prior is part of the selection.** In 0.7.1
   the fit added the ridge to the prior after the selection, so the coefficients were not those of the
   model that the evidence was calculated for. The selection now has a lower limit on the ratio of the
@@ -26,7 +33,19 @@
   2,304 functions on one core. `spectrum_fn` and `bands_fn`, which differentiate the eigenvalues,
   and every GPU path are unchanged.
 
+### Fixed
+
+- `HamiltonianCalculator` and `aj eval` now refuse an electron count that does not fit in the orbitals of
+  the model. For a model with valence orbitals only, give the valence electrons (`--nelectrons 79:11`).
+  Before, the Fermi level was above the last band and the band metrics were wrong, with no message.
+
 ### Added
+
+- **`aj ham calibrate` gives calibrated intervals for the eigenvalues of a Hamiltonian model.** The command
+  uses structures with reference blocks that the fit did not use. It stores a half-width for each energy
+  band and each level (0.68, 0.9 and 0.95 by default) in the model file. `aj eval` then prints the coverage
+  of the intervals, and `HamiltonianCalculator.eigenvalue_half_widths` returns the half-widths. The intervals
+  are correct only for structures that are similar to the calibration set.
 
 - `aj ham fit --noise-floor SIGMA` (`noise=` of `fit_onsite` and `fit_offsite`) sets the smallest noise
   of H that `--prior evidence` can select, in the unit of the data. The difference of H between SCF
