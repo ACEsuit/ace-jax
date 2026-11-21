@@ -115,8 +115,8 @@ class BlockErrors:
     Groups (Mondrian): the channel, the species of the two atoms, on-site or one of `n_dist`
     distance bands (equal numbers of calibration blocks), and the pair of shells an element
     couples.  On bulk gold the half-width at 0.9 falls from 1.2 meV for the nearest bonds to
-    0.07 meV for the longest and is 7.7 meV on-site, and at one distance differs fourfold
-    between shell pairs: one width per distance band left the coverage of the shell pairs
+    0.07 meV for the longest and is 7.7 meV on-site, and over the off-site blocks differs fourfold
+    between angular-momentum pairs: one width per distance band left the coverage of the shell pairs
     between 0.54 and 1.00 at 0.9, distance bands times shell pairs between 0.88 and 0.90
     (docs/dev/ham-results.md, 2026-11-21).  `whole`: a width for the largest element error of a
     block, per distance band.  Unlike the eigenvalues, the elements of one structure do not share
