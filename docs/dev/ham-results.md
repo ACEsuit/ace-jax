@@ -1210,5 +1210,6 @@ Coverage on the 10 test structures (`aj eval`; band RMSE there 1.58 meV in this 
 | 0.95 | 0.934 | 0.88 to 0.98 | 10 of 10 |
 
 The intervals are 2 to 3 points under their level on average, and the spread between structures
-is narrower than for the old default (0.48 to 0.91 at 0.68 with the leave-one-out spectra above).
+is narrower than for the old default (0.48 to 0.91 at 0.68 with the leave-one-out spectra above; 40
+structures there, 10 here, so the comparison is weak).
 The bands away from the Fermi level are twice as wide as the one at it.
