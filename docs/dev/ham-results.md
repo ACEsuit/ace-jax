@@ -992,3 +992,28 @@ Experiment (`ham-ref/work/uq/gold_uq.py`): gold default model, 4 training struct
 - **No shape ranks the errors within these structures** (Spearman 0.09 to 0.15): the test set is in distribution. Whether the jackknife shape separates familiar from unfamiliar structures needs structures that differ (strained gold; the NbFeSb types).
 - Block elements: the noise per shell pair stays calibrated in every run (rms z 1.03 to 1.08).
 - Next: scales by group (Mondrian: on-site / off-site, shell pair, bond-length band; structure type and energy band for eigenvalues), joint scores per structure (largest |error| / sigma over the states; Mahalanobis distance in the draws' covariance; a band for the DoS curve), on held-out structures; then an out-of-distribution test.
+
+## Gold, 64 atoms: FHI-aims and ace-jax on the same core (2026-11-21)
+
+One core of mnf148 (Xeon Gold 6130, core 24, `OMP_NUM_THREADS=1`), test structure `run_Aims_2l_957yc`
+of the MACE-H gold data, Gamma-centred 2 x 2 x 2 k-points (8).
+
+FHI-aims 261002, PBE, atomic ZORA, Gaussian smearing 0.05 eV, light defaults (3,584 basis functions),
+real-space H and S written: 10,771 s for 32 SCF cycles. Of that: solution of the Kohn-Sham equations
+4,474 s, density update 2,984 s, integrations 2,601 s, Hartree multipole sum 631 s.
+
+ace-jax, models fitted to 32 structures (`gold_grid3`), float64, 576 valence functions. The models
+predict H; S is the reference data's (not timed: two-centre integrals). Blocks: positions to every H
+block. Eigenvalues: block dictionary, Bloch sums of H and S and the 8 generalised eigensolves
+(host LAPACK path, complex matrices), 1.5 s for every model.
+
+| model | blocks / s | positions to eigenvalues / s | FHI-aims / blocks | FHI-aims / eigenvalues |
+|---|---|---|---|---|
+| 2c | 0.054 | 1.54 | 200,000 | 7,000 |
+| 2c + site(2,2) + env(6,4,4,4) (default) | 0.89 | 2.39 | 12,100 | 4,500 |
+| 2c + site(4,4) + env(8,4,6,4), 20/16 radials | 1.12 | 2.62 | 9,600 | 4,100 |
+
+The block times are the difference of the two timed calls (0.87 and 0.92 s for the default model
+from `model_time.py` on the 152-structure fit agree). Against one SCF cycle (337 s) the default model's
+factors are 380 and 140. The eigensolves are now most of ace-jax's time at this size: all 8 k-points
+of this grid are time-reversal invariant, so real matrices would roughly halve them.
