@@ -4,6 +4,12 @@
 
 ### Changed
 
+- **`--prior evidence`, `loo` and `press`: the limit on the prior is part of the selection.** In 0.7.1
+  the fit added the ridge to the prior after the selection, so the coefficients were not those of the
+  model that the evidence was calculated for. The selection now has a lower limit on the ratio of the
+  noise to the prior scale, such that the prior is at least the ridge on each coefficient. The results
+  of such fits change slightly from 0.7.1.
+
 - **Hamiltonian models: block prediction on a GPU is approximately 2.8 times faster.** The features of
   the atoms near a bond are now calculated for 16 atoms at a time on a GPU, not for one atom at a time.
   `HamiltonianPredictor.prepare_device` now builds one neighbour list, at the largest cutoff, and gets the
@@ -19,6 +25,13 @@
   callback when JAX runs on a CPU. The compiled XLA solve took 4 times as long for eigenvalues at
   2,304 functions on one core. `spectrum_fn` and `bands_fn`, which differentiate the eigenvalues,
   and every GPU path are unchanged.
+
+### Added
+
+- `aj ham fit --noise-floor SIGMA` (`noise=` of `fit_onsite` and `fit_offsite`) sets the smallest noise
+  of H that `--prior evidence` can select, in the unit of the data. The difference of H between SCF
+  calculations of the same structure is a measured value for it: approximately 1e-7 eV for off-site blocks
+  and 3e-6 eV for on-site blocks (FHI-aims, `sc_accuracy_rho 1e-5`, aluminium).
 
 ## 0.7.2 (2026-11-21)
 
