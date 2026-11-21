@@ -114,6 +114,10 @@ blocks and 3e-6 eV for on-site blocks.
 `aj ham fit --validation` and `aj eval --model gold.npz --data validation/`
 print the same tables.
 
+For a model without an overlap, the eigenvalues of the model and of the
+reference are both calculated with the overlap of the reference structures.
+If the structures have no overlap, the two spectra use S = 1.
+
 - **Blocks**: the error of the matrix elements, for the on-site and the
   off-site blocks of each channel.
 - **Bands at a common zero**: the eigenvalue error with the two spectra as
@@ -174,6 +178,11 @@ reference is not larger than the half-width.
 
 Use the same `--kpts`, `--width`, `--smearing` and `--nelectrons` for the
 calibration and for the predictions.
+
+For a model without an overlap (`--channels H`), the calibration uses the
+overlap of the calibration set. `eigenvalue_half_widths` then gives an error,
+because the eigenvalues of the calculator have no overlap. Fit H and S to get
+intervals from the calculator.
 
 !!! warning
     The intervals are correct only for structures that are similar to the

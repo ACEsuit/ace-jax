@@ -391,7 +391,8 @@ structures. User page: `docs/user/howto/hamiltonians.md`; measurements: `docs/de
 - `aj ham calibrate --model model.npz --data DIR` (structures the fit did not use; same `--kpts`, `--nelectrons`, `--width` as
   later predictions): split-conformal half-widths of the eigenvalues per energy band and level, stored in the model file;
   `aj eval` then prints their coverage, `HamiltonianCalculator.eigenvalue_half_widths(atoms, level=0.9, joint=False)` returns
-  them. Constant per energy band, valid for structures like the calibration set only.
+  them. Constant per energy band, valid for structures like the calibration set only. An H-only model is scored (and calibrated)
+  with the data's S for both spectra; the calculator then refuses to give half-widths (its eigenvalues use S = 1).
 - `aj ham fit --data DIR --out model.npz [--validation DIR] [--prior none|loo|evidence|press|<number>]`
   (`--site-rcut`, `--site-radials`, `--bond-radials`, `--bond-rcut`, `--coupled N L`, `--env R N L NB LB` or
   `--no-env`, `--bonds N` to subsample off-site blocks). The bond-environment group gives most of the
