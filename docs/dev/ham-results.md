@@ -1017,3 +1017,58 @@ The block times are the difference of the two timed calls (`model_time.py` gave 
 default model of the 152-structure fit). Against one SCF cycle (337 s) the default model's
 factors are 380 and 140. The eigensolves are now most of ace-jax's time at this size: all 8 k-points
 of this grid are time-reversal invariant, so real matrices would roughly halve them.
+
+## Eigenvalue uncertainty on gold: conformal scales (2026-11-21)
+
+Model fitted to 32 structures (leave-structure-out prior), 16 jackknife draws with shared weights,
+with and without block noise. Calibration: 30 further training-set structures not used in the fit.
+Test: the 10 test structures. 27 k-points, eigenvalues from each spectrum's own Fermi level, window
+-10 to 5 eV, sorted by the predicted eigenvalue. Script and log: `ham-ref/work/uq/conformal.py`,
+`conformal_n32_loo.log` (not in the repository).
+
+Pointwise (one eigenvalue; split conformal on |error| / sigma, the eigenvalues of all calibration
+structures pooled), nominal 0.90:
+
+| shape | scale | coverage | by structure | by energy band | mean half-width / meV |
+|---|---|---|---|---|---|
+| constant | one | 0.907 | 0.80-0.98 | 0.77-0.94 | 3.94 |
+| constant | per energy band | 0.906 | 0.81-0.98 | 0.88-0.92 | 3.93 |
+| jackknife | one | 0.904 | 0.81-0.98 | 0.86-0.99 | 4.43 |
+| jackknife | per energy band | 0.905 | 0.80-0.98 | 0.89-0.92 | 4.11 |
+| jackknife + noise | one | 0.911 | 0.80-0.99 | 0.79-1.00 | 4.71 |
+| jackknife + noise | per energy band | 0.910 | 0.78-0.98 | 0.88-0.93 | 4.16 |
+
+Energy bands: edges -10, -6, -4, -2, 0, 2, 5 eV. The same pattern at 0.68 and 0.95.
+
+- One scale gives the nominal marginal coverage for every shape. A scale per energy band (Mondrian)
+  brings every band to within 0.03 of nominal; with one scale the bands range over 0.2.
+- No shape is better than a constant in distribution: the jackknife shapes give wider intervals
+  at the same coverage, and Spearman(|error|, sigma) is 0.06. The raw rms z of jackknife + noise
+  goes from 2.7 in the lowest band to 1.0 in the highest, which is what the per-band scale removes.
+- Coverage by structure at nominal 0.68 is 0.48 to 0.91: the error of a structure is largely common
+  to its eigenvalues, so pooled eigenvalues are not exchangeable and a per-eigenvalue statement
+  holds on average over structures only.
+
+Joint (one score per structure, quantile of the 30 calibration scores), nominal 0.9, 10 test structures:
+
+| score | test structures covered | mean half-width |
+|---|---|---|
+| largest \|error\| / sigma, constant | 0.8 | 14.1 meV |
+| largest \|error\| / sigma, jackknife | 0.9 | 15.0 meV |
+| largest \|error\| / sigma, jackknife + noise | 0.7 | 16.5 meV |
+| Mahalanobis, draws' covariance + (0.5 meV)^2 | 0.9 | (ellipsoid) |
+| Mahalanobis, draws' covariance + (2 meV)^2 | 0.9 | (ellipsoid) |
+| DoS band (0.1 eV broadening), constant | 0.9 | 0.028 of a mean DoS of 0.87 per atom per eV |
+| DoS band, shape from the draws | 0.6 | 0.012 |
+
+- A band that holds the whole window of a structure is 3.6 times as wide as the pointwise one.
+- 10 to 40 % of each test structure's squared error lies in the span of the 16 draws (0.2 % for
+  random directions): the draws hold the main direction of the error (a guess: the shift of the
+  d band against the s band from the on-site blocks; not checked), though not its size.
+- The DoS band shaped by the draws is under half the width of the constant one and covers only
+  6 of 10 structures at nominal 0.9: the draws' DoS spread is too small where the errors are.
+- With 30 calibration and 10 test structures, a joint coverage has a resolution of 0.1 and a
+  standard error of about 0.1.
+
+All of this is in distribution (bulk gold from one molecular-dynamics ensemble). Not done: block-level
+grouped scales (the saved block scores carry no group labels), and a test out of distribution.
