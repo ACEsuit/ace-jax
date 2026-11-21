@@ -1087,7 +1087,7 @@ electrons per atom:
 On one structure (`ham-ref/work/gold_hs/diag.py`), against the reference H and S: predicted H with the
 reference S 2.79 meV; reference H with predicted S 0.27 meV; both predicted 2.60 meV. The overlap's
 error is a tenth of the Hamiltonian's in the bands, so S can be predicted with H at no cost in
-accuracy. Its blocks cost nothing more to evaluate than a further channel of the same features.
+accuracy. The prediction time with the second channel was not measured.
 
 `aj ham fit --validation` without `--nelectrons` counted 79 electrons per atom in the 9 valence
 functions, which put the Fermi level above the last band and the window on the highest states
