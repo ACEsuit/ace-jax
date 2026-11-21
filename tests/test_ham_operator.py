@@ -131,6 +131,31 @@ def test_device_lists_give_the_same_matrices(models):
                 assert np.abs(A - Bm).max() < 1e-10 * max(1.0, np.abs(A).max()), (seed, k, c)
 
 
+@pytest.mark.parametrize("env", [False, True])
+def test_device_path_gives_the_same_blocks(models, env):
+    """`prepare_device` with the site, bond and environment lists cut from one list inside the
+    compiled program: same H(k), S(k) and block dictionary as the host-list path, with atoms
+    displaced by lattice vectors (the image labels follow the positions as given) and for a
+    structure whose neighbour counts outgrow the first one's slots."""
+    need_gpu_list()
+    hp = _env_predictor(models) if env else HamiltonianPredictor(*models)
+    for seed, squeeze in ((0, 1.0), (2, 1.0), (2, 0.9)):
+        pos, cell, numbers = structure(seed)
+        pos, cell = squeeze * pos, squeeze * cell
+        pos = pos + np.random.default_rng(seed).integers(-2, 3, pos.shape) @ cell
+        a, b = hp.prepare(pos, cell, numbers), hp.prepare_device(pos, cell, numbers)
+        assert bool(b.reverse_ok) and a.n_orb == b.n_orb
+        for k in ((0.0, 0.0, 0.0), (0.31, -0.2, 0.45)):
+            for c in CH:
+                A, Bm = np.asarray(hp.hk(a, k, c)), np.asarray(hp.hk(b, k, c))
+                assert np.abs(A - Bm).max() < 1e-10 * max(1.0, np.abs(A).max()), (seed, k, c)
+        host = {c: {**hp.offsite(pos, cell, numbers)[c], **hp.onsite(pos, cell, numbers)[c]} for c in CH}
+        mine = hp.blocks(pos, cell, numbers)
+        for c in CH:
+            assert set(host[c]) == set(mine[c])
+            assert max(np.abs(np.asarray(host[c][key]) - mine[c][key]).max() for key in host[c]) < 1e-10
+
+
 def test_device_path_uploads_nothing_but_its_inputs(models):
     """After the first (compiling) call, positions to eigenvalues runs with JAX's host-to-device
     transfers disallowed: `prepare_device` uploads the positions, cell and species explicitly

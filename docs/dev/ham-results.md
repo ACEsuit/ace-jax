@@ -915,5 +915,51 @@ FHI-aims 261002 on 16 MPI ranks (its own time accounting) against the model rout
 
 - ace-jax's times are those of the 0.7.0 models to 2 % (the midpoint fix costs nothing); the accuracies are those of the midpoint section.
 - The networks gain little from 32 to 64 structures (MACE-H 4.11 to 3.76 meV); the 5.32 meV of the earlier table was a run stopped by its time limit.
-- **ACEhamiltonians.jl is basis-limited at these degrees**: 8/10 does not improve from 1 to 32 structures. The paper's degrees (10/12 to 14/14) are running.
+- **ACEhamiltonians.jl is basis-limited at these degrees**: 8/10 does not improve from 1 to 32 structures. The paper's degrees (10/12 to 14/14): the section of 2026-11-21.
 - **A type instability in ACE.jl 0.12.22** (`evaluate!(AA, basis::PIBasis, config)`: the one-particle values are inferred as an abstract `Vector`, so each of the products dispatches dynamically) is 2.6 to 7.5 times of its cost. A function barrier removes it (overrides kept outside the repository; dashed line of the figure). On the full training set the 8/10 predictions with and without it differ by at most 2.6 meV in a block (RMS 0.23 on-site, 0.06 off-site: LSQR, not the basis values, which agree to 6e-17), and the band error is the same. With it ACEhamiltonians.jl 8/10 is 180 times ace-jax's largest model in cost, at 12 times its error.
+
+## Gold: ACEhamiltonians.jl at the paper's degrees (2026-11-21)
+
+Degrees 10/12, 12/14 and 14/14 (on-site order 2 / off-site order 1; 7,639, 12,127 and 13,551 basis functions), 32 training structures, fitted and predicted with the type instability removed (fits 5.7, 12.1 and 12.4 h on 40 cores).
+
+| Degrees | ms per atom, one core | H MAE / meV | Band RMSE from own Fermi levels / meV |
+|---|---|---|---|
+| 10/12 | 5,575 | 0.429 | 9.45 |
+| 12/14 | 9,015 | 0.311 | 5.19 |
+| 14/14 | 9,522 | 0.311 | 5.21 |
+
+- Times: 10/12 on the reference machine (Xeon Gold 6130; 5,607 on the Gold 6230 the fits ran on, 0.6 % apart). 12/14 and 14/14 are the Gold 6230's; their retiming on the reference machine is running.
+- **At its published degrees ACEhamiltonians.jl reaches 5.2 meV**, between MACE-H (4.11) and DeepH-E3 (8.40) at the same 32 structures, at 35 times MACE-H's one-core cost with the instability removed. ace-jax's default model is at 2.15 meV for 14.3 ms per atom: 630 times cheaper than 12/14 at 0.4 of its error.
+- The on-site degree is converged at 12 (12/14 and 14/14 agree to 0.02 meV); the error left is the off-site model's.
+
+## Block prediction on a GPU: profile, and what was changed (2026-11-21)
+
+Gold default model (2c + site(2,2) + env(6,4,4,4)), H, RTX 4000 Ada, float32; tiles of the 64-atom test cell (233 bonds per atom). Stages of `OffsitePredictor.dense` at 512 atoms, µs per atom:
+
+| Stage | before | now |
+|---|---|---|
+| off-site blocks, compiled program | 303 | 86 |
+| bond list, host | 60 | 60 |
+| site and environment lists, pair layouts, host | 17 | 17 |
+| blocks to the host, selection | 12 | 12 |
+| site features, compiled | 2 | 2 |
+
+- **The bond-environment loops ran one atom at a time** (`lax.map` in `_canonical` and `_env_side`, chosen for the CPU cache): 512 sequential steps of a small program on a GPU. `offsite_fast._rows` now takes `ROW_BATCH` = 16 atoms a step on a GPU (4: 164, 8: 131, 16: 121, 32: 122, 64: 131 µs per atom for the device path at 512 atoms; all at once is slower than 16) and one atom on a CPU as before. Same blocks (float64: 7e-13).
+- **Site features are 1 % of the call**, so the potential's CUDA kernel (which computes the same A and AA) has nothing to gain here; the remaining device time is the bond-environment contraction and the scatter into blocks.
+- **The device path made three neighbour-list calls** (site, bond, environment cutoffs; matscipy-neighbours' CUDA backend, handed over by DLPack), each with a download to size its slots: 6.5 ms of 12.4 ms at 64 atoms. `prepare_device` now makes one, at the largest cutoff, and `_one_list` cuts the three lists from it inside the compiled program (a running count and a scatter per row, linear). Their slot counts are kept between calls and checked after each: one small download, after the program. One call of the library is 2.8 ms at 64 atoms and 7.0 ms at 1,024 (its CPU build: 1.3 and 20 ms), which is now the floor for small cells.
+- `HamiltonianPredictor.blocks` (and through it the calculator's `hamiltonian` property and `aj ham predict`) and `prepare_auto` (`aj ham bands`) take the device path where it can run (`device_lists()`); elsewhere they are unchanged.
+
+Positions to blocks, µs per atom, float32:
+
+| | 64 atoms | 256 | 1,024 |
+|---|---|---|---|
+| blocks left on the device, before (three lists, atom loop) | 414 | | 332 (512 atoms) |
+| blocks left on the device, now | 148 | 122 | 116 |
+| dictionary of blocks on the host, before (host lists) | 583 | | |
+| dictionary of blocks on the host, now | 231 | | |
+
+- 64 atoms: 9.5 ms per structure, 2.8 times faster; against MACE-H's 3.5 ms per atom on this card, 24 times.
+- Building the Python dictionary is 80 µs per atom (15 k blocks for 64 atoms): consumers that can should take `Prepared`'s arrays.
+- An all-pairs neighbour list inside the program (no library call at all) was tried: 6.4 ms at 64 atoms, level with the library at 1,024. Not kept: it is quadratic in the atoms.
+- Float32 run-to-run differences of the blocks (scatter order on the GPU): largest 0.35 meV, mean 0.001 meV for this model; 4 meV and 0.015 meV for the largest model.
+- Not yet measured: float64 on an A100; `band_energy_device` still makes three list calls.

@@ -86,6 +86,8 @@ for code, col in OTHERS:                                # the other codes: every
     pts = sorted((alt[sz], v, sz) for (sz, m), v in small.get(code, {}).items() if m == nb and sz in alt)
     if pts:
         b.plot([q[0] for q in pts], [q[1] for q in pts], color=col, marker="s", ms=6, mfc="white", mew=1.5, ls="--", lw=1.5)
+        for i, (x, y, sz) in enumerate(q for q in pts if q[2] not in T.get(code, {})):   # sizes run only with it removed: named here
+            b.annotate(sz, (x, y), xytext=(7, 5 if i % 2 else -4), textcoords="offset points", va="center", fontsize=6.5, color=INK)
         b.annotate("type instability\nremoved", max(pts, key=lambda q: q[1])[:2], xytext=(-8, 0), textcoords="offset points", ha="right", va="center", fontsize=7, color=INK, linespacing=1.1)
 b.set_xscale("log"); b.set_xlabel(f"Block prediction / ms per atom\n({T.get('machine', 'one CPU core')}; {nb} training structures)")
 from matplotlib.ticker import FuncFormatter, NullFormatter
