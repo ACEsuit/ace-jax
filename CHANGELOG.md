@@ -40,6 +40,11 @@
   of the intervals, and `HamiltonianCalculator.eigenvalue_half_widths` returns the half-widths. The intervals
   are correct only for structures that are similar to the calibration set.
 
+- **`aj ham calibrate` also gives calibrated intervals for the matrix elements.** It stores a half-width for
+  each channel, species pair, distance band (`--distance-bands`, 6 by default; on-site blocks apart) and
+  pair of shells, and a half-width for the largest element error of a block. `aj eval` prints their
+  coverage. `HamiltonianCalculator.block_half_widths` returns them for the blocks of a structure.
+
 - `aj ham fit --noise-floor SIGMA` (`noise=` of `fit_onsite` and `fit_offsite`) sets the smallest noise
   of H that `--prior evidence` can select, in the unit of the data. The difference of H between SCF
   calculations of the same structure is a measured value for it: approximately 1e-7 eV for off-site blocks

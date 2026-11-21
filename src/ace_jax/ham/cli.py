@@ -92,11 +92,12 @@ def _filled(blocks, keys, numbers, orb):
     return {k: np.asarray(blocks[k]) if k in blocks else np.zeros((orb.n_orb(int(numbers[k[3]])), orb.n_orb(int(numbers[k[4]])))) for k in keys}
 
 
-def score(calc, data, window, metrics_out=None, blocks_out=None, pairs=None):
+def score(calc, data, window, metrics_out=None, blocks_out=None, pairs=None, block_errors=None):
     """Print the block errors of `calc`'s model on the reference structures under `data`, and the
     electronic-structure errors of its eigenvalues against the reference's on the calculator's
     k-points (`ham.metrics`).  Returns (block error table, metrics summary or None).  pairs: a list that
     receives each structure's (reference, predicted) eigenvalues from their own Fermi levels (`ham.uq`).
+    block_errors: a `uq.BlockErrors` that receives every structure's block errors.
     A model with a calibration (`aj ham calibrate`) also gets the coverage of its intervals here.
     A model without an overlap is scored with the data's S where it has one (its H and the reference
     H in the same generalised problem; summary["overlap"] "reference"), else with S = 1 ("identity")."""
@@ -105,6 +106,10 @@ def score(calc, data, window, metrics_out=None, blocks_out=None, pairs=None):
     ch, orb = calc.predictor.channels, calc.predictor.orbitals
     names = block_names(data)
     err, per, bad, spectra, overlap = {}, [], [], ([] if pairs is None else pairs), None
+    held = getattr(calc, "calibration", None) if pairs is None else None      # a calibrated model being scored (not calibrated)
+    if held and held.get("blocks") and block_errors is None:
+        from . import uq
+        block_errors = uq.BlockErrors(orb)
     print(f"{len(names)} reference structures; eigenvalues on {len(calc.kpts)} k-points, {window[0]:g} to {window[1]:g} from the Fermi level")
     for i, (name, at, d) in enumerate(s for n in names for s in structures(n)):
         if d.basis != orb:
@@ -113,6 +118,8 @@ def score(calc, data, window, metrics_out=None, blocks_out=None, pairs=None):
         pred = calc._blocks(at)
         for c in ch:
             if c in d.blocks:
+                if block_errors is not None:
+                    block_errors.add(c, d.numbers, d.positions, d.cell, d.blocks[c], pred[c])
                 for part, sel in (("on-site", onsite), ("off-site", lambda k: not onsite(k))):
                     err.setdefault((c, part), []).append(np.concatenate([(pred[c][k] - v).ravel() for k, v in d.blocks[c].items()
                                                                           if sel(k) and k in pred[c]] or [np.zeros(0)]))
@@ -148,6 +155,11 @@ def score(calc, data, window, metrics_out=None, blocks_out=None, pairs=None):
     for (c, part), t in table.items():
         print(f"  {c:6s} {part:9s} {1e3 * t['rmse']:22.4f} {1e3 * t['mae']:10.4f} {1e3 * t['max']:10.3f}")
     summary = M.summary(per) if per else None
+    if held and held.get("blocks") and block_errors.n:
+        cov = block_errors.coverage(held["blocks"])
+        print("\n".join(uq.format_block_coverage(cov)))
+        if summary is not None:
+            summary["block_coverage"] = cov
     if summary is not None:
         summary["overlap"] = overlap
         if bad:
@@ -242,7 +254,8 @@ def cmd_fit(a):
 
 def cmd_calibrate(a):
     """Calibrate the eigenvalue intervals of a model on structures with reference blocks that its fit
-    did not use (`ham.uq`: split conformal, a half-width per energy band and level), and write the
+    did not use (`ham.uq`: split conformal, a half-width per energy band and level), and those of its
+    matrix elements (per channel, species pair, distance band and shell pair), and write the
     model with the calibration in its file.  `aj eval` then reports the coverage of the intervals
     on other structures, and `HamiltonianCalculator.eigenvalue_half_widths` gives them."""
     import jax
@@ -254,13 +267,15 @@ def cmd_calibrate(a):
     if used:
         raise UsageError(f"--data: {len(used)} of its structures were in the model's fit (e.g. {sorted(used)[0]}): calibrate on structures the fit did not use")
     calc = _calc(a, tuple(a.kpts)); calc.calibration = None
-    pairs = []
-    _, summary = score(calc, a.data, a.window, pairs=pairs)
+    pairs, be = [], uq.BlockErrors(calc.predictor.orbitals)
+    _, summary = score(calc, a.data, a.window, pairs=pairs, block_errors=be)
     if len(pairs) < 10:
         print(f"warning: {len(pairs)} calibration structures: the joint widths need about level / (1 - level) structures (9 for 0.9, 19 for 0.95)")
     cal = uq.calibrate(pairs, tuple(a.window), tuple(a.levels), a.bands)
     cal.update(data=os.path.abspath(a.data), kpts=[int(v) for v in a.kpts], width=a.width, smearing=a.smearing, overlap=(summary or {}).get("overlap"))
     print("\n".join(uq.format_calibration(cal)))
+    cal["blocks"] = be.calibrate(tuple(a.levels), a.distance_bands)
+    print("\n".join(uq.format_block_calibration(cal["blocks"])))
     out = a.out or a.model
     io.save(out, f.onsite, f.offsite, info={**f.meta["info"], "calibration": cal})
     print(f"wrote {out}")
@@ -439,11 +454,12 @@ def add_parser(sub):
                         "(the scatter of H between SCF runs; approximately 1e-7 eV to 3e-6 eV for sc_accuracy_rho 1e-5)")
     f.add_argument("--ridge", type=float, default=1e-10, help="ridge on every coefficient (default 1e-10)")
     _add_spectrum_args(f, [3, 3, 3])
-    c = hs.add_parser("calibrate", help="calibrate a model's eigenvalue intervals on structures its fit did not use", description=cmd_calibrate.__doc__)
+    c = hs.add_parser("calibrate", help="calibrate a model's eigenvalue and matrix-element intervals on structures its fit did not use", description=cmd_calibrate.__doc__)
     c.add_argument("--model", required=True); c.add_argument("--data", required=True, help="calibration structures with blocks (not those of the fit)")
     c.add_argument("--out", default=None, help="the calibrated model file (default: --model, rewritten)")
     c.add_argument("--levels", type=float, nargs="+", default=[0.68, 0.9, 0.95], help="coverage levels (default 0.68 0.9 0.95)")
     c.add_argument("--bands", type=int, default=6, help="energy bands, each with its own half-width (default 6)")
+    c.add_argument("--distance-bands", type=int, default=6, help="distance bands of the off-site blocks of a species pair, each with its own half-widths (default 6)")
     c.add_argument("--channel", default=None, help="Hamiltonian channel (default H; H_up or H_dn of a spin model)")
     _add_spectrum_args(c, [3, 3, 3])
     p = hs.add_parser("predict", help="write the predicted H and S blocks of structures (DeepH layout)", description=cmd_predict.__doc__)

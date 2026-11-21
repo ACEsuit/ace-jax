@@ -157,8 +157,14 @@ def test_calculator_from_a_model_file_and_aj_eval(models, tmp_path, capsys):  # 
     assert h.shape == cc.get_property("eigenvalues", at).shape and np.nanmax(h) < 1e-8 and np.isinf(hj).all()      # two structures: no joint width at any level
     with pytest.raises(ValueError, match="no calibration"):
         calc.eigenvalue_half_widths(at)
+    bh, bw = cc.block_half_widths(at), cc.block_half_widths(at, channel="S", level=0.68, whole=True)      # of matrix elements: zero for S (its own blocks)
+    Hat = cc.get_hamiltonian(at)
+    assert set(bh) == set(Hat) and all(bh[k].shape == Hat[k].shape for k in Hat) and max(bw.values()) < 1e-9
+    with pytest.raises(ValueError, match="no block calibration"):
+        calc.block_half_widths(at)
     main(["eval", "--model", cal, "--data", str(tmp_path / "ref"), *args, "--window", "-50", "50"])
-    assert "coverage of the model's calibrated intervals" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "coverage of the model's calibrated intervals" in out and "coverage of the calibrated block intervals" in out
     write_cextxyz(str(tmp_path / "s.xyz"), [f[0] for f in frames])
     main(["eval", "--model", path, "--data", str(tmp_path / "s.xyz"), *args, "--out", str(tmp_path / "o.xyz")])
     for f, (_, e, mu, F) in zip(read_cextxyz(str(tmp_path / "o.xyz"), index=":", create_calc=False), frames):
