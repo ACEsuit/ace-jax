@@ -37,6 +37,8 @@ class DesignStats(NamedTuple):
     factor: ls.Factor
     keys: tuple
     hyper: object = None
+    gamma: object = None                 # what the fit was given for this design's columns (`_solve`): the prior precision
+    ridge: float = 0.0                   # added to the ridge, or with `hyper` the smoothness of each column
 
 
 class _Prior(NamedTuple):
@@ -294,7 +296,7 @@ def _solve(designs, acc, yy, n, nc, ridge, gamma=None, select=None, blocks=None,
         for q, key in enumerate(keys):
             coef[key] = mu[:, q * nc:(q + 1) * nc].T.copy()
             report[key] = (n[d], k, np.sqrt(res2[q * nc:(q + 1) * nc] / n[d]))
-        stats[d] = DesignStats(fac, tuple(keys), hyper)
+        stats[d] = DesignStats(fac, tuple(keys), hyper, None if gamma is None else np.asarray(gamma[d], float), float(ridge))
     return coef, report, stats
 
 

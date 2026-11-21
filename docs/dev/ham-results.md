@@ -963,3 +963,20 @@ Positions to blocks, µs per atom, float32:
 - An all-pairs neighbour list inside the program (no library call at all) was tried: 6.4 ms at 64 atoms, level with the library at 1,024. Not kept: it is quadratic in the atoms.
 - Float32 run-to-run differences of the blocks (scatter order on the GPU): largest 0.35 meV, mean 0.001 meV for this model; 4 meV and 0.015 meV for the largest model.
 - Not yet measured: float64 on an A100; `band_energy_device` still makes three list calls.
+
+## Uncertainty of operators: a first look on gold (2026-11-21)
+
+`operators/posterior.py`: the coefficient posterior of a block fit from the statistics it returns (`DesignStats` now keeps the prior it solved with): N(mean_q, sigma_q^2 (R^T R + diag(lin_q))^-1) per right-hand side q, `draws` (the mean and n draws as extra channels of one model, so one prediction gives every draw's blocks) and `noise` (sigma_q, the scatter of the data about the model, per shell pair and L).
+
+Experiment (`ham-ref/work/uq/gold_uq.py`): gold default model, 4 training structures, prior by the evidence, 3 test structures, 24 draws, bands at 3 x 3 x 3 k-points from own Fermi levels.
+
+| Quantity | rms error | rms z, coefficient posterior only | rms z, noise only | rms z, both | coverage at 1 and 2 sigma, both |
+|---|---|---|---|---|---|
+| on-site block elements | 6.07 meV | 12.5 | 1.08 | 1.07 | 0.66, 0.94 |
+| off-site block elements | 0.66 meV | 1.5e6 | 1.06 | 1.04 | 0.87, 0.95 |
+| eigenvalues (-12 to 5 eV) | 2.2 to 3.3 meV | 7.2 | 2.4 | 2.1 | 0.34, 0.66 |
+
+- **For block elements the evidence's noise is a calibrated error bar as it stands** (rms z 1.04 to 1.08); the off-site errors are heavier-tailed than a Gaussian (0.87 inside one sigma).
+- **The coefficient posterior is negligible in distribution**: 3,000 bonds a structure determine the coefficients, and the error is the model's limit. Its use is out of distribution (pairs or environments with few rows), which this test set cannot show.
+- **Eigenvalues from independent element noise are 2.1 times too narrow**: the block errors are correlated between bonds (a systematic misfit adds coherently in c^T dH c). One scale factor repairs the size, as HInitASI's conformal weight does. Within a structure the predicted sigma does not rank the errors (Spearman 0.12).
+- Next: the same with leave-structure-out noise and 32 structures; a configuration out of distribution (strained gold; Ti-Ti in NbFeSb) to see the posterior term and a trust flag; then the conformal scale per group and `hamiltonian_uncertainty` in the calculator.
