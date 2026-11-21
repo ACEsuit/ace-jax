@@ -920,7 +920,7 @@ FHI-aims 261002 on 16 MPI ranks (its own time accounting) against the model rout
 
 ## Gold: ACEhamiltonians.jl at the paper's degrees (2026-11-21)
 
-Degrees 10/12, 12/14 and 14/14 (on-site order 2 / off-site order 1; 7,639, 12,127 and 13,551 basis functions), 32 training structures, fitted and predicted with the type instability removed (fits 5.7, 12.1 and 12.4 h on 40 cores).
+Degrees 10/12, 12/14 and 14/14 (on-site order 2 / off-site order 1; 7,639, 12,127 and 13,551 basis functions), 32 training structures, fitted and predicted with the type instability removed (fits 5.7, 12.1 and 12.4 h).
 
 | Degrees | ms per atom, one core | H MAE / meV | Band RMSE from own Fermi levels / meV |
 |---|---|---|---|
