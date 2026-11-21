@@ -1253,7 +1253,7 @@ Half-widths of the stored calibration (all shell pairs pooled, then a whole bloc
 | 8.69 to 9.32 Å | 0.055 | 0.111 | 0.146 | 0.25 | 0.33 | 0.37 |
 | beyond 9.32 Å | 0.029 | 0.065 | 0.087 | 0.14 | 0.19 | 0.22 |
 
-At one distance the off-site half-width at 0.90 differs fourfold between angular-momentum pairs
+Over all off-site blocks the half-width at 0.90 differs fourfold between angular-momentum pairs
 (0.14 meV d-d to 0.59 meV p-p); on-site 4.5 (p-d) to 15.7 meV (s-s). Test coverage of the stored
 calibration: elements 0.679 / 0.900 / 0.950, single structures 0.656 to 0.726 / 0.886 to 0.928 /
 0.941 to 0.967, whole blocks 0.678 / 0.900 / 0.950. The elements of a structure do not share
