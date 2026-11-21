@@ -199,7 +199,7 @@ def test_fit_statistics_are_generic_factors(basis_spdf):
     model, report, st = fit_onsite(basis_spdf, [d], stats=True, ridge=1e-8)
     _, _, st2 = fit_onsite(basis_spdf, [d, d], stats=True, ridge=1e-8)
     assert st and all(key[0] in (6, 14) for key in st)
-    for key, (fac, keys, _) in st.items():
+    for key, (fac, keys, *_) in st.items():
         k = fac.R.shape[0]
         assert fac.c.shape == (k, 2 * len(keys)) and fac.yy.shape == (2 * len(keys),)
         assert all(report[ck][:2] == (int(fac.n), k) for ck in keys)
