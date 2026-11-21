@@ -87,17 +87,24 @@ def _calc(a, kpts):
     return calc
 
 
+def _filled(blocks, keys, numbers, orb):
+    """`blocks` on `keys`, zero blocks where it has none (a model's cutoff, or S's, shorter than H's)."""
+    return {k: np.asarray(blocks[k]) if k in blocks else np.zeros((orb.n_orb(int(numbers[k[3]])), orb.n_orb(int(numbers[k[4]])))) for k in keys}
+
+
 def score(calc, data, window, metrics_out=None, blocks_out=None, pairs=None):
     """Print the block errors of `calc`'s model on the reference structures under `data`, and the
     electronic-structure errors of its eigenvalues against the reference's on the calculator's
     k-points (`ham.metrics`).  Returns (block error table, metrics summary or None).  pairs: a list that
     receives each structure's (reference, predicted) eigenvalues from their own Fermi levels (`ham.uq`).
-    A model with a calibration (`aj ham calibrate`) also gets the coverage of its intervals here."""
+    A model with a calibration (`aj ham calibrate`) also gets the coverage of its intervals here.
+    A model without an overlap is scored with the data's S where it has one (its H and the reference
+    H in the same generalised problem; summary["overlap"] "reference"), else with S = 1 ("identity")."""
     from . import metrics as M
     from .operator import BlockSum, block_bands
     ch, orb = calc.predictor.channels, calc.predictor.orbitals
     names = block_names(data)
-    err, per, bad, spectra = {}, [], [], ([] if pairs is None else pairs)
+    err, per, bad, spectra, overlap = {}, [], [], ([] if pairs is None else pairs), None
     print(f"{len(names)} reference structures; eigenvalues on {len(calc.kpts)} k-points, {window[0]:g} to {window[1]:g} from the Fermi level")
     for i, (name, at, d) in enumerate(s for n in names for s in structures(n)):
         if d.basis != orb:
@@ -110,15 +117,26 @@ def score(calc, data, window, metrics_out=None, blocks_out=None, pairs=None):
                     err.setdefault((c, part), []).append(np.concatenate([(pred[c][k] - v).ravel() for k, v in d.blocks[c].items()
                                                                           if sel(k) and k in pred[c]] or [np.zeros(0)]))
         if calc.channel in d.blocks and (calc.overlap is None or calc.overlap in d.blocks):
-            e1 = np.asarray(calc.get_property("eigenvalues", at))
+            Hb = d.blocks[calc.channel]
+            if calc.overlap is None and "S" in d.blocks:   # a model of H alone: its H and the reference H, both with the reference S
+                given = "reference"; Sb, P = d.blocks["S"], pred[calc.channel]
+                keys = sorted(set(Hb) | set(Sb) | set(P))
+                bs = BlockSum(keys, d.numbers, orb); full = lambda B, keys=keys, z=d.numbers: _filled(B, keys, z, orb); Sf = full(Sb)
+                e1, e0 = block_bands(bs, full(P), Sf, calc.kpts), block_bands(bs, full(Hb), Sf, calc.kpts)
+            else:
+                given = "model" if calc.overlap else "identity"
+                e1 = np.asarray(calc.get_property("eigenvalues", at))
+                Sb = d.blocks[calc.overlap] if calc.overlap else {k: np.eye(*v.shape) * float(onsite(k)) for k, v in Hb.items()}
+                e0 = block_bands(BlockSum(sorted(Hb), d.numbers, orb), Hb, Sb, calc.kpts) if np.isfinite(e1).all() else None
+            if overlap is None:
+                overlap = given
+                print({"reference": "the model has no overlap: eigenvalues of its H and of the reference H with the reference S",
+                       "identity": "the model and the data have no overlap: eigenvalues with S = 1", "model": f"overlap: the model's {calc.overlap}"}[given], flush=True)
             if not np.isfinite(e1).all():                # the eigensolver's answer to an overlap that is not positive definite
                 print(f"  {name}: no eigenvalues: the predicted {calc.overlap or 'H'} gives a generalised eigenproblem that is not "
                       f"positive definite; no band metrics for this structure", flush=True)
                 bad.append(name)
             else:
-                Hb = d.blocks[calc.channel]
-                Sb = d.blocks[calc.overlap] if calc.overlap else {k: np.eye(*v.shape) * float(onsite(k)) for k, v in Hb.items()}
-                e0 = block_bands(BlockSum(sorted(Hb), d.numbers, orb), Hb, Sb, calc.kpts)
                 per.append(dict(name=name, **M.spectrum_metrics(
                     e0, e1, calc.electrons(d.numbers), len(d.numbers), calc.weights, calc.width, calc.smearing, calc.degeneracy, tuple(window))))
                 spectra.append((np.asarray(e0) - per[-1]["fermi_ref"], e1 - per[-1]["fermi_ref"] - per[-1]["fermi"]))
@@ -130,8 +148,10 @@ def score(calc, data, window, metrics_out=None, blocks_out=None, pairs=None):
     for (c, part), t in table.items():
         print(f"  {c:6s} {part:9s} {1e3 * t['rmse']:22.4f} {1e3 * t['mae']:10.4f} {1e3 * t['max']:10.3f}")
     summary = M.summary(per) if per else None
-    if summary is not None and bad:
-        summary["no_eigenvalues"] = bad
+    if summary is not None:
+        summary["overlap"] = overlap
+        if bad:
+            summary["no_eigenvalues"] = bad
     if per:
         print("\n".join(M.format_summary(summary, unit="(1e-3 of the data's unit)")))
         if getattr(calc, "calibration", None) and pairs is None:
@@ -235,11 +255,11 @@ def cmd_calibrate(a):
         raise UsageError(f"--data: {len(used)} of its structures were in the model's fit (e.g. {sorted(used)[0]}): calibrate on structures the fit did not use")
     calc = _calc(a, tuple(a.kpts)); calc.calibration = None
     pairs = []
-    score(calc, a.data, a.window, pairs=pairs)
+    _, summary = score(calc, a.data, a.window, pairs=pairs)
     if len(pairs) < 10:
         print(f"warning: {len(pairs)} calibration structures: the joint widths need about level / (1 - level) structures (9 for 0.9, 19 for 0.95)")
     cal = uq.calibrate(pairs, tuple(a.window), tuple(a.levels), a.bands)
-    cal.update(data=os.path.abspath(a.data), kpts=[int(v) for v in a.kpts], width=a.width, smearing=a.smearing)
+    cal.update(data=os.path.abspath(a.data), kpts=[int(v) for v in a.kpts], width=a.width, smearing=a.smearing, overlap=(summary or {}).get("overlap"))
     print("\n".join(uq.format_calibration(cal)))
     out = a.out or a.model
     io.save(out, f.onsite, f.offsite, info={**f.meta["info"], "calibration": cal})

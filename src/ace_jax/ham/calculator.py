@@ -133,6 +133,9 @@ class HamiltonianCalculator(Calculator):
         from . import uq
         if not self.calibration:
             raise ValueError("this model has no calibration: run `aj ham calibrate`, or set calc.calibration")
+        if self.calibration.get("overlap") == "reference":   # calibrated on eigenvalues with the data's S; this calculator's use S = 1
+            raise ValueError("this model has no overlap and its calibration used the reference S: its intervals are for eigenvalues "
+                             "with that S (ham.uq.half_width on such eigenvalues), not for this calculator's")
         return uq.half_width(self.calibration, self.get_property("eigenvalues", atoms) - self.get_property("fermi_level", atoms), level, joint)
 
     def get_fermi_level(self):

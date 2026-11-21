@@ -203,6 +203,18 @@ def test_aj_ham_fit_predict_bands(models, tmp_path, capsys):  # noqa: F811
     assert info["validation"]["metrics"]["band_rmse"] < 1e-3 and info["prior"] == "none"
     with pytest.raises(SystemExit):                                # a channel the data does not have
         main(["ham", "fit", "--data", str(tmp_path / "b"), "--out", second, "--channels", "H_up"])
+    honly = str(tmp_path / "honly.npz")                           # a model of H alone, scored on data with S: both spectra with the reference S
+    main(["ham", "fit", "--data", str(tmp_path / "b"), "--out", honly, "--channels", "H", *basis])
+    main(["eval", "--model", honly, "--data", str(tmp_path / "b"), *spec, "--metrics-out", str(tmp_path / "h.json")])
+    import json
+    mh = json.load(open(tmp_path / "h.json"))
+    assert "with the reference S" in capsys.readouterr().out and mh["summary"]["overlap"] == "reference" and mh["summary"]["band_rmse"] < 1e-3
+    (tmp_path / "c").mkdir()                                       # other file names: calibrate refuses structures of the fit
+    for i in range(3):
+        (tmp_path / "c" / f"c{i}.npz").write_bytes((tmp_path / "a" / f"{i}.npz").read_bytes())
+    main(["ham", "calibrate", "--model", honly, "--data", str(tmp_path / "c"), *spec, "--bands", "2"])
+    with pytest.raises(ValueError, match="reference S"):          # the calculator's own eigenvalues of such a model use S = 1
+        HamiltonianCalculator(honly, kpts=(2, 1, 2), nelectrons=40, width=0.2, overlap=None).eigenvalue_half_widths(frames[0])
     capsys.readouterr()
     write_cextxyz(str(tmp_path / "s.xyz"), frames)
     main(["ham", "predict", "--model", second, "--data", str(tmp_path / "s.xyz"), "--out", str(tmp_path / "pred")])

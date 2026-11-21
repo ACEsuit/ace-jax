@@ -4,6 +4,14 @@
 
 ### Changed
 
+- **`aj eval` scores a Hamiltonian model without an overlap with the S of the data.** The eigenvalues of
+  the model's H and of the reference H are now both from the generalised problem with the reference S,
+  when the reference structures have one. Before, both used S = 1, and the band metrics were not those of
+  the physical spectrum (bulk gold, default model: 2.19 meV with S = 1, 2.14 meV with the reference S).
+  The command prints which overlap it uses, and `--metrics-out` records it. `aj ham calibrate` records it
+  too: `HamiltonianCalculator.eigenvalue_half_widths` refuses such a calibration, because the eigenvalues
+  of the calculator use S = 1.
+
 - **`aj ham fit` has a larger default bond environment: `--env 5 8 4 6 4` (was `5 6 4 4 4`).** Fits with
   the default options change. With 32 training structures the band error from own Fermi levels decreased
   from 2.15 to 1.41 meV on bulk gold, and from 18.8 to 6.9 meV on bulk aluminium (34 structures, H and S).
