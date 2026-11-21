@@ -165,7 +165,7 @@ If the export used the XLA program on a CPU, `ace_jax.ffi_reason` gives the
 reason.
 
 For large models, `--ffi-precision mixed` (`ffi_precision="mixed"` in
-Python) is faster: 1.4 times for the silicon model o4d20 on 128 cores. The
+Python) is faster: 1.1 to 1.2 times for the silicon model o4d20 on 128 cores. The
 kernel then calculates the product basis in float32. It is off by default.
 
 !!! warning "Mixed precision adds noise to the energy"

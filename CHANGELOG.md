@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Changed
+
+- The documentation gives the gain of mixed precision with the kernels of 0.7.2: 1.1 to 1.2 times for the
+  silicon model o4d20 (1.4 times before 0.7.2, when the product basis used more of the time), and no gain
+  from o4d14 down. The kernel row of the five-element alloy table is timed again and did not change.
+
 ## 0.7.2 (2026-11-21)
 
 **Highlights.** The C++ and CUDA kernels for linear ACE are faster for models of correlation order 4. For

@@ -273,8 +273,8 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
   the table's ~1e-8) for analytic, unsplined radials with lmax <= 8; learned/splined radials and PACE-shaped
   bases keep the table (`"table"`). `ACEJAX_FFI_RADIAL=table` forces the table.
   `ffi_precision="mixed"` (off by default; float64 only; CPU and CUDA kernels, the same library): the
-  product basis in float32, everything else float64. Worth it only for large models (o4d20: 1.4x in LAMMPS
-  on 128 cores, 1.4x on an A100; nothing below o4d14). Forces within ~5e-5 eV/A (o4d20), but the energy
+  product basis in float32, everything else float64. Worth it only for large models (from 0.7.2, o4d20:
+  1.1-1.2x in LAMMPS on 128 cores, 1.2x on an A100; o4d16 at most 1.2x; nothing from o4d14 down). Forces within ~5e-5 eV/A (o4d20), but the energy
   carries ~0.1 meV of noise per 200 atoms (1 meV at o4d16), so energy line-search optimisers (L-BFGS/CG with
   Armijo or Wolfe, LAMMPS `min_style cg`) fail near a minimum: use force-only ones (ODE12r, FIRE,
   `min_style fire`). `calc.ffi["precision"]` reports it. Also on `BatchCalculator` and
