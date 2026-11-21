@@ -48,15 +48,36 @@ class _Prior(NamedTuple):
 
 @jax.jit
 def _evidence_vg(x, s2, chat, P, p0, yy, n):
-    """Value and gradient in x = (log sigma, log sigma_c) of the evidence of one right-hand side
-    (chat (:,), yy): `fit.linear.lml_svd.log_evidence_svd` on the design's SVD."""
-    return jax.value_and_grad(lambda x: lml_svd.log_evidence_svd(x[0], x[1], lml_svd.SVDStats(s2, chat, P, p0, yy, n, jnp.zeros(()))))(x)
+    """Value and gradient in x = (log sigma, log sigma / sigma_c) of the evidence of one right-hand
+    side (chat (:,), yy): `fit.linear.lml_svd.log_evidence_svd` on the design's SVD.  The second
+    variable is half of log rho, so the floor of rho is a bound of the search (`_evidence`)."""
+    return jax.value_and_grad(lambda x: lml_svd.log_evidence_svd(x[0], x[0] - x[1], lml_svd.SVDStats(s2, chat, P, p0, yy, n, jnp.zeros(()))))(x)
+
+
+def _noise_floor(noise, channels):
+    """`noise=` of the fits as one lower bound of sigma per channel: None; a number, for every
+    channel but the overlap "S" (which no SCF noise reaches); or {channel: number}."""
+    if noise is None:
+        return None
+    if isinstance(noise, dict):
+        unknown = set(noise) - set(channels)
+        if unknown:
+            raise ValueError(f"noise: no channel {sorted(unknown)} among {tuple(channels)}")
+        return tuple(float(noise.get(c, 0.0)) for c in channels)
+    return tuple(0.0 if c == "S" else float(noise) for c in channels)
+
+
+def _rho_floor(gamma, ridge):
+    """The smallest rho = sigma^2 / sigma_c^2 a selection may take: gamma_j^2 rho >= ridge for every
+    column with a smoothness prior, so a selected prior is nowhere weaker than the fit without one."""
+    g = np.asarray(gamma, float)
+    return ridge / float(g[g > 0].min()) ** 2
 
 
 RHO_STEP = 0.1          # decades: right-hand sides whose sigma^2 / sigma_c^2 agree to this share one posterior solve
 
 
-def _evidence(fac, gamma, ridge, nc):
+def _evidence(fac, gamma, ridge, nc, floor=None):
     """The evidence fit of one design.  Every right-hand side (a shell pair and a channel: their
     scales differ by orders of magnitude) has its own noise sigma and smoothness-prior scale
     sigma_c (coefficient j ~ N(0, sigma_c^2 / gamma_j^2); columns with gamma_j = 0 keep the
@@ -64,15 +85,22 @@ def _evidence(fac, gamma, ridge, nc):
     evidence (`fit.linear.lml_svd`: one SVD of R D^-1 for the design, O(k) per evaluation) by
     bounded L-BFGS from three starts (`fit.linear.multistart`).  The posterior mean depends on
     rho = sigma^2 / sigma_c^2 alone, so right-hand sides are solved together by rho rounded to
-    RHO_STEP decades (`fit.linear.objective.posterior_qr`).  Returns (mean (k, n_rhs) in the
-    design's column order, hyper (n_rhs, 4): sigma, sigma_c at the maximum, the log evidence
+    RHO_STEP decades (`fit.linear.objective.posterior_qr`).  Returns (mean (k, n_rhs) in
+    the design's column order, hyper (n_rhs, 4): sigma, sigma_c at the maximum, the log evidence
     there, and the sigma_c used after rounding).
 
-    The solve adds `ridge` to the prior precision of every column, as the fit with a given
-    sigma_c does.  A design with fewer rows than columns (a species pair with few bonds) can be
-    interpolated, the evidence then takes sigma to its lower bound, and gamma^2 sigma^2 /
-    sigma_c^2 alone is orders of magnitude below the ridge: the coefficients of nearly dependent
-    columns reached 1e13 (Ti-Ti in NbFeSb; docs/dev/ham-results.md)."""
+    floor: per channel, a lower bound of sigma in the data's unit (the noise of the reference
+    data, e.g. the scatter of the blocks between SCF runs; `_noise_floor`); None: 1e-9 of each
+    target's rms alone.  It keeps the evidence from reading interpolated data as exact, but does
+    not by itself keep the prior above the ridge (Ti-Ti, sigma >= 1e-7 eV: coefficients of 1.8e3
+    against 51 without a prior), so:
+
+    The search is in (log sigma, log sigma / sigma_c) with rho bounded below by `_rho_floor`: the
+    evidence is maximised over priors that are at least the ridge on every column, and the solve
+    is the model the evidence was computed for.  Without the bound a design with fewer rows than
+    columns (a species pair with few bonds) is interpolated, the evidence takes sigma to its lower
+    bound, and gamma^2 rho fell orders of magnitude below the ridge: the coefficients of nearly
+    dependent columns reached 1e13 (Ti-Ti in NbFeSb; docs/dev/ham-results.md)."""
     gamma = np.asarray(gamma, float)
     free = np.flatnonzero(gamma > 0)
     order = np.concatenate([free, np.flatnonzero(gamma <= 0)])            # smoothness columns first, fixed ones last
@@ -81,18 +109,21 @@ def _evidence(fac, gamma, ridge, nc):
     prior = _Prior(gamma[free], np.full(len(order) - len(free), ridge))
     sv = lml_svd.svd_statistics([ls.Factor(R, c, jnp.asarray(yy.sum()), fac.n, jnp.zeros(()))], prior)
     hyper = np.zeros((c.shape[1], 4))
+    vmin = 0.5 * np.log(_rho_floor(gamma, ridge))                         # log sigma / sigma_c at the floor of rho
     for q in range(c.shape[1]):
         scale = float(np.sqrt(max(yy[q] / n, 1e-300)))                    # rms of this target
-        lo_, hi_ = np.log([1e-9 * scale, 1e-3 * scale]), np.log([1e2 * scale, 1e15 * scale])
+        ls_ = np.log(max(1e-9 * scale, floor[q % nc] if floor is not None else 0.0))    # a floor above the target's own size leaves sigma there
+        lo_, hi_ = np.array([ls_, vmin]), np.array([max(np.log(1e2 * scale), ls_ + 1e-6), max(np.log(1e5), vmin + 1.0)])
         vg = lambda x, q=q: _evidence_vg(jnp.asarray(x), sv.s2, sv.chat[:, q], sv.P, sv.p0, jnp.asarray(yy[q]), sv.n)
-        best, _ = multistart.multistart_map(vg, [np.log([1e-2 * scale, v * scale]) for v in (1e2, 1e5, 1e8)], lo_, hi_, maxiter=200)
-        hyper[q, :3] = np.exp(best["x"][0]), np.exp(best["x"][1]), best["value"]
-    rho = np.round(2.0 * np.log10(hyper[:, 0] / hyper[:, 1]) / RHO_STEP) * RHO_STEP          # log10 sigma^2 / sigma_c^2
+        starts = [np.array([min(max(np.log(1e-2 * scale), ls_), hi_[0]), min(max(np.log(v), vmin), hi_[1])]) for v in (1e-4, 1e-7, 1e-10)]
+        best, _ = multistart.multistart_map(vg, starts, lo_, hi_, maxiter=200)
+        hyper[q, :3] = np.exp(best["x"][0]), np.exp(best["x"][0] - best["x"][1]), best["value"]
+    rho = np.maximum(np.round(2.0 * np.log10(hyper[:, 0] / hyper[:, 1]) / RHO_STEP) * RHO_STEP, 2.0 * vmin / np.log(10.0))   # log10 sigma^2 / sigma_c^2, not below the floor
     hyper[:, 3] = hyper[:, 0] / 10.0 ** (0.5 * rho)
     mean = np.zeros_like(c)
     for r in np.unique(rho):
         q = np.flatnonzero(rho == r)
-        lin = jnp.asarray(np.concatenate([ridge + prior.gamma ** 2 * 10.0 ** r, prior.e0_prec]))     # never weaker than the plain ridge
+        lin = jnp.asarray(np.concatenate([prior.gamma ** 2 * 10.0 ** r, prior.e0_prec]))
         mu = lo.posterior_qr(lin, [ls.Factor(jnp.asarray(R), jnp.asarray(c[:, q]), jnp.asarray(yy[q]), fac.n, jnp.zeros(()))], [0.0])[0]
         mean[np.ix_(order, q)] = np.asarray(mu)
     return mean, hyper
@@ -113,8 +144,7 @@ def _loo(fac, gamma, ridge, blocks, press):
     the noise that maximises it, or (`press`) minus their squared prediction error.  Residuals
     shared by the atoms of a structure count once per structure, where the evidence reads them
     as independent noise.  A rho at which a structure has leverage 1 within roundoff is skipped.
-    The solve adds `ridge` to every column (see `_evidence`); the rho values whose prior is below
-    it give the same fit, and of rho values that tie the largest is taken.
+    rho values below `_rho_floor` are not tried (see `_evidence`).
     Returns (mean, hyper) as `_evidence` (hyper[:, 2]: the criterion)."""
     gamma, n = np.asarray(gamma, float), float(fac.n)
     blocks = [_Spill.get(b) for b in blocks]
@@ -123,17 +153,17 @@ def _loo(fac, gamma, ridge, blocks, press):
     ee = np.sum([b[2] for b in blocks], axis=0)
     f = ls.Factor(jnp.asarray(fac.R), jnp.asarray(fac.c), jnp.asarray(fac.yy), fac.n, jnp.zeros(()))
     crit, s2, means = [], [], []
-    for r in LOO_RHO:
-        quad, hld, pr, mean = (np.asarray(v) for v in loo.loo_terms(jnp.asarray(ridge + gamma ** 2 * 10.0 ** r), f, P, Y))
+    floor = np.log10(_rho_floor(gamma, ridge))
+    grid = np.concatenate([[floor], LOO_RHO[LOO_RHO > floor]])
+    for r in grid:
+        quad, hld, pr, mean = (np.asarray(v) for v in loo.loo_terms(jnp.asarray(np.where(gamma > 0, gamma ** 2 * 10.0 ** r, ridge)), f, P, Y))
         s2.append((quad + ee) / n); means.append(mean)
         with np.errstate(divide="ignore", invalid="ignore"):
             crit.append(-(pr + ee) if press else -0.5 * n * np.log(s2[-1]) + hld)
     crit = np.where(np.isfinite(crit), crit, -np.inf)
-    top = crit.max(0)                                    # ties (every rho whose prior is below the ridge gives one fit): the largest rho
-    tied = crit >= top - 1e-9 * (1.0 + np.abs(np.where(np.isfinite(top), top, 0.0)))
-    best, q = len(LOO_RHO) - 1 - tied[::-1].argmax(0), np.arange(crit.shape[1])
+    best, q = crit.argmax(0), np.arange(crit.shape[1])
     sig = np.sqrt(np.asarray(s2)[best, q])
-    sc = sig / 10.0 ** (0.5 * LOO_RHO[best])
+    sc = sig / 10.0 ** (0.5 * grid[best])
     return np.asarray(means)[best, :, q].T, np.stack([sig, sc, crit[best, q], sc], axis=1)
 
 
@@ -169,7 +199,7 @@ def _need_x64():
         raise ValueError("the block fit needs float64: jax.config.update('jax_enable_x64', True)")
 
 
-def _fit(designs, n_chunks, rows, nc, ridge, device=False, gamma=None, select=None, groups=None):
+def _fit(designs, n_chunks, rows, nc, ridge, device=False, gamma=None, select=None, groups=None, floor=None):
     """Stream and solve.  designs: {design key: (n columns, [coefficient keys])}; rows(i) ->
     {design key: (A (n_rows, n_columns), Y (n_rows, n_keys * nc))} for chunk i (a design without
     rows in the chunk is left out).  Returns (coef, report, stats).
@@ -206,7 +236,7 @@ def _fit(designs, n_chunks, rows, nc, ridge, device=False, gamma=None, select=No
                     Rs[(g, d)] = qr_merge(Rs.get((g, d), jnp.zeros((w, w))), A, jnp.asarray(Y))
         close()
         acc = {d: (R[:designs[d][0], :designs[d][0]], R[:designs[d][0], designs[d][0]:]) for (_, d), R in Rs.items()}
-        return _solve(designs, acc, yy, n, nc, ridge, gamma, select, blocks)
+        return _solve(designs, acc, yy, n, nc, ridge, gamma, select, blocks, floor)
 
     def parts(i):
         out = rows(int(i))
@@ -233,10 +263,10 @@ def _fit(designs, n_chunks, rows, nc, ridge, device=False, gamma=None, select=No
             for p in parts_d:
                 if p is not None:
                     yy[d] += (p[1] ** 2).sum(0); n[d] += len(p[1])
-    return _solve(designs, acc, yy, n, nc, ridge, gamma, select, blocks)
+    return _solve(designs, acc, yy, n, nc, ridge, gamma, select, blocks, floor)
 
 
-def _solve(designs, acc, yy, n, nc, ridge, gamma=None, select=None, blocks=None):
+def _solve(designs, acc, yy, n, nc, ridge, gamma=None, select=None, blocks=None, floor=None):
     """Coefficients, report and statistics from the factors (R, c) of each design.  gamma:
     {design key: prior precision of each column} added to the ridge (the smoothness prior), or,
     with `select` (one of SELECT), {design key: smoothness of each column} for `_evidence` or,
@@ -254,7 +284,7 @@ def _solve(designs, acc, yy, n, nc, ridge, gamma=None, select=None, blocks=None)
         fac = ls.Factor(R, c, jnp.asarray(yy[d]), jnp.asarray(float(n[d])), jnp.zeros(()))
         hyper = None
         if select == "evidence":
-            mu, hyper = _evidence(fac, gamma[d], ridge, nc)
+            mu, hyper = _evidence(fac, gamma[d], ridge, nc, floor)
         elif select:
             mu, hyper = _loo(fac, gamma[d], ridge, blocks[d], select == "press")
         else:
@@ -268,7 +298,7 @@ def _solve(designs, acc, yy, n, nc, ridge, gamma=None, select=None, blocks=None)
     return coef, report, stats
 
 
-def fit_onsite(basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10, atoms=None, stats=False, sigma_c=None):
+def fit_onsite(basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10, atoms=None, stats=False, sigma_c=None, noise=None):
     """An `OnsiteModel` fitted to the on-site blocks of `datasets` (`OperatorData`s).
 
     Returns (model, report): report[(z, s1, s2, L)] = (rows, columns, rms residual per channel).
@@ -280,7 +310,8 @@ def fit_onsite(basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10,
     sigma_c: None, the plain ridge; a number: the algebraic smoothness prior of the potential
     fit (`basis.prior`), precision ridge + (gamma / sigma_c)^2 on the feature of smoothness gamma
     (`SiteBasis.smoothness`; unit noise, so sigma_c is in the units of the blocks).  The constant
-    column of the L = 0 parts keeps the ridge alone.  "evidence": sigma_c and the noise of every
+    column of the L = 0 parts keeps the ridge alone.  noise: with "evidence", a lower bound of the noise in the data's unit (a
+    number: every channel but "S"; or {channel: number}; `_noise_floor`).  "evidence": sigma_c and the noise of every
     shell pair and channel maximise its evidence (`_evidence`; the values are in the statistics'
     `hyper`).  "loo": sigma_c of every shell pair and channel maximises the predictive density of
     the structures left out one at a time (`_loo`; `aj fit --objective loo` for these rows);
@@ -324,14 +355,14 @@ def fit_onsite(basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10,
         raise ValueError(f"sigma_c: None, a number or one of {SELECT}, got {sigma_c!r}")
     smooth = lambda L, p: np.concatenate([basis.smoothness(L, p), np.zeros(int(L == 0))])
     gamma = None if sigma_c is None else {(z, L, p): smooth(L, p) if ev else smooth(L, p) ** 2 / sigma_c ** 2 for z, L, p in designs}
-    coef, report, st = _fit(designs, len(datasets), rows, nc, ridge, gamma=gamma, select=sigma_c if ev else None,
+    coef, report, st = _fit(designs, len(datasets), rows, nc, ridge, gamma=gamma, select=sigma_c if ev else None, floor=_noise_floor(noise, channels),
                             groups=np.arange(len(datasets)) if ev and sigma_c != "evidence" else None)
     model = OnsiteModel(basis=basis, coef=coef, orbitals=orbitals, channels=tuple(channels))
     return (model, report, st) if stats else (model, report)
 
 
 def fit_offsite(bond_basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10, chunk=2048, stats=False, compiled=True,
-                sigma_c=None):
+                sigma_c=None, noise=None):
     """An `OffsiteModel` fitted to the off-site blocks present in `datasets` (`OperatorData`s).
 
     Every bond within the bond cutoff whose block (R, i, j) is in the data is a sample; to fit
@@ -407,7 +438,7 @@ def fit_offsite(bond_basis, datasets, orbitals=None, channels=("H", "S"), ridge=
         raise ValueError(f"sigma_c: None, a number or one of {SELECT}, got {sigma_c!r}")
     gamma = None if sigma_c is None else {
         key: B.smoothness(bond_basis, key[2], key[3], key[4]) ** (1 if ev else 2) / (1.0 if ev else sigma_c ** 2) for key in designs}
-    sel = dict(select=sigma_c if ev else None, groups=[c[0] for c in chunks] if ev and sigma_c != "evidence" else None)
+    sel = dict(floor=_noise_floor(noise, channels), select=sigma_c if ev else None, groups=[c[0] for c in chunks] if ev and sigma_c != "evidence" else None)
     if compiled:
         from .design import bond_designs
         progs, dev = {}, {}
