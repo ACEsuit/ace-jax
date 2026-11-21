@@ -1272,3 +1272,38 @@ Two further tests of model pairs, from the saved spectra and models (`ham-ref/wo
   55.2 -> new default 1.39: first order 5.78, second order (gaps damped at 2 meV) 3.65;
   two-centre 66.4 -> largest 1.29: 31.1 and 17.2. At 576 functions the product costs 0.014 s a
   k-point and a second eigenvalue-only solve 0.020 s, so it saves nothing at this size.
+
+### Matrix elements: a width scaled by the disagreement with a second model (2026-11-21)
+
+Score |err| / sigma, sigma^2 = d^2 + f^2, with d the difference from a second model B (per element,
+or the rms over the block) and f the group's median d; quantile per group (distance band x
+angular-momentum pair) as before. New default model, gold, 30 / 10 structures, level 0.90
+(`ham-ref/work/blockcal/scaled.py`). Constant width: coverage 0.900, mean half-width 7.68 meV
+on-site and 0.338 meV off-site. Off-site, by B:
+
+| B | d | Spearman of d with the error, within groups | mean half-width / meV | constant width: coverage in the lowest / highest third of sigma | scaled width: the same |
+|---|---|---|---|---|---|
+| old default | element | 0.15 | 0.376 | 0.928 / 0.853 | 0.829 / 0.971 |
+| old default | block | 0.17 | 0.321 | 0.942 / 0.847 | 0.903 / 0.903 |
+| largest | element | 0.46 | 0.321 | 0.972 / 0.770 | 0.871 / 0.936 |
+| largest | block | 0.24 | 0.313 | 0.961 / 0.817 | 0.929 / 0.865 |
+| no environment | element | 0.10 | 0.401 | 0.922 / 0.864 | 0.825 / 0.975 |
+| no environment | block | 0.11 | 0.344 | 0.928 / 0.861 | 0.883 / 0.920 |
+| two-centre | element | 0.20 | 0.385 | 0.946 / 0.838 | 0.850 / 0.970 |
+| two-centre | block | 0.11 | 0.325 | 0.924 / 0.862 | 0.859 / 0.940 |
+| environment 4 Å | element | 0.14 | 0.370 | 0.928 / 0.851 | 0.829 / 0.969 |
+| environment 4 Å | block | 0.18 | 0.319 | 0.944 / 0.842 | 0.910 / 0.889 |
+| all five | block | 0.17 | 0.318 | 0.939 / 0.846 | 0.895 / 0.910 |
+
+- Coverage on the test set stays at 0.899 to 0.902 with every score, single structures within
+  0.89 to 0.92.
+- The constant width over-covers where the models agree and under-covers where they disagree
+  (0.92 to 0.97 against 0.77 to 0.87). The block-rms disagreement with a model of similar size
+  (old default, 4 Å environment) removes that (0.90 / 0.90, 0.91 / 0.89) and narrows the mean
+  width by 5 to 6 %. Per element the same models over-correct (0.83 / 0.97) and widen the mean.
+- Only the largest model ranks single elements (0.46), and it gives the narrowest widths (0.313
+  to 0.321 meV, 5 to 8 % below the constant), but it over-corrects per element and
+  under-corrects per block.
+- On-site: the four models that differ from the new default only in bond features have its
+  on-site model, so d = 0 and the width is the constant; the largest model (other site basis)
+  ranks on-site errors at 0.05 to 0.11 and widens the mean (7.73 to 8.08 against 7.68 meV).
