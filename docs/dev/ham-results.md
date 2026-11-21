@@ -1113,3 +1113,53 @@ the model's bias; our posterior and jackknife spreads follow the variance only, 
 error is bias. The analogue to try here is a pair of predictions that differ in what they see
 (the site-coupled features of one end against the other; a smaller environment or degree against
 the full one), scaled by the conformal step.
+
+## Disagreement between models that see different things, as an error score (2026-11-21)
+
+The analogue of MACE-H's Hermiticity score for a model that is Hermitian by construction. Eight gold
+models of the same 32 training structures (`aj ham fit --max-structures 32`): the default (A), and
+B = no bond environment, environment radius 4 or 6 Å (default 5), site cutoff 5 Å (default 7),
+two-centre only, the largest architecture of the gold grid, and the default with the
+leave-structure-out prior. Scored on the 10 test structures and 30 training-set structures held out
+of the fits; eigenvalues with the reference S, 27 k-points, own Fermi levels, window -10 to 5 eV.
+Scripts and logs: `ham-ref/work/views/` (not in the repository).
+
+Blocks (test structures): Spearman of |A - B| with A's error per block.
+
+| B | block error of B / meV (A: 0.292) | all blocks | on-site | within bond-length bands (below 3.5 Å ... above 7 Å) |
+|---|---|---|---|---|
+| no environment | 2.144 | 0.81 | 0.00 | 0.49 0.43 0.51 0.56 0.67 |
+| environment 4 Å | 0.265 | 0.89 | 0.05 | 0.51 0.67 0.57 0.56 0.84 |
+| environment 6 Å | 0.360 | 0.84 | -0.02 | 0.44 0.58 0.48 0.50 0.73 |
+| site cutoff 5 Å | 0.297 | 0.83 | 0.02 | 0.15 0.26 0.25 0.43 0.66 |
+| two-centre | 2.668 | 0.80 | 0.05 | 0.41 0.57 0.57 0.57 0.52 |
+| largest | 0.131 | 0.99 | 0.12 | 0.61 0.87 0.87 0.97 0.98 |
+| leave-structure-out prior | 0.299 | 0.70 | 0.03 | 0.33 0.59 0.36 0.36 0.59 |
+
+Eigenvalues (40 structures): score |e_A - e_B|.
+
+| B | band RMSE of B / meV (A: 2.14) | Spearman with \|error\| | per structure, rms score against rms error | signed difference against signed error (Pearson) | 90 % interval half-width / meV (constant: 3.42) |
+|---|---|---|---|---|---|
+| no environment | 55.2 | 0.08 | 0.20 | -0.43 | 3.81 |
+| environment 4 Å | 1.62 | 0.30 | 0.62 | +0.53 | 3.48 |
+| environment 6 Å | 2.97 | 0.02 | -0.17 | -0.21 | 3.85 |
+| site cutoff 5 Å | 2.17 | 0.10 | 0.18 | -0.01 | 3.94 |
+| two-centre | 65.6 | 0.11 | 0.38 | -0.36 | 3.72 |
+| largest | 1.28 | 0.49 | 0.86 | +0.75 | 3.13 |
+| leave-structure-out prior | 2.26 | 0.07 | 0.36 | -0.07 | 4.19 |
+
+- For off-site blocks, the disagreement with almost any second model ranks the errors within a
+  bond-length band at 0.4 to 0.7, the level of MACE-H's Hermiticity score on its own predictions
+  (0.47 to 0.76), and the models need not be good (two-centre only: 0.4 to 0.6).
+- For on-site blocks no pair says anything (at most 0.12; MACE-H's score: 0.22).
+- For eigenvalues only a more accurate second model helps (the largest; environment 4 Å), and then
+  the signed difference follows the signed error (0.75, 0.53): that is a correction, or a
+  per-structure error estimate (0.86 over 40 structures), not a width. Models of the same or lower
+  accuracy give nothing, and no score narrows the spread of coverage between structures (0.43 to
+  0.89 at nominal 0.68, as with a constant width).
+- So the eigenvalue error of the default model is a bias that models of similar size share, and that
+  a larger basis removes in part. The off-site score does not carry over to eigenvalues, whose error
+  follows the on-site blocks.
+- Side result: with these fits (first 32 structures by name, plain ridge) the band error is 1.28 meV
+  for the largest architecture and 1.62 for the 4 Å environment against 2.14 for the default; the
+  6 Å environment is worse (2.97).
