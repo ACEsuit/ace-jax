@@ -49,3 +49,32 @@ def test_fixed_prior_takes_the_residual_as_noise():
     nz = P.noise({"d": st}, nc)
     assert np.allclose(np.concatenate([nz["a"], nz["b"]]), sigma, rtol=1e-10)
     assert P.channel_names(("H", "S"), 2) == ("H", "S", "H#1", "S#1", "H#2", "S#2")
+
+
+def test_jackknife_deviations_are_the_refits_without_each_structure():
+    from ace_jax.operators.fit import _jackknife
+    rng = np.random.default_rng(1)
+    G, m, k = 6, 9, 5
+    A, Y = rng.normal(size=(G, m, k)), rng.normal(size=(G, m, 3))
+    gamma, ridge, rho = np.array([1.0, 2.0, 0.0, 0.5, 3.0]), 1e-8, np.array([-2.0, 0.5, -2.0])
+    blocks = []
+    for g in range(G):
+        Q, R = np.linalg.qr(A[g])
+        blocks.append((R, Q.T @ Y[g], np.zeros(3)))
+    Af, Yf = A.reshape(-1, k), Y.reshape(-1, 3)
+    lin = lambda r: np.where(gamma > 0, gamma ** 2 * 10.0 ** r, ridge)
+    solve = lambda X, y, r: np.linalg.solve(X.T @ X + np.diag(lin(r)), X.T @ y)
+    mean = np.stack([solve(Af, Yf[:, q], rho[q]) for q in range(3)], axis=1)
+    Q, R = np.linalg.qr(Af)
+    fac = ls.Factor(R, Q.T @ Yf, (Yf ** 2).sum(0), float(len(Af)), 0.0)
+    J = _jackknife(fac, gamma, ridge, blocks, rho, mean)
+    assert J.shape == (3, k, G)
+    for g in range(G):
+        keep = np.arange(G) != g
+        for q in range(3):
+            ref = solve(A[keep].reshape(-1, k), Y[keep].reshape(-1, 3)[:, q], rho[q]) - mean[:, q]
+            assert np.allclose(J[q, :, g], np.sqrt((G - 1) / G) * ref, rtol=1e-8, atol=1e-10)
+    st = DesignStats(fac, ("a", "b", "c"), None, gamma, ridge, J)
+    out = P.jackknife_draws({key: mean[:, [i]].T for i, key in enumerate("abc")}, {"d": st}, 4, 1, seed=2)
+    xi = np.random.default_rng(2).normal(size=(G, 4))
+    assert np.allclose(out["b"][1:], mean[:, 1] + (J[1] @ xi).T)

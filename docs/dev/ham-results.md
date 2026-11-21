@@ -979,4 +979,16 @@ Experiment (`ham-ref/work/uq/gold_uq.py`): gold default model, 4 training struct
 - **For block elements the evidence's noise is a calibrated error bar as it stands** (rms z 1.04 to 1.08); the off-site errors are heavier-tailed than a Gaussian (0.87 inside one sigma).
 - **The coefficient posterior is negligible in distribution**: 3,000 bonds a structure determine the coefficients, and the error is the model's limit. Its use is out of distribution (pairs or environments with few rows), which this test set cannot show.
 - **Eigenvalues from independent element noise are 2.1 times too narrow**: the block errors are correlated between bonds (a systematic misfit adds coherently in c^T dH c). One scale factor repairs the size, as HInitASI's conformal weight does. Within a structure the predicted sigma does not rank the errors (Spearman 0.12).
-- Next: the same with leave-structure-out noise and 32 structures; a configuration out of distribution (strained gold; Ti-Ti in NbFeSb) to see the posterior term and a trust flag; then the conformal scale per group and `hamiltonian_uncertainty` in the calculator.
+**Jackknife shape.** A fit with `sigma_c="loo"` or `"press"` now also returns the delete-one-structure jackknife of the coefficients (`fit._jackknife`, CR3, closed form from the per-structure factors; `DesignStats.jack`), and `posterior.jackknife_draws` weights those deviations with one set of random weights for every shell pair, L and both models, so the draws keep the correlation of the misfit between bonds.
+
+| Run | eigenvalue rms error / meV | rms sigma of the draws / meV | rms z, draws only | rms z, noise only | rms z, both | Spearman(\|error\|, sigma), draws |
+|---|---|---|---|---|---|---|
+| 4 structures, evidence, posterior draws | 2.62 | 0.40 | 7.2 | 2.4 | 2.1 | 0.11 |
+| 32 structures, evidence, posterior draws | 2.70 | 0.15 | 20.6 | 2.3 | 2.2 | 0.12 |
+| 8 structures, loo, jackknife draws | 2.64 | 0.51 | 6.0 | 2.3 | 2.0 | 0.13 |
+| 32 structures, loo, jackknife draws | 2.69 | 0.25 | 12.7 | 2.3 | 2.1 | 0.09 |
+
+- **On gold the eigenvalue error is bias, not variance**: it does not fall from 4 to 32 structures, while both the posterior and the jackknife spread fall as 1 / sqrt(structures). The jackknife is twice the posterior's width at 32 structures and still 13 times too narrow. A scale calibrated at one training-set size does not hold at another (the potential's calibration has a size-transfer rule for this).
+- **No shape ranks the errors within these structures** (Spearman 0.09 to 0.15): the test set is in distribution. Whether the jackknife shape separates familiar from unfamiliar structures needs structures that differ (strained gold; the NbFeSb types).
+- Block elements: the noise per shell pair stays calibrated in every run (rms z 1.03 to 1.08).
+- Next: scales by group (Mondrian: on-site / off-site, shell pair, bond-length band; structure type and energy band for eigenvalues), joint scores per structure (largest |error| / sigma over the states; Mahalanobis distance in the draws' covariance; a band for the DoS curve), on held-out structures; then an out-of-distribution test.

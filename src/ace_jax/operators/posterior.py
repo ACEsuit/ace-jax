@@ -73,6 +73,28 @@ def draws(coef, stats, n, nc, seed=0):
     return out
 
 
+def jackknife_draws(coef, stats, n, nc, seed=0):
+    """As `draws`, from the delete-one-structure jackknife of a fit with `sigma_c="loo"` or
+    "press" (`DesignStats.jack`): draw j is the fitted coefficients plus the deviations of the
+    structures weighted by xi_j ~ N(0, 1) per structure, the same weights in every design and
+    right-hand side, so the draws keep the correlation of the misfit between shell pairs and
+    bonds, which independent noise does not have.  Call it with the same `seed` for the on-site
+    and the off-site model of one fit (the same structures): their draws then belong together."""
+    out = {key: np.concatenate([np.asarray(c, float)] * (1 + n)) for key, c in coef.items()}
+    xi = None
+    for d in sorted(stats, key=str):
+        st = stats[d]
+        if st.jack is None:
+            raise ValueError("no jackknife in these statistics: fit with sigma_c='loo' or 'press'")
+        if xi is None:
+            xi = np.random.default_rng(seed).normal(size=(st.jack.shape[2], n))
+        dev = st.jack @ xi                                                    # (n_rhs, columns, n)
+        for qi in range(dev.shape[0]):
+            key, ch = st.keys[qi // nc], qi % nc
+            out[key][nc * (1 + np.arange(n)) + ch] += dev[qi].T
+    return out
+
+
 def channel_names(channels, n):
     """The channels of a model holding `draws`' coefficients."""
     return tuple(channels) + tuple(f"{c}#{j + 1}" for j in range(n) for c in channels)

@@ -17,6 +17,7 @@ from typing import NamedTuple
 import jax
 import jax.numpy as jnp
 import numpy as np
+import scipy.linalg as sla
 
 from ..basis import cg
 from ..fit.linear import lml_svd
@@ -39,6 +40,7 @@ class DesignStats(NamedTuple):
     hyper: object = None
     gamma: object = None                 # what the fit was given for this design's columns (`_solve`): the prior precision
     ridge: float = 0.0                   # added to the ridge, or with `hyper` the smoothness of each column
+    jack: object = None                  # "loo", "press": (n_rhs, columns, structures), the jackknife deviations (`_jackknife`)
 
 
 class _Prior(NamedTuple):
@@ -166,7 +168,29 @@ def _loo(fac, gamma, ridge, blocks, press):
     best, q = crit.argmax(0), np.arange(crit.shape[1])
     sig = np.sqrt(np.asarray(s2)[best, q])
     sc = sig / 10.0 ** (0.5 * grid[best])
-    return np.asarray(means)[best, :, q].T, np.stack([sig, sc, crit[best, q], sc], axis=1)
+    mean = np.asarray(means)[best, :, q].T
+    return mean, np.stack([sig, sc, crit[best, q], sc], axis=1), _jackknife(fac, gamma, ridge, blocks, grid[best], mean)
+
+
+def _jackknife(fac, gamma, ridge, blocks, rho, mean):
+    """(n_rhs, columns, structures): the change of each right-hand side's coefficients when one
+    structure is left out, at its own prior (log10 rho), times sqrt((G - 1) / G): the
+    delete-one-structure jackknife (CR3), whose outer product over the structures is the
+    covariance of the coefficients that the scatter between structures supports.  In closed form
+    from the structure's rows P_g and residual r_g: -A^-1 P_g^T (1 - P_g A^-1 P_g^T)^-1 r_g, with
+    A = R^T R + diag(prior).  A leverage of 1 within roundoff is clamped (`uq.jackknife`)."""
+    R = np.asarray(fac.R, float)
+    G = len(blocks)
+    out = np.zeros((mean.shape[1], R.shape[1], G))
+    for r in np.unique(rho):
+        q = np.flatnonzero(rho == r)
+        U = np.linalg.qr(np.concatenate([R, np.diag(np.sqrt(np.where(gamma > 0, gamma ** 2 * 10.0 ** r, ridge)))]), mode="r")
+        for g, (Pg, Yg, _e) in enumerate(blocks):
+            W = sla.solve_triangular(U, Pg.T, trans="T")                     # U^-T P_g^T: H_g = W^T W
+            mu, V = np.linalg.eigh(np.eye(len(Pg)) - W.T @ W)
+            res = Yg[:, q] - Pg @ mean[:, q]
+            out[q, :, g] = -sla.solve_triangular(U, W @ (V @ ((V.T @ res) / np.maximum(mu, 1e-10)[:, None]))).T
+    return out * np.sqrt((G - 1) / G)
 
 
 class _Spill:
@@ -284,11 +308,11 @@ def _solve(designs, acc, yy, n, nc, ridge, gamma=None, select=None, blocks=None,
         R, c = acc[d]
         make_room(40_000 if select else 25_000)          # every design shape is a program of its own (`operators.maps`)
         fac = ls.Factor(R, c, jnp.asarray(yy[d]), jnp.asarray(float(n[d])), jnp.zeros(()))
-        hyper = None
+        hyper = jack = None
         if select == "evidence":
             mu, hyper = _evidence(fac, gamma[d], ridge, nc, floor)
         elif select:
-            mu, hyper = _loo(fac, gamma[d], ridge, blocks[d], select == "press")
+            mu, hyper, jack = _loo(fac, gamma[d], ridge, blocks[d], select == "press")
         else:
             lin = jnp.full(k, ridge) if gamma is None else ridge + jnp.asarray(gamma[d])
             mu = np.asarray(lo.posterior_qr(lin, [fac], [0.0])[0])                       # (k, n_keys * nc)
@@ -296,7 +320,7 @@ def _solve(designs, acc, yy, n, nc, ridge, gamma=None, select=None, blocks=None,
         for q, key in enumerate(keys):
             coef[key] = mu[:, q * nc:(q + 1) * nc].T.copy()
             report[key] = (n[d], k, np.sqrt(res2[q * nc:(q + 1) * nc] / n[d]))
-        stats[d] = DesignStats(fac, tuple(keys), hyper, None if gamma is None else np.asarray(gamma[d], float), float(ridge))
+        stats[d] = DesignStats(fac, tuple(keys), hyper, None if gamma is None else np.asarray(gamma[d], float), float(ridge), jack)
     return coef, report, stats
 
 
