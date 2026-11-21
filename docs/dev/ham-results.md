@@ -1163,3 +1163,52 @@ Eigenvalues (40 structures): score |e_A - e_B|.
 - Side result: with these fits (first 32 structures by name, plain ridge) the band error is 1.28 meV
   for the largest architecture and 1.62 for the 4 Å environment against 2.14 for the default; the
   6 Å environment is worse (2.97).
+
+## A larger default bond environment, and stored calibration (2026-11-21)
+
+`aj ham fit`'s default bond environment changed from `--env 5 6 4 4 4` to `5 8 4 6 4` (8 radial
+functions about the midpoint, 6 of the bond). Fits on lestrade (8 threads), scored by `aj eval`
+(27 k-points, band RMSE from own Fermi levels).
+
+| data | training / test structures | `5 6 4 4 4` | `5 8 4 6 4` |
+|---|---|---|---|
+| bulk gold (H; S = 1 in the score), band RMSE / meV | 32 / 10 | 2.19 | 1.81 |
+| the same, coefficients; fit time / s | | 3,987; 67 | 5,811; 103 |
+| bulk aluminium (H and S), band RMSE / meV | 34 / 20 | 18.83 | 6.90 |
+| the same, common zero / meV | | 17.57 | 7.92 |
+| the same, off-site H block RMSE / meV | | 1.799 | 1.277 |
+| the same, Fermi-level RMSE / meV | | 12.43 | 3.91 |
+| the same, coefficients; fit time / s | | 22,868; 128 | 32,996; 281 |
+
+- Gold: the grid of the Pareto figure has the same pair at 32 structures as 2.15 and 1.41 meV (reference
+  S in the score), 14.30 and 17.16 ms per atom for the blocks on one CPU core, 0.594 and 0.619 on the GPU.
+- Aluminium gains more than gold: 2.7 times in band error, 3.2 in the Fermi level. The on-site blocks
+  are the same model in both fits (8.16 meV), so the gain is all off-site.
+- A 4.5 Å environment with the new radial counts gives 1.82 meV on gold, a 4 Å one 2.04: 5 Å stays.
+- The band energy per atom of the aluminium fits is 187 meV in both. Not looked into here.
+
+Calibration of the new default on gold (`aj ham calibrate`, window -10 to 5 eV, 30 training-set
+structures that the 32-structure fit did not use; 279,759 eigenvalues), half-widths in meV:
+
+| energy from the Fermi level / eV | 0.68 | 0.90 | 0.95 |
+|---|---|---|---|
+| -10.00 to -7.14 | 1.92 | 3.40 | 4.18 |
+| -7.14 to -4.79 | 1.38 | 2.33 | 2.83 |
+| -4.79 to -2.84 | 1.04 | 1.74 | 2.11 |
+| -2.84 to -1.52 | 1.14 | 1.91 | 2.28 |
+| -1.52 to 1.39 | 0.91 | 1.56 | 1.87 |
+| 1.39 to 5.00 | 1.49 | 2.66 | 3.21 |
+| every energy | 1.27 | 2.29 | 2.89 |
+| whole window of a structure (joint) | 7.26 | 9.04 | 10.44 |
+
+Coverage on the 10 test structures (`aj eval`; band RMSE there 1.58 meV in this window):
+
+| level | eigenvalues inside | range over structures | structures wholly inside the joint width |
+|---|---|---|---|
+| 0.68 | 0.646 | 0.52 to 0.75 | 6 of 10 |
+| 0.90 | 0.878 | 0.80 to 0.96 | 9 of 10 |
+| 0.95 | 0.934 | 0.88 to 0.98 | 10 of 10 |
+
+The intervals are 2 to 3 points under their level on average, and the spread between structures
+is narrower than for the old default (0.48 to 0.91 at 0.68 with the leave-one-out spectra above).
+The bands away from the Fermi level are twice as wide as the one at it.

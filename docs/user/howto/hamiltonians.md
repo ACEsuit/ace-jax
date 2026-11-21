@@ -77,8 +77,12 @@ with these options:
 | `--bond-radials` | number of radial functions of the distance between the two atoms of a block |
 | `--bond-rcut` | longest distance that has a block. The default is the longest distance in the data |
 | `--coupled N L` | features that couple the bond with the environments of its two atoms |
-| `--env R N L NB LB` | features of the atoms near the bond. This group gives most of the accuracy and most of the cost |
+| `--env R N L NB LB` | features of the atoms near the bond. This group gives most of the accuracy and most of the cost. The default is `5 8 4 6 4` |
 | `--no-env` | no features of the atoms near the bond. The model is fast and less accurate |
+
+`--env 5 6 4 4 4` is a smaller basis. It was the default to version 0.7.2. The fit and the
+prediction are approximately 1.2 to 2 times faster, and the band error is larger: 1.5 times
+on bulk gold and 2.7 times on bulk aluminium, each with approximately 32 training structures.
 
 ### The prior
 
@@ -127,6 +131,54 @@ larger than 5 times the median.
 
 Energies are in the unit of the data. For FHI-aims data the unit is eV, and the
 tables show meV.
+
+## Calibrate the eigenvalue errors
+
+A calibrated model gives an interval for each eigenvalue. The calibration set
+is a set of structures with reference blocks that the fit did not use.
+
+1. Calibrate the model:
+
+    ```bash
+    aj ham calibrate --model gold.npz --data calibration/ --nelectrons 79:11
+    ```
+
+2. Examine the coverage on a validation set:
+
+    ```bash
+    aj eval --model gold.npz --data validation/ --nelectrons 79:11
+    ```
+
+3. Get the half-widths of the intervals in Python:
+
+    ```python
+    calc = HamiltonianCalculator("gold.npz", kpts=(3, 3, 3), nelectrons={79: 11})
+    h = calc.eigenvalue_half_widths(atoms, level=0.9)
+    ```
+
+The command prints a half-width for each energy band and each level (0.68, 0.9
+and 0.95 by default). The eigenvalues are relative to the Fermi level of their
+own spectrum. An eigenvalue is in its interval when the difference from the
+reference is not larger than the half-width.
+
+- The half-width is constant in an energy band. It does not change with the
+  structure.
+- At level 0.9, approximately 90 % of the eigenvalues are in their intervals.
+  This is a mean for many structures. For one structure the fraction can be
+  smaller or larger, because the eigenvalues of one structure have a common
+  error.
+- The **whole window** half-width is larger. At level 0.9, all eigenvalues of
+  a structure are in this interval for approximately 90 % of the structures.
+  Give `joint=True` to `eigenvalue_half_widths` to get it. It needs
+  approximately 10 calibration structures for level 0.9 and 20 for level 0.95.
+
+Use the same `--kpts`, `--width`, `--smearing` and `--nelectrons` for the
+calibration and for the predictions.
+
+!!! warning
+    The intervals are correct only for structures that are similar to the
+    calibration set. They do not show that a structure is different from the
+    training data.
 
 ## Predict H and S
 

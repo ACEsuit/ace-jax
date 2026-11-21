@@ -50,7 +50,10 @@ class HamiltonianCalculator(Calculator):
     def __init__(self, predictor, kpts=(1, 1, 1), weights=None, nelectrons=None, width=0.1, smearing="fermi-dirac",
                  overlap="S", channel="H", degeneracy=2.0, device=False, core_bands=None, threads=1, **kwargs):
         super().__init__(**kwargs)
+        self.calibration = None                         # `ham.uq.calibrate`'s record: read from a model file that `aj ham calibrate` wrote
         if isinstance(predictor, (str, os.PathLike)):
+            from ..operators import io
+            self.calibration = io.load(predictor).meta["info"].get("calibration")
             predictor = HamiltonianPredictor.from_file(predictor, threads=threads)
         self.predictor = predictor if isinstance(predictor, HamiltonianPredictor) else HamiltonianPredictor(*predictor, threads=threads)
         if smearing not in SMEARINGS:
@@ -120,6 +123,17 @@ class HamiltonianCalculator(Calculator):
 
     def get_eigenvalues(self, kpt=0, spin=0):
         return self.get_property("eigenvalues")[kpt]
+
+    def eigenvalue_half_widths(self, atoms=None, level=0.9, joint=False):
+        """(n_k, n) half-widths of the calibrated intervals of the eigenvalues at `level` (`ham.uq`:
+        constant within an energy band from the Fermi level; `joint`: one width that holds for every
+        eigenvalue of the window at once), NaN outside the calibration's window.  Needs a model
+        calibrated by `aj ham calibrate`, or `calc.calibration = ham.uq.calibrate(...)`; the
+        k-points and smearing should be those of the calibration."""
+        from . import uq
+        if not self.calibration:
+            raise ValueError("this model has no calibration: run `aj ham calibrate`, or set calc.calibration")
+        return uq.half_width(self.calibration, self.get_property("eigenvalues", atoms) - self.get_property("fermi_level", atoms), level, joint)
 
     def get_fermi_level(self):
         return self.get_property("fermi_level")
