@@ -60,7 +60,7 @@ def spectrum(M, S, nel, sthr=0.0):
     number of them at every k, the smallest count), which leaves out the nearly dependent
     combinations of orbitals that a small error in H turns into spurious states."""
     if sthr <= 0:
-        e = np.array([[scipy.linalg.eigh(h, s, eigvals_only=True) for h, s in zip(M[c], S)] for c in ("H_up", "H_dn")])
+        e = np.array([[scipy.linalg.eigh(h, s, eigvals_only=True, driver="gvx") for h, s in zip(M[c], S)] for c in ("H_up", "H_dn")])
     else:
         sv = [np.linalg.eigh(s) for s in S]
         keep = min(int((w > sthr).sum()) for w, _ in sv)

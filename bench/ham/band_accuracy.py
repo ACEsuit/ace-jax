@@ -50,7 +50,7 @@ def bands(HR, SR, n, kpts):
     for k in kpts:
         ph = np.exp(2j * np.pi * (n @ k))
         H, S = np.einsum("r,rij->ij", ph, HR), np.einsum("r,rij->ij", ph, SR)
-        out.append(scipy.linalg.eigh(0.5 * (H + H.conj().T), 0.5 * (S + S.conj().T), eigvals_only=True))
+        out.append(scipy.linalg.eigh(0.5 * (H + H.conj().T), 0.5 * (S + S.conj().T), eigvals_only=True, driver="gvx"))
     return np.asarray(out)
 
 

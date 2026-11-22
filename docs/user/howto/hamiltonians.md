@@ -93,6 +93,12 @@ with these options:
   below, and its fit used much more time and disk space.
 - A number sets the scale directly.
 
+`--noise-floor` sets the smallest noise of H that `--prior evidence` can
+select, in the unit of the data. A good value is the difference of H between
+two SCF calculations of the same structure. For FHI-aims with
+`sc_accuracy_rho 1e-5`, this difference is approximately 1e-7 eV for off-site
+blocks and 3e-6 eV for on-site blocks.
+
 !!! warning
     A fit with no prior can give an eigenvalue far from the bands when the
     overlap matrix is almost singular. The block errors do not show this

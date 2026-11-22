@@ -1031,7 +1031,7 @@ the released kernels), Sulis, job scripts `runs/symmetrix-ace/sulis/tables-{gpu,
 **Cantor kernel row** (`accuracy_cost.multicomponent --codes acejax-ace`, LAMMPS, float64; the other codes' rows are
 not rerun): A100 (gpu013, job 2296551, 32,768 atoms) 0.149 µs/atom-step, was 0.150; CPU 128 x 1 (node094, job
 2296552, 8,192 atoms) 0.382 and 0.390, was 0.376. No change. Both kernels take the coupled form for this model; the
-CUDA kernel keeps the radial table (the model has no `ffi.analytic_plan`; not looked into). Rows:
+CUDA kernel keeps the radial table (the model file is an ACEpotentials export with splined radials, so it has no `ffi.analytic_plan`). Rows:
 `sulis-gpu-cantor-kernel.jsonl`, `sulis-cpu-128x1-cantor-kernel.jsonl` (the first CPU repeat).
 
 **Mixed precision, A100** (`ACECalculator`, 32,768 Si atoms, the three precisions in one process in turn, 5 x 8

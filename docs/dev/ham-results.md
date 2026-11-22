@@ -858,3 +858,59 @@ Bulk gold, 10 test structures, all bonds, H only (`deeph_fit.py`), band RMSE fro
 - Perfect fcc supercell, spread of the block norm over symmetry-equivalent bonds: 2.5 meV at (0,2,2) and 1.7 meV at (0,0,4) (an atom at the midpoint) with the 0.7.0 model, 0 on the ten other vector classes; 0 everywhere after the refit.
 - `aj ham fit` (H and S, default basis, 32 structures, CPU, no wrapper): 2.14 meV on the 4x4x4 grid, 2.04 meV on 7x7x7 at 1000 K; H off-site MAE 0.28 meV. The fit took 398 s on 16 threads of a CPU (70 s on the GPU before); it is the first full fit on a CPU with the memory-map guard in the library.
 - MACE-H at half size, 32 structures, converged (2,294 epochs, lestrade): H MAE 0.421 meV, bands 4.57 meV, 126 ms per atom on one core: better in bands than the full-size run that hit its time limit (5.32 meV).
+
+## SCF noise of the blocks, and the bounds of the evidence (2026-11-20)
+
+Two 64-atom rattled Al cells (bcc_010, fcc_010 of `al_small`; FHI-aims 261002, the dataset's settings), each rerun with other SCF settings and compared with a run at `sc_accuracy_rho 1e-8` (two such runs with different mixing agree to the files' digits). H difference in meV, RMS (largest); S is identical in every run.
+
+| Run | Cycles | On-site | Off-site |
+|---|---|---|---|
+| `sc_accuracy_rho 1e-4` | 23-24 | 0.013-0.018 (0.29) | 0.0005-0.0012 (0.056) |
+| dataset settings, 1e-5 | 30-31 | 0.002-0.003 (0.04) | 0.0001 (0.006) |
+| 1e-5, mixing 0.05 / mixing 0.4 with 4 Pulay steps / 12 Pulay steps | 17-31 | 0.001-0.004 (0.04) | 0.0001-0.0003 (0.014) |
+| 1e-6 | 37-39 | 0.0003-0.0004 (0.005) | < 0.0001 (0.001) |
+
+The rigid part (a multiple of S) is at most 0.009 meV. So the data are noise-free on the scale of the model errors (off-site MAE 0.13 meV at best on gold): the sigma the evidence finds is misfit. Inputs and script: `ham-ref/work/noise/` (`analyse.py`).
+
+Ti-Ti off-site blocks of the 24 NbFeSb cells alone (304 bonds, fewer rows than columns), `sigma_c="evidence"`, largest |coefficient| (no prior: 51.5):
+
+| Form | Largest, next |
+|---|---|
+| 0.7.0: sigma >= 1e-9 of the target's rms, no bound on rho | 4.7e13 |
+| 0.7.1: ridge added in the solve after the selection | 50.9, 7.7 |
+| rho >= ridge / gamma_min^2 inside the search (`_rho_floor`) | 64, 21 |
+| no bound on rho, sigma >= 1e-7 eV / 3e-6 eV / 1e-4 eV | 1.8e3, 280 / 1.7e3, 102 / 102, 35 |
+
+A noise floor at the measured SCF level removes the divergence but leaves a prior weaker than the ridge; the bound on rho is what holds the prior at the ridge. Both are in the search now (`noise=` optional, the rho bound always), and the solve is the model the evidence was computed for. The 0.7.1 form changed 532 of 533 off-site coefficient blocks of the NbFeSb model (predictions by at most 0.9 meV; Ti on-site by 24 meV; no score moved).
+
+## Block prediction on a GPU: profile, and what was changed (2026-11-21)
+
+Gold default model (2c + site(2,2) + env(6,4,4,4)), H, RTX 4000 Ada, float32; tiles of the 64-atom test cell (233 bonds per atom). Stages of `OffsitePredictor.dense` at 512 atoms, µs per atom:
+
+| Stage | before | now |
+|---|---|---|
+| off-site blocks, compiled program | 303 | 86 |
+| bond list, host | 60 | 60 |
+| site and environment lists, pair layouts, host | 17 | 17 |
+| blocks to the host, selection | 12 | 12 |
+| site features, compiled | 2 | 2 |
+
+- **The bond-environment loops ran one atom at a time** (`lax.map` in `_canonical` and `_env_side`, chosen for the CPU cache): 512 sequential steps of a small program on a GPU. `offsite_fast._rows` now takes `ROW_BATCH` = 16 atoms a step on a GPU (4: 164, 8: 131, 16: 121, 32: 122, 64: 131 µs per atom for the device path at 512 atoms; all at once is slower than 16) and one atom on a CPU as before. Same blocks (float64: 7e-13).
+- **Site features are 1 % of the call**, so the potential's CUDA kernel (which computes the same A and AA) has nothing to gain here; the remaining device time is the bond-environment contraction and the scatter into blocks.
+- **The device path made three neighbour-list calls** (site, bond, environment cutoffs; matscipy-neighbours' CUDA backend, handed over by DLPack), each with a download to size its slots: 6.5 ms of 12.4 ms at 64 atoms. `prepare_device` now makes one, at the largest cutoff, and `_one_list` cuts the three lists from it inside the compiled program (a running count and a scatter per row, linear). Their slot counts are kept between calls and checked after each: one small download, after the program. One call of the library is 2.8 ms at 64 atoms and 7.0 ms at 1,024 (its CPU build: 1.3 and 20 ms), which is now the floor for small cells.
+- `HamiltonianPredictor.blocks` (and through it the calculator's `hamiltonian` property and `aj ham predict`) and `prepare_auto` (`aj ham bands`) take the device path where it can run (`device_lists()`); elsewhere they are unchanged.
+
+Positions to blocks, µs per atom, float32:
+
+| | 64 atoms | 256 | 1,024 |
+|---|---|---|---|
+| blocks left on the device, before (three lists, atom loop) | 414 | | 332 (512 atoms) |
+| blocks left on the device, now | 148 | 122 | 116 |
+| dictionary of blocks on the host, before (host lists) | 583 | | |
+| dictionary of blocks on the host, now | 231 | | |
+
+- 64 atoms: 9.5 ms per structure, 2.8 times faster; against MACE-H's 3.5 ms per atom on this card, 24 times.
+- Building the Python dictionary is 80 µs per atom (15 k blocks for 64 atoms): consumers that can should take `Prepared`'s arrays.
+- An all-pairs neighbour list inside the program (no library call at all) was tried: 6.4 ms at 64 atoms, level with the library at 1,024. Not kept: it is quadratic in the atoms.
+- Float32 run-to-run differences of the blocks (scatter order on the GPU): largest 0.35 meV, mean 0.001 meV for this model; 4 meV and 0.015 meV for the largest model.
+- Not yet measured: float64 on an A100; `band_energy_device` still makes three list calls.
