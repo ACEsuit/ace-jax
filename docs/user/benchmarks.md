@@ -276,6 +276,7 @@ LAMMPS and in float64.
   the cost of a fitted model of the same size, but they do not predict
   correctly. Thus this table compares only speed.
     - The linear ACE model has 447 basis functions for each element.
+      ace-jax builds it, with polynomial radial functions.
     - The PACE model has 496 basis functions for each element. ace-jax and
       ML-PACE evaluate the same `.yace` file.
     - The MACE model is MACE-MP-0b2 medium.
@@ -283,7 +284,11 @@ LAMMPS and in float64.
   with lammps-jax, ML-PACE as `pair_style pace` and `pair_style pace/kk`,
   and MACE with Symmetrix v0.3.0.
 - **ace-jax kernel.** The kernel evaluates linear ACE models only. Thus the
-  PACE model runs as the compiled JAX program.
+  PACE model runs as the compiled JAX program. On the GPU, the kernel
+  calculates the polynomial radial functions directly.
+- **Compiled JAX program.** For the linear ACE model, the radial functions
+  are splined (`spline_tol=1e-10`). This setting is not the default. With
+  the default, the cost is 5.5 µs/atom-step on the A100 and 76 on the CPU.
 - **GPU.** One NVIDIA A100, 32,768 atoms, one MPI rank.
 - **CPU.** One node with two 64-core AMD EPYC 7742 CPUs, 8,192 atoms, 128
   MPI ranks with one thread for each rank.
@@ -293,16 +298,16 @@ LAMMPS and in float64.
 
 The results are:
 
-- On the linear ACE model, the ace-jax kernel is 3.9 times faster than the
+- On the linear ACE model, the ace-jax kernel is 9.3 times faster than the
   compiled JAX program on the A100. On the CPU, it is 10 times faster.
 - The ace-jax kernel on the linear ACE model costs less than ML-PACE on the
-  PACE model: 0.15 against 0.30 µs/atom-step on the A100, and 0.38 against
+  PACE model: 0.064 against 0.30 µs/atom-step on the A100, and 0.38 against
   0.51 on the CPU. These are different models of approximately the same
   size.
 - On the same PACE model, ML-PACE is 2.4 times faster than ace-jax on the
   A100. On the CPU, it is 11 times faster.
 - MACE-MP-0b2 medium costs 7.5 µs/atom-step on the A100 and 29 on the CPU.
-  This is 50 and 78 times the cost of the ace-jax kernel on the linear ACE
+  This is 118 and 78 times the cost of the ace-jax kernel on the linear ACE
   model.
 
 !!! warning
