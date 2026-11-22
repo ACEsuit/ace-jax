@@ -270,3 +270,24 @@ def test_fit_leaving_structures_out(basis):
         G = np.asarray(s0[key].factor.G)
         assert np.allclose(sa[key].factor.G, G, atol=1e-8 * np.abs(G).max())
     assert all(np.allclose(a.coef[k], b.coef[k], rtol=1e-3, atol=1e-3) for k in a.coef)                  # the few C-C bonds leave directions of 1e-5 relative; coefficients ~100
+
+
+def test_jackknife_at_a_fixed_prior(basis):
+    """`fit_offsite(jackknife=True)` without prior selection, on the device and on the host: the
+    closed-form deviations are the coefficients of the refit without a structure."""
+    require_optional("h5py")
+    d = deeph.read(FIX)
+    rng = np.random.default_rng(0)
+    ds = [d._replace(positions=d.positions + 0.02 * rng.normal(size=d.positions.shape)) for _ in range(3)]
+    basis = basis._replace(n_cpl=0, l_cpl=0)
+    kw = dict(ridge=1e-4, chunk=512)                     # a ridge that conditions the few C-C bonds
+    a, _, sa = fit_offsite(basis, ds, stats=True, jackknife=True, **kw)
+    b, _, sb = fit_offsite(basis, ds, stats=True, jackknife=True, compiled=False, **kw)
+    ref, _ = fit_offsite(basis, ds[1:], compiled=False, **kw)
+    nc, f = len(a.channels), np.sqrt(2 / 3)
+    for key, st in sb.items():
+        assert st.jack.shape == (len(st.keys) * nc, np.asarray(st.factor.R).shape[1], 3) and st.hyper is None and st.ridge == 1e-4
+        scale = max(np.abs(st.jack).max(), 1e-300)
+        assert np.abs(sa[key].jack - st.jack).max() < 1e-5 * scale, key
+        for i, k in enumerate(st.keys):
+            assert np.abs(st.jack[i * nc:(i + 1) * nc, :, 0] / f - (ref.coef[k] - b.coef[k])).max() < 1e-7 * scale, k
