@@ -32,9 +32,11 @@ Prototype (read it before starting; do not copy its hard-wired aluminium constan
 
 Nothing here knows it is a density.
 
-- **Auxiliary basis**: an `OrbitalBasis` (`operators/orbitals.py`): shells per species as a list of l. Reuse it as it is; `shell_slice(z, s)` gives the columns of shell s in an atom's vector.
+- **Auxiliary basis**: an `OrbitalBasis` (`operators/orbitals.py`): shells per species as a list of l; `shell_slice(z, s)` gives the columns of shell s in an atom's vector.
+- **Radial functions (new, optional, on `OrbitalBasis`)**: `radials: {z: (grid (n_r,), values (n_shells, n_r))} | None`, the radial function of every shell tabulated on a radial grid (u(r) / r convention and normalisation stated in the docstring), for the orbital basis and the auxiliary basis alike. Nothing in this task evaluates them; they are carried so that the later conversions (below) need no new data format. Equality and hashing of an `OrbitalBasis` stay on the shells alone (models and data compare bases by shells; check every `==` and `static` use). `operators/io.py` stores them when present (`radial_grid_<z>`, `radial_values_<z>` per basis); the tables come from the DFT code's output and live in the data, never in the repository or its fixtures (tests use analytic Gaussians).
 - **`CentredModel(eqx.Module)`**: `basis: SiteBasis`, `coef: {(z, s): (n_channel, n_B(lam, p) [+ 1 for lam = 0])}`, `shells: OrbitalBasis` (static), `channels: tuple` (static; the density has one, "rho"; a spin density would have two). p = (-1)^lam. The lam = 0 part has a constant column, as the on-site L = 0 part: the coefficient of the isolated atom.
 - **Prediction**: `predict(positions, cell, numbers, pbc=True) -> {channel: (n_atoms, n_aux_max) or list per atom}`; choose one layout and document it (a ragged list per species, `{channel: {z: (n_z atoms, n_aux(z))}}` plus the atom indices, matches `OnsitePredictor.dense`). Features from `onsite.site_graph` + `onsite._features` (do not write a second feature path). A compiled `CentredPredictor` like `OnsitePredictor`: neighbour list on the host, features and readout as compiled programs, the model's arrays passed per call.
+- **Overlap and charges are inputs, by name, not by origin**: `fit_centred(..., overlaps=)` and `conserve(..., charges=)` take arrays. Today they come from the data files; when the integrals module exists (deferred) they will be computed from the radial functions, and the data's copies become a check. Do not read them from files inside the fit.
 - **m convention**: component m of shell lam is `eval.harmonics`' real Y_{lam, m}, index m + lam, the same as the features. The converter is responsible for bringing data to it.
 - The site basis needs only the parities (-1)^lam up to the largest auxiliary lam: build it with `build_site_basis(elements, order, totaldegree, lmax_feat=lam_max, rcut=..., ...)` and check what parities it returns; if it builds both, the unused ones cost evaluation time, so add a way to ask for natural parity only if that is cheap, else leave it and say so in the results.
 
@@ -62,7 +64,13 @@ One more optional part in the model file, beside `onsite` and `offsite`: `centre
 
 The `ham` extra already carries what it needs (h5py is not required; npz is enough).
 
-- **`DensityData`** (NamedTuple): `positions, cell, numbers, pbc, shells: OrbitalBasis, coefficients: (n_aux_total,)` in atom order then shell order then m, `overlap: (n_aux_total, n_aux_total) | None`, `charges: {z: (n_aux(z),)} | None` (the integral of each auxiliary function; zero for lam > 0), `nelectrons: float | None`.
+- **`DensityData`** (NamedTuple): `positions, cell, numbers, pbc, shells: OrbitalBasis, coefficients: (n_aux_total,)` in atom order then shell order then m, `overlap: (n_aux_total, n_aux_total) | None`, `charges: {z: (n_aux(z),)} | None` (the integral of each auxiliary function; zero for lam > 0), `nelectrons: float | None`, `info: dict`.
+- **One layout with the Hamiltonian data**: atom order, shell order within an atom and the m convention are those of `OperatorData` blocks, so that a density record and the H, S (and later the density matrix) of the same structure index the same atoms the same way. A density file may sit in a structure's DeepH directory (`density.npz`), and `read` accepts that directory.
+- **`info`, recorded with every density** (all optional, all written by the converter when known; `aj density fit` warns when training structures disagree on the first two):
+  - `fit_metric`: how the coefficients are defined from the density, "overlap" (c = S^-1 w, w the projections on the auxiliary functions) or "coulomb". Not verified for the reference code: the prototype assumed "overlap"; the converter records "unknown" until a projection of a reference density matrix settles it.
+  - `kpts`, `kpt_offset`, `smearing`, `width`, `nelectrons`: what the density of a given H depends on.
+  - `self_consistent: bool`, and `hamiltonian`: the path of the H this density produced or was built into. A converged run has both true and its own H. A record with `self_consistent = False` and a `hamiltonian` is a pair (density in, H built from it): the training and test data of a density-to-H map. 26 such pairs exist (`ham-ref/work/salted/hdata/{harsh_hrho,harsh_hrho_mix,bulk_hrho}` with the predicted coefficients under `harsh/{pbulk,pmix,hrho_bt}`): the converter should emit them with the flag set.
+- `projections(data)`: w = S c when the overlap is there. The later consistency checks work in w (local, basis-independent to first order), so every metric is reported for c and for w.
 - **Neutral format**: one `.npz` per structure with those names and a `meta_json` (`schema_version` 1, `kind` "density", the m convention stated). `read(path)`, `write(path, data)`, and `names(dir)` listing a directory of them. Document the schema in the module docstring, as `operators/io.py` does.
 - **Electron count**: N = sum_i q_{z_i} . c_i. After prediction, `conserve(c, numbers, charges, nelectrons)` applies the smallest Euclidean change that makes it exact: c_i -= q_{z_i} dN / sum_j |q_{z_j}|^2. Return dN before the correction as well: it is a free out-of-distribution flag (0.01 to 0.08 e in distribution, up to 7.8 e on slabs) and belongs in every prediction's output.
   - Charges come from the data. If no structure has them, fit them from the training labels (sum over atoms of the lam = 0 coefficients against the electron count, least squares) and warn: the prototype found that fit ill-conditioned on six structures and replaced it by measured charges.
@@ -86,7 +94,8 @@ Mounted from `ham/cli.py` the way `aj ham` is (the parser lives with the applica
 - With a random S and noisy targets, the overlap fit has the smaller S-weighted residual and the plain fit the smaller plain one (they are different minimisers).
 - The closed-form jackknife deviations equal explicit refits without each structure (fixed prior), to 1e-8 relative.
 - Electron count: exact after `conserve`; dN returned equals the direct sum; two species.
-- File round trips: model file bit for bit; neutral data file; an old operator file without the centred part still loads.
+- File round trips: model file bit for bit, with and without radial functions; neutral data file with `info`; an old operator file without the centred part or radials still loads; two bases with the same shells and different radial tables compare equal.
+- A non-self-consistent record round-trips with its flag and H link, and `read` of a DeepH directory finds `density.npz`.
 - Command line smoke test: fit, predict, eval on four small synthetic structures.
 - `tests/test_import_layers.py` passes with no new `ALLOWED` entry; `tests/test_core_deps.py` passes.
 
@@ -101,12 +110,19 @@ Data: `/storage/eng/essswb/projects/ace-jax/ham-ref/work/salted/data/s000` to `s
 
 The one-shot energies need the DFT code and are not part of this task; the owner's session reruns them from the predicted files.
 
+## Conversions between density and Hamiltonian without the DFT code (deferred; what this task prepares)
+
+- **H to density**: density matrix D from H(k), S(k) (the band-energy code in `ham/operator.py` already forms it: expose it as blocks {(R, i, j)} in the H layout when this stage is done), then c = S_aux^-1 w, w_P = sum D_mu,nu <P | phi_mu phi_nu>: three-centre overlaps of numeric radial functions, by quadrature on atom-centred grids. Needs: the radial functions of both bases (carried from now on), k-points, smearing and electron count (recorded from now on), the fit metric (recorded). An integrals module is its own spec. Its use: the mismatch between the density of the predicted H and the predicted density, in the S_aux metric, as an error estimate with no reference and no DFT code.
+- **Density to H**: H0(geometry) + Hartree (linear in c; radial Poisson solves, three-centre integrals, Ewald) + exchange-correlation (density and gradient on a grid). This is the H-build stage of a DFT code and is its own spec; the non-self-consistent pairs recorded from now on are its test data, and the data for a learned linear response dH = K dc if that route is taken instead.
+
+Nothing above is implemented in this task. The task's part is: radial functions on the basis objects and in the files, the shared layout, the recorded metric, k-points, smearing and electron count, the self-consistency flag with the link to H, and overlap and charges passed as arrays.
+
 ## Out of scope, noted for later
 
 - Forces or any derivative of the density with respect to positions.
 - A sparse or truncated overlap for large cells; learning in a metric that needs no overlap.
 - Element embedding (TrACE) site bases: `fit_centred` should take any `SiteBasis`, but only the categorical one is tested here.
-- The Hamiltonian from the predicted density without the DFT code, and the projection-space consistency check with the H model (`docs/dev/ham-results.md`, "A consistency check without the DFT code"): both will sit on `DensityPredictor` and `HamiltonianPredictor`, so keep the predictor's output layout documented and stable.
+- The integrals module and both conversions (section above); the projection-space consistency check with the H model (`docs/dev/ham-results.md`, "A consistency check without the DFT code"). They will sit on `DensityPredictor` and `HamiltonianPredictor`, so keep the predictor's output layout documented and stable.
 - A spin density (two channels): the model and fit carry a channel axis from the start so that it is data, not a redesign.
 
 ## Documentation
