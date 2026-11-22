@@ -3,6 +3,7 @@
     python bench/scaling/models.py pace   # pyace venv: random-coefficient .yace x3 x2
     python bench/scaling/models.py ace    # Julia: linear ACE .npz x3 x2
     python bench/scaling/models.py mace   # MACE-MP-0b2 s/m/l + MH-1 + Symmetrix .json per system
+    python bench/scaling/models.py ace-poly  # linear ACE .npz built by ace-jax, polynomial radials (no Julia)
     python bench/scaling/models.py ace-learned  # learned-radial proxies of ace_*_medium.npz (after `ace`)
     python bench/scaling/models.py acepotentials-trim [SiGe/small ...]  # PR 309 trim .so per ace npz
     python bench/scaling/models.py sizes  # basis functions per central element -> model_sizes.json
@@ -62,6 +63,12 @@ MACE_HEAD = {"mh1": "omat_pbe"}
 LEARNED_CODES = {"acejax-ace-learned": "auto", "acejax-ace-analytic": None}   # code -> spline_tol
 LEARNED_SIZES = ("medium",)
 LEARNED_RECIPE = {"n_q": 12, "scale": 0.1, "seed": 0}
+# The linear ACE model of ace-jax's own builder (`build_ace_poly`): polynomial radials, which the CUDA kernel
+# evaluates without a table (A100, Cantor medium, LAMMPS: 0.063 against 0.148 us/atom-step for the splined
+# ACEpotentials export of the same basis size).  The alloy speed table (accuracy_cost.multicomponent) times it;
+# the scaling suite keeps ace_*.npz, which the ACEpotentials lines rebuild in Julia and assert identical.
+POLY_SYSTEMS = ("Cantor",)
+POLY_WEIGHTS = {"scale": 0.02, "seed": 0}                # N(0, scale) for WB and Wpair: the size of ace_*.npz's
 
 
 # ACEpotentials.jl lines (CPU only): `acepotentials` evaluates the ace_*.npz model
@@ -198,6 +205,34 @@ def build_ace():
             _update_manifest({str(p): {"builder": "julia/export_model.jl", "order": order,
                                         "totaldegree": deg, "n_params": n_b, "weights": "random",
                                         "sha256": _sha(p)}})   # per model: a later failure keeps it
+
+
+def poly_path(system, size="medium"):
+    return DIR / f"ace_{system}_{size}_poly.npz"
+
+
+def build_ace_poly(systems=POLY_SYSTEMS, sizes=LEARNED_SIZES):
+    """The linear ACE model of ace-jax's own builder (`basis.build_basis`, as `aj basis`): the (order, degree,
+    rcut) of ace_<system>_<size>.npz, with polynomial radials in place of ACEpotentials' splined ones, so the CUDA
+    kernel has an `ffi.analytic_plan`.  The same basis size (Cantor medium: 447 functions per element, both).
+    Random weights (`POLY_WEIGHTS`): timing only.  Deterministic: the same arguments, the same arrays."""
+    import numpy as np
+    from ace_jax.basis.export import save_npz
+    from ace_jax.basis.model import BasisSpec, build_basis
+    DIR.mkdir(parents=True, exist_ok=True)
+    for system in systems:
+        for size in sizes:
+            order, deg = ACE_DEG_BY_SYSTEM[system][size]
+            p = poly_path(system, size)
+            save_npz(p, build_basis(BasisSpec(order=order, max_degree=deg, elements=tuple(ELEMENTS[system]), rcut=5.0)))
+            d = dict(np.load(p, allow_pickle=False))
+            rng = np.random.default_rng(POLY_WEIGHTS["seed"])
+            for k in ("WB", "Wpair"):
+                d[k] = rng.normal(0.0, POLY_WEIGHTS["scale"], d[k].shape)
+            np.savez(p, **d)
+            _update_manifest({str(p): {"builder": "models.py ace-poly (ace_jax.basis.build_basis)", "order": order,
+                                        "max_degree": deg, "rcut": 5.0, **POLY_WEIGHTS, "weights": "random",
+                                        "n_params": int(d["WB"].shape[0]), "sha256": _sha(p)}})
 
 
 def learned_proxy(src, dst, n_q=12, scale=0.1, seed=0):
@@ -398,5 +433,5 @@ if __name__ == "__main__":
         sys.path.insert(0, str(ROOT / "bench"))
         build_acepotentials_trim(sys.argv[2:] or None)
     else:
-        {"pace": build_pace, "ace": build_ace, "ace-learned": build_ace_learned, "mace": build_mace,
+        {"pace": build_pace, "ace": build_ace, "ace-poly": build_ace_poly, "ace-learned": build_ace_learned, "mace": build_mace,
          "sizes": write_sizes}[sys.argv[1]]()

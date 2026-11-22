@@ -1256,6 +1256,7 @@ def test_multicomponent_cases(monkeypatch):
     assert all((c["mode"], c["dtype"]) == ("lammps", "float64") for c in cs)
     by = {c["row"]["code"]: c["row"] for c in cs}
     assert all(r["system"] == "Cantor" and r["elements"] == models.ELEMENTS["Cantor"] and r["gate_n"] == 256 for r in by.values())
+    assert by["acejax-ace"]["path"].endswith("ace_Cantor_medium_poly.npz")       # ace-jax's builder: analytic radials
     assert by["acejax-pace"]["path"] == by["mlpace"]["path"] and by["mlpace"]["path"].endswith("pace_Cantor_medium.yace")
     assert by["mace-symx3"]["symmetrix"].endswith("mace_medium_Cantor-symx3.json")
     assert len({tuple({**r, "dtype": "float64", "mode": "lammps", "device": "gpu"}[f] for f in timing.KEY) for r in by.values()}) == 4

@@ -4,7 +4,8 @@ plateau check and repeats, the same LAMMPS builds and node layouts (timing.run_c
 
     python -m accuracy_cost.multicomponent {gpu,cpu} --env ENV.json --results PATH [--codes C ...] [--n MAIN CHECK]
 
-Models (bench/scaling/models.py; $BENCH_MODELS_DIR): the medium linear ACE .npz (ace-jax), the medium PACE .yace
+Models (bench/scaling/models.py; $BENCH_MODELS_DIR): the medium linear ACE .npz of ace-jax's own builder
+(`models.py ace-poly`: polynomial radials, which the CUDA kernel evaluates without a table), the medium PACE .yace
 (ace-jax and ML-PACE on the same file) and MACE-MP-0b2 medium (Symmetrix v0.3.0: `mace-symx3`, its own extraction
 `mace_medium_Cantor-symx3.json`).  Random weights: speed only.  The ace-jax kernel rows are the same command with
 ACEJAX_EXPORT_FFI=1 and LAMMPS_JAX_FFI_HANDLERS in the environment, in their own results file (the row key has no
@@ -31,8 +32,9 @@ def cases():
         if (m["system"], m["size"]) != (SYSTEM, SIZE) or m["code"] not in CODES:
             continue
         code = CODES[m["code"]]
+        path = str(models.poly_path(SYSTEM, SIZE)) if code == "acejax-ace" else m["path"]
         row = {"code": code, "family": FAMILY, "system": SYSTEM, "size": SIZE, "elements": m["elements"],
-               "path": m["path"], "name": f"{FAMILY}/{SIZE}/{code}", "rattle": timing.RATTLE, "gate_n": GATE_N,
+               "path": path, "name": f"{FAMILY}/{SIZE}/{code}", "rattle": timing.RATTLE, "gate_n": GATE_N,
                "ref": None, "n_params": None}
         if code == "mace-symx3":
             row["symmetrix"] = str(models.DIR / f"mace_{SIZE}_{SYSTEM}-symx3.json")
