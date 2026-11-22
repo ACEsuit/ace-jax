@@ -1326,10 +1326,10 @@ Out of distribution: 16 cells, four each of a vacancy (31 atoms), strong rattle 
 | strain | 46 to 64 | 2.8 to 14 | 0.074 to 0.133 | 5.9 to 17 | 16 to 19 / 17 to 21 | 3.6 to 6.4 |
 | slab | 95 to 99 | 876 to 972 | 0.50 to 0.53 | 167 to 181 | 22 to 25 / 22 to 24 | 7.3 to 7.8 |
 
-- **The one-shot energy does not survive leaving the training distribution**: 3 to 36 meV per atom on the bulk-like classes (five to ten times the in-distribution error, still two to ten times better than free atoms) and 0.9 eV per atom on the slab, ten times worse than free atoms.
+- **The one-shot energy does not survive leaving the training distribution**: 3 to 36 meV per atom on the bulk-like classes (five to ten times the in-distribution error, still 1.5 to 18 times better than free atoms) and 0.9 eV per atom on the slab, ten times worse than free atoms.
 - **The first density change flags the failure but does not size it.** It rises with every class and separates the slab at once (0.5 against 0.02 to 0.04 in distribution; free atoms give 0.3). As an estimate through the bulk law it is low by 1.7 to 3.2 times for rattle and vacancy, high by 1.3 to 2.5 times for strain and low by 5 times for the slab. Refitted with half of the harsh cells (1,167 x change^1.93) the other half lie within a factor 0.27 to 2.9. Within the bulk-like classes it does not rank cells (rank correlation 0.15 over 12 cells).
 - **The electron-count error before correction is a free out-of-distribution flag**, large for strain and slab, but it does not follow the energy error (strain: count error 4 to 6 e, energy error among the smallest).
-- Starting the cycle from the predicted density saves 1 to 4 iterations of about 20 on the bulk-like classes and none on the slab.
+- Starting the cycle from the predicted density saves 0 to 6 iterations of about 20 on the bulk-like classes and none on the slab.
 
 **The H model out of distribution, and its mismatch with the H built from the predicted density.** For each harsh cell: the bulk H model's band error against the converged H (from own Fermi levels, −12 to 5 eV), and the same measure between the model's H and the H the DFT code builds from the predicted density (one build, no solve: a run stopped after one iteration with the mixing switched off).
 
