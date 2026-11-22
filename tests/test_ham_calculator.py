@@ -74,6 +74,12 @@ def test_electron_counts():
     for spec, want in ((None, 14 + 6 + 14), (7.0, 7.0), ({14: 4, 6: 4}, 12.0)):
         c.nelectrons = spec
         assert c.electrons(np.array([14, 6, 14])) == want
+    from types import SimpleNamespace
+    c.predictor, c.degeneracy, c.nelectrons = SimpleNamespace(orbitals=SimpleNamespace(n_orb=lambda z: 4)), 2.0, None
+    with pytest.raises(ValueError, match="do not fit"):     # every electron of the atoms, a valence-only basis: 34 into 24 states
+        c.electrons(np.array([14, 6, 14]))
+    c.nelectrons = {14: 4, 6: 4}
+    assert c.electrons(np.array([14, 6, 14])) == 12.0
 
 
 def test_core_bands_are_left_out_of_the_energy_and_its_derivatives(setup):
@@ -186,6 +192,12 @@ def test_aj_ham_fit_predict_bands(models, tmp_path, capsys):  # noqa: F811
     assert info["validation"]["metrics"]["band_rmse"] < 1e-3 and info["prior"] == "none"
     with pytest.raises(SystemExit):                                # a channel the data does not have
         main(["ham", "fit", "--data", str(tmp_path / "b"), "--out", second, "--channels", "H_up"])
+    honly = str(tmp_path / "honly.npz")                           # a model of H alone, scored on data with S: both spectra with the reference S
+    main(["ham", "fit", "--data", str(tmp_path / "b"), "--out", honly, "--channels", "H", *basis])
+    main(["eval", "--model", honly, "--data", str(tmp_path / "b"), *spec, "--metrics-out", str(tmp_path / "h.json")])
+    import json
+    mh = json.load(open(tmp_path / "h.json"))
+    assert "with the reference S" in capsys.readouterr().out and mh["summary"]["overlap"] == "reference" and mh["summary"]["band_rmse"] < 1e-3
     capsys.readouterr()
     write_cextxyz(str(tmp_path / "s.xyz"), frames)
     main(["ham", "predict", "--model", second, "--data", str(tmp_path / "s.xyz"), "--out", str(tmp_path / "pred")])

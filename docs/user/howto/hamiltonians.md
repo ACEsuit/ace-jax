@@ -77,8 +77,12 @@ with these options:
 | `--bond-radials` | number of radial functions of the distance between the two atoms of a block |
 | `--bond-rcut` | longest distance that has a block. The default is the longest distance in the data |
 | `--coupled N L` | features that couple the bond with the environments of its two atoms |
-| `--env R N L NB LB` | features of the atoms near the bond. This group gives most of the accuracy and most of the cost |
+| `--env R N L NB LB` | features of the atoms near the bond. This group gives most of the accuracy and most of the cost. The default is `5 8 4 6 4` |
 | `--no-env` | no features of the atoms near the bond. The model is fast and less accurate |
+
+`--env 5 6 4 4 4` is a smaller basis. It was the default to version 0.7.2. The fit and the
+prediction are approximately 1.2 to 2 times faster, and the band error is larger: 1.5 times
+on bulk gold and 2.7 times on bulk aluminium, each with approximately 32 training structures.
 
 ### The prior
 
@@ -109,6 +113,10 @@ blocks and 3e-6 eV for on-site blocks.
 
 `aj ham fit --validation` and `aj eval --model gold.npz --data validation/`
 print the same tables.
+
+For a model without an overlap, the eigenvalues of the model and of the
+reference are both calculated with the overlap of the reference structures.
+If the structures have no overlap, the two spectra use S = 1.
 
 - **Blocks**: the error of the matrix elements, for the on-site and the
   off-site blocks of each channel.
