@@ -203,7 +203,7 @@ lower cost. The fine-tuned foundation models have lower errors.
   [mixed precision](howto/precision.md#mixed-precision-for-the-kernels). The
   CPU line starts at o3d10: for o3d8, the energy error of mixed precision
   (0.6 meV for each atom) is more than the limit of the benchmark. Below
-  o4d14, mixed precision is not faster than float64. On the A100, it runs
+  o4d20, mixed precision is not faster than float64 at this system size. On the A100, it runs
   float32 bundles. The accuracy that
   the figure shows is that of the float64 fit. These results are not
   included in the comparison with the float64 results of the other codes.

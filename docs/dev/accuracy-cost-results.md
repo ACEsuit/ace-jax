@@ -1022,3 +1022,43 @@ CPU path did not change. Mixed o3d8 fails the gate on both kernels (max dF 1.3e-
 At the target (o4d20): A100 0.24 (float32 0.15), CPU 0.49 (mixed 0.35); MACE c16L0 in Symmetrix 0.3.0 is 0.65 and
 0.59. Against patched ML-PACE on the A100 4.6-9.9x (o4d12 to o4d20), against the XLA program 7.0-12.8x; CPU against
 XLA 18-102x.
+
+## Cantor and mixed precision after 0.7.2 (2026-11-21)
+
+The two tables of the user pages that the retime above left: ace-jax 0.7.2's kernels (tree 81536af with main merged,
+the released kernels), Sulis, job scripts `runs/symmetrix-ace/sulis/tables-{gpu,cpu}.sbatch`.
+
+**Cantor kernel row** (`accuracy_cost.multicomponent --codes acejax-ace`, LAMMPS, float64; the other codes' rows are
+not rerun): A100 (gpu013, job 2296551, 32,768 atoms) 0.149 µs/atom-step, was 0.150; CPU 128 x 1 (node094, job
+2296552, 8,192 atoms) 0.382 and 0.390, was 0.376. No change. Both kernels take the coupled form for this model; the
+CUDA kernel keeps the radial table (the model file is an ACEpotentials export with splined radials, so it has no `ffi.analytic_plan`). Rows:
+`sulis-gpu-cantor-kernel.jsonl`, `sulis-cpu-128x1-cantor-kernel.jsonl` (the first CPU repeat).
+
+**Mixed precision, A100** (`ACECalculator`, 32,768 Si atoms, the three precisions in one process in turn, 5 x 8
+calls, the fastest; `tp.py`; job 2296551), µs/atom, and max |dF| against float64 (eV/Å):
+
+| model | float64 | mixed | float32 | float64 / mixed | max dF mixed, float32 |
+|---|---|---|---|---|---|
+| o4d20 | 0.312 | 0.262 | 0.205 | 1.19 | 4.0e-5, 5.9e-5 |
+| o4d16 | 0.183 | 0.173 | 0.136 | 1.06 | 1.6e-4, 2.0e-4 |
+| o4d14 | 0.157 | 0.152 | 0.120 | 1.03 | 5.9e-4, 5.9e-4 |
+| o4d12 | 0.136 | 0.135 | 0.106 | 1.01 | 2.9e-4, 1.0e-3 |
+| o3d12 | 0.139 | 0.137 | 0.108 | 1.01 | 2.9e-4, 1.7e-3 |
+
+(0.98 / 0.71 / 0.65 at o4d20 with the DAG, on a Modal A100: 1.38.)
+
+**Mixed precision, CPU** (LAMMPS, 128 x 1, node094, job 2296552; float64 then mixed, three times at 4,096 atoms,
+then once at 32,768; µs/atom-step, float64 / mixed):
+
+| model | 4,096 atoms, three repeats | ratios | 32,768 atoms | ratio |
+|---|---|---|---|---|
+| o4d20 | 0.446 / 0.318, 0.360 / 0.326, 0.342 / 0.297 | 1.40, 1.11, 1.15 | 0.297 / 0.255 | 1.16 |
+| o4d16 | 0.267 / 0.272, 0.186 / 0.178, 0.187 / 0.183 | 0.98, 1.04, 1.02 | 0.148 / 0.127 | 1.16 |
+| o4d14 | 0.149 / 0.152, 0.150 / 0.150, 0.230 / 0.155 | 0.98, 1.00, 1.48 | 0.108 / 0.117 | 0.92 |
+| o4d12 | 0.135 / 0.125, 0.201 / 0.223, 0.119 / 0.125 | 1.08, 0.90, 0.96 | 0.083 / 0.082 | 1.00 |
+| o3d12 | 0.123 / 0.123, 0.123 / 0.126, 0.123 / 0.127 | 1.00, 0.97, 0.97 | 0.087 / 0.087 | 1.00 |
+
+Single runs on this node still differ by up to 50% (o4d14's third float64, o4d12's second pair), and the 32,768-atom
+column is one run each, so the o4d16 and o4d14 entries there are within the scatter of each other. The user table
+says: o4d20 1.1 to 1.2 times (CPU) and 1.2 (A100); o4d16 1.0 to 1.2 and 1.1; o4d14 and smaller no gain. With the
+DAG it was 1.39 at o4d20 and 1.10 at o4d16 and o4d14 (job 2283977). The rows are not added to the plotted files.

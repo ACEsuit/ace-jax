@@ -26,6 +26,10 @@
   2,304 functions on one core. `spectrum_fn` and `bands_fn`, which differentiate the eigenvalues,
   and every GPU path are unchanged.
 
+- The documentation gives the gain of mixed precision with the kernels of 0.7.2: 1.1 to 1.2 times for the
+  silicon model o4d20 (1.4 times before 0.7.2, when the product basis used more of the time), and no gain
+  from o4d14 down. The kernel row of the five-element alloy table is timed again and did not change.
+
 ### Added
 
 - `aj ham fit --noise-floor SIGMA` (`noise=` of `fit_onsite` and `fit_offsite`) sets the smallest noise
