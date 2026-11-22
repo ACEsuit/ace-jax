@@ -1,6 +1,7 @@
 """Benchmark models: what is planned, how each is built, and the manifest.
 
     python bench/scaling/models.py pace   # pyace venv: random-coefficient .yace x3 x2
+    python bench/scaling/models.py pace-yaml [Cantor/medium ...]  # pyace venv: the B-basis .yaml of a .yace
     python bench/scaling/models.py ace    # Julia: linear ACE .npz x3 x2
     python bench/scaling/models.py mace   # MACE-MP-0b2 s/m/l + MH-1 + Symmetrix .json per system
     python bench/scaling/models.py ace-poly  # linear ACE .npz built by ace-jax, polynomial radials (no Julia)
@@ -148,33 +149,59 @@ def load_manifest():
     return json.loads((DIR / "manifest.json").read_text())
 
 
-def build_pace():
-    """Run inside pace_ref/.venv (pyace)."""
+def _pace_bbasis(system, size):
+    """pyace's B-basis of pace_<system>_<size> with its random coefficients (run inside pace_ref/.venv)."""
     import numpy as np
     from pyace import ACEBBasisSet, create_multispecies_basis_config
+    els, nf = ELEMENTS[system], PACE_FUNCS[size]
+    cfg = {"deltaSplineBins": 0.001, "elements": els,
+           "embeddings": {"ALL": {"npot": "FinnisSinclairShiftedScaled",
+                                  "fs_parameters": [1, 1, 1, 0.5], "ndensity": 2}},
+           "bonds": {"ALL": {"radbase": "SBessel", "radparameters": [5.25], "rcut": 5.0,
+                             "dcut": 0.01, "inner_cutoff_type": "distance",
+                             "r_in": 1.0, "delta_in": 0.5,
+                             "core-repulsion": [100.0, 5.0]}},
+           "functions": {"number_of_functions_per_element": nf,
+                         "ALL": {"nradmax_by_orders": [15, 6, 4, 3, 2],
+                                 "lmax_by_orders": [0, 4, 3, 2, 1]}}}
+    bb = ACEBBasisSet(create_multispecies_basis_config(cfg))
+    rng = np.random.default_rng(nf + len(els))
+    c = np.asarray(bb.all_coeffs)
+    bb.all_coeffs = rng.normal(scale=0.05, size=c.shape)
+    return bb, int(c.size)
+
+
+def build_pace():
+    """Run inside pace_ref/.venv (pyace)."""
     out = {}
-    for system, els in ELEMENTS.items():
+    for system in ELEMENTS:
         for size, nf in PACE_FUNCS.items():
-            cfg = {"deltaSplineBins": 0.001, "elements": els,
-                   "embeddings": {"ALL": {"npot": "FinnisSinclairShiftedScaled",
-                                          "fs_parameters": [1, 1, 1, 0.5], "ndensity": 2}},
-                   "bonds": {"ALL": {"radbase": "SBessel", "radparameters": [5.25], "rcut": 5.0,
-                                     "dcut": 0.01, "inner_cutoff_type": "distance",
-                                     "r_in": 1.0, "delta_in": 0.5,
-                                     "core-repulsion": [100.0, 5.0]}},
-                   "functions": {"number_of_functions_per_element": nf,
-                                 "ALL": {"nradmax_by_orders": [15, 6, 4, 3, 2],
-                                         "lmax_by_orders": [0, 4, 3, 2, 1]}}}
-            bb = ACEBBasisSet(create_multispecies_basis_config(cfg))
-            rng = np.random.default_rng(nf + len(els))
-            c = np.asarray(bb.all_coeffs)
-            bb.all_coeffs = rng.normal(scale=0.05, size=c.shape)
+            bb, n = _pace_bbasis(system, size)
             p = DIR / f"pace_{system}_{size}.yace"
             DIR.mkdir(parents=True, exist_ok=True)
             bb.to_ACECTildeBasisSet().save_yaml(str(p))
             out[str(p)] = {"builder": "pyace", "functions_per_element": nf,
-                           "n_params": int(c.size), "sha256": _sha(p)}
+                           "n_params": n, "sha256": _sha(p)}
     _update_manifest(out)
+
+
+def pace_yaml_path(system, size="medium"):
+    return DIR / f"pace_{system}_{size}.yaml"
+
+
+def build_pace_yaml(names=None):
+    """The B-basis .yaml of pace_<system>_<size>.yace (`names`: "System/size" ...; default Cantor/medium), for
+    grace-runtime's `pace/runtime`, which reads pacemaker's B-basis file and no .yace.  The same pyace call and
+    seed as `build_pace`, so the same model; the .yace is not written again (the benchmark's gate compares
+    LAMMPS on the .yaml with ace-jax on the .yace).  Run inside pace_ref/.venv (pyace)."""
+    DIR.mkdir(parents=True, exist_ok=True)
+    for name in names or ["Cantor/medium"]:
+        system, size = name.split("/")
+        bb, n = _pace_bbasis(system, size)
+        p = pace_yaml_path(system, size)
+        bb.save(str(p))
+        _update_manifest({str(p): {"builder": "pyace (B-basis of the .yace)", "n_params": n,
+                                   "functions_per_element": PACE_FUNCS[size], "sha256": _sha(p)}})
 
 
 def build_ace():
@@ -429,7 +456,9 @@ def write_sizes():
 
 
 if __name__ == "__main__":
-    if sys.argv[1] == "acepotentials-trim":
+    if sys.argv[1] == "pace-yaml":
+        build_pace_yaml(sys.argv[2:] or None)
+    elif sys.argv[1] == "acepotentials-trim":
         sys.path.insert(0, str(ROOT / "bench"))
         build_acepotentials_trim(sys.argv[2:] or None)
     else:

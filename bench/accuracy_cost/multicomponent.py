@@ -6,7 +6,8 @@ plateau check and repeats, the same LAMMPS builds and node layouts (timing.run_c
 
 Models (bench/scaling/models.py; $BENCH_MODELS_DIR): the medium linear ACE .npz of ace-jax's own builder
 (`models.py ace-poly`: polynomial radials, which the CUDA kernel evaluates without a table), the medium PACE .yace
-(ace-jax and ML-PACE on the same file) and MACE-MP-0b2 medium (Symmetrix v0.3.0: `mace-symx3`, its own extraction
+(ace-jax and ML-PACE on the same file; grace-runtime's `pace/runtime` on its B-basis .yaml, `models.py pace-yaml`,
+code `pace-rt`, with an env json whose `lmp` is the grace-runtime LAMMPS: envs/sulis-*-cantor-gracert.json) and MACE-MP-0b2 medium (Symmetrix v0.3.0: `mace-symx3`, its own extraction
 `mace_medium_Cantor-symx3.json`).  Random weights: speed only.  The ace-jax kernel rows are the same command with
 ACEJAX_EXPORT_FFI=1 and LAMMPS_JAX_FFI_HANDLERS in the environment, in their own results file (the row key has no
 kernel field, as timing.py's)."""
@@ -47,6 +48,10 @@ def cases():
         if code == "mace-symx3":
             row["symmetrix"] = str(models.DIR / f"mace_{SIZE}_{SYSTEM}-symx3.json")
         out.append({"row": row, "mode": "lammps", "dtype": "float64"})
+        if code == "mlpace":                      # grace-runtime on the same model: the .yaml, gated against the .yace
+            rt = {**row, "code": "pace-rt", "name": f"{FAMILY}/{SIZE}/pace-rt", "ref": m["path"],
+                  "path": str(models.pace_yaml_path(SYSTEM, SIZE))}
+            out.append({"row": rt, "mode": "lammps", "dtype": "float64"})
     return out
 
 
@@ -74,8 +79,10 @@ def main(argv=None):
             "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
             "kernel": bool(os.environ.get("ACEJAX_EXPORT_FFI") or env.get("os_env", {}).get("ACEJAX_EXPORT_FFI"))}
     runner, gate = timing.subprocess_runner(env, a.device)
+    rt = "gracert" in pathlib.Path(env["lmp"]).name            # the grace-runtime LAMMPS runs pace-rt and nothing else
     cs = [c for c in timing.select(cases(), a.codes)
-          if c["row"]["code"] not in timing.OPTIONAL_LMP or env.get(timing.OPTIONAL_LMP[c["row"]["code"]])]
+          if (c["row"]["code"] == "pace-rt") == rt
+          and (c["row"]["code"] not in timing.OPTIONAL_LMP or env.get(timing.OPTIONAL_LMP[c["row"]["code"]]))]
     timing.run_cases(a.device, cs, runner, gate, pathlib.Path(a.results), n=tuple(a.n) if a.n else N[a.device],
                      repeats=a.repeats, work=work, meta=meta, redo=a.redo, ready=ready)
 
@@ -90,6 +97,7 @@ LINES = [(("acejax-ace", True), "ace-jax, linear ACE, kernel (C++ on the CPU, CU
          (("acejax-ace", False), "ace-jax, linear ACE, compiled JAX program"),
          (("acejax-pace", False), "ace-jax, PACE model, compiled JAX program"),
          (("mlpace", False), "ML-PACE, the same PACE model"),
+         (("pace-rt", False), "grace-runtime, the same PACE model"),
          (("mace-symx3", False), "MACE-MP-0b2 medium, Symmetrix")]
 
 
