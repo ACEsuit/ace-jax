@@ -1251,7 +1251,11 @@ def test_multicomponent_cases(monkeypatch):
     Symmetrix v0.3.0 with its own extraction, and the gate on Cantor cells of the row's size."""
     from accuracy_cost import multicomponent as mc, timing
     from scaling import models
+    monkeypatch.setenv("ACEJAX_EXPORT_FFI", "1")
+    assert all("spline_tol" not in c["row"] for c in mc.cases())                  # the kernel: the file's radials
+    monkeypatch.delenv("ACEJAX_EXPORT_FFI")
     cs = mc.cases()
+    assert {c["row"]["code"]: c["row"].get("spline_tol") for c in cs}["acejax-ace"] == mc.XLA_SPLINE_TOL
     assert sorted(c["row"]["code"] for c in cs) == ["acejax-ace", "acejax-pace", "mace-symx3", "mlpace"]
     assert all((c["mode"], c["dtype"]) == ("lammps", "float64") for c in cs)
     by = {c["row"]["code"]: c["row"] for c in cs}

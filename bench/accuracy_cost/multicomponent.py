@@ -11,6 +11,7 @@ Models (bench/scaling/models.py; $BENCH_MODELS_DIR): the medium linear ACE .npz 
 ACEJAX_EXPORT_FFI=1 and LAMMPS_JAX_FFI_HANDLERS in the environment, in their own results file (the row key has no
 kernel field, as timing.py's)."""
 import json
+import os
 import pathlib
 import sys
 
@@ -21,6 +22,11 @@ SYSTEM, SIZE, FAMILY = "Cantor", "medium", "cantor"
 # Symmetrix v0.3.0 takes 5 GB there).  CPU: 64 atoms per rank on 128 ranks; the N/8 check does not run for ace-jax
 N = {"gpu": timing.N["gpu"], "cpu": (8192, 1024)}
 GATE_N = 256                                      # a 4 x 4 x 4 fcc cell (14.4 A): wider than twice any cutoff here
+# The compiled JAX program on the linear ACE model splines its polynomial radials (opt-in for an authored model; 53
+# polynomials for 58 radial columns per edge cost it 9 times on an A100 and 20 times on the CPU node unsplined:
+# 5.5 and 76 us/atom-step, jobs 2297096-7).  The kernel takes the file as it is: analytic on the GPU, its table on
+# the CPU.
+XLA_SPLINE_TOL = 1e-10
 CODES = {"acejax-ace": "acejax-ace", "acejax-pace": "acejax-pace", "mlpace": "mlpace", "mace": "mace-symx3"}
 
 
@@ -36,6 +42,8 @@ def cases():
         row = {"code": code, "family": FAMILY, "system": SYSTEM, "size": SIZE, "elements": m["elements"],
                "path": path, "name": f"{FAMILY}/{SIZE}/{code}", "rattle": timing.RATTLE, "gate_n": GATE_N,
                "ref": None, "n_params": None}
+        if code == "acejax-ace" and not os.environ.get("ACEJAX_EXPORT_FFI"):
+            row["spline_tol"] = XLA_SPLINE_TOL
         if code == "mace-symx3":
             row["symmetrix"] = str(models.DIR / f"mace_{SIZE}_{SYSTEM}-symx3.json")
         out.append({"row": row, "mode": "lammps", "dtype": "float64"})
@@ -44,7 +52,6 @@ def cases():
 
 def main(argv=None):
     import argparse
-    import os
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("device", choices=sorted(N))
     ap.add_argument("--env", required=True)
