@@ -286,7 +286,10 @@ def _fit(designs, n_chunks, rows, nc, ridge, device=False, gamma=None, select=No
                     Rs[(g, d)] = qr_merge(Rs.get((g, d), jnp.zeros((w, w))), A, jnp.asarray(Y))
         close()
         acc = {d: (R[:designs[d][0], :designs[d][0]], R[:designs[d][0], designs[d][0]:]) for (_, d), R in Rs.items()}
-        return _solve(designs, acc, yy, n, nc, ridge, gamma, select, blocks, floor, jackknife)
+        try:
+            return _solve(designs, acc, yy, n, nc, ridge, gamma, select, blocks, floor, jackknife)
+        finally:
+            spill.dir.cleanup()
 
     def parts(i):
         out = rows(int(i))
@@ -313,7 +316,10 @@ def _fit(designs, n_chunks, rows, nc, ridge, device=False, gamma=None, select=No
             for p in parts_d:
                 if p is not None:
                     yy[d] += (p[1] ** 2).sum(0); n[d] += len(p[1])
-    return _solve(designs, acc, yy, n, nc, ridge, gamma, select, blocks, floor, jackknife)
+    try:
+        return _solve(designs, acc, yy, n, nc, ridge, gamma, select, blocks, floor, jackknife)
+    finally:
+        spill.dir.cleanup()
 
 
 def _solve(designs, acc, yy, n, nc, ridge, gamma=None, select=None, blocks=None, floor=None, jackknife=False):
@@ -543,20 +549,30 @@ METRICS = ("plain", "overlap")
 CLIP = 1e-12                                           # eigenvalues of an overlap below this, of the largest, are raised to it
 
 
-def overlap_root(S):
+def overlap_root(S, overwrite=False):
     """(W, clipped): W (n, n) with W^T W = S, the metric of an overlap-weighted fit as a row
     transform (|W x|^2 = x^T S x).  The upper Cholesky factor; for an S that is not positive
     definite to roundoff (nearly dependent functions), sqrt(e) V^T of its eigen-decomposition
-    with the eigenvalues raised to CLIP of the largest, and `clipped` how many were."""
+    with the eigenvalues raised to CLIP of the largest, and `clipped` how many were.
+    overwrite: the factor may take S's memory (S is O(n^2): at 10^4.5 functions, 8 GB)."""
     S = np.asarray(S, float)
     if S.ndim != 2 or S.shape[0] != S.shape[1]:
         raise ValueError(f"an overlap must be square, got {S.shape}")
-    try:
-        return sla.cholesky(S, lower=False, check_finite=True), 0
-    except sla.LinAlgError:
-        e, V = np.linalg.eigh(0.5 * (S + S.T))
-        lo_ = CLIP * e[-1]
-        return np.sqrt(np.maximum(e, lo_))[:, None] * V.T, int((e < lo_).sum())
+    if not np.isfinite(S).all():
+        raise ValueError("an overlap has entries that are not finite")
+    a = S.T if S.flags.c_contiguous else S               # S is symmetric: its transpose is the Fortran-ordered array LAPACK factors in place
+    diag = np.diag(a).copy()
+    U, info = sla.lapack.dpotrf(a, lower=0, clean=0, overwrite_a=overwrite)
+    if info == 0:
+        for r in range(0, len(U), 1024):                 # the triangle LAPACK did not touch still holds S
+            U[r:r + 1024] = np.triu(U[r:r + 1024], k=r)
+        return U, 0
+    S = np.tril(U, -1)                                   # not positive definite: S again, from that triangle
+    S = S + S.T
+    S[np.diag_indices_from(S)] = diag
+    e, V = np.linalg.eigh(S)
+    lo_ = CLIP * e[-1]
+    return np.sqrt(np.maximum(e, lo_))[:, None] * V.T, int((e < lo_).sum())
 
 
 def fit_centred(basis, datasets, shells=None, channels=("rho",), metric=None, overlaps=None, ridge=1e-10, sigma_c=None, scaled=None,
@@ -661,7 +677,8 @@ def fit_centred(basis, datasets, shells=None, channels=("rho",), metric=None, ov
                 S = overlaps[k]() if callable(overlaps[k]) else overlaps[k]
                 if np.shape(S) != (off[k][-1],) * 2:
                     raise ValueError(f"fit_centred: the overlap of structure {k} is {np.shape(S)}, its coefficients ({off[k][-1]},)")
-                W, clipped[k] = overlap_root(S)
+                own = callable(overlaps[k])              # ours to overwrite: the root in the overlap's memory
+                W, clipped[k] = overlap_root(S if own and isinstance(S, np.ndarray) and S.dtype == np.float64 and S.flags.writeable else np.array(S, float), overwrite=True)
                 del S
                 cache.update(k=k, F=features(k), W=W, Y=W @ np.stack([np.asarray(datasets[k].coefficients[ch], float) for ch in channels], axis=-1))
             F, W = cache["F"], cache["W"][r0:r1]

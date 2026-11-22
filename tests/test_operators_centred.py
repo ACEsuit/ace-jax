@@ -189,8 +189,12 @@ def test_overlap_root():
     V = np.random.default_rng(0).normal(size=(30, 27))
     S1 = V @ V.T                                             # rank 27: three dependent functions
     S1[0, 0] -= 1e-9                                         # and not positive semi-definite to roundoff
-    W, clipped = overlap_root(S1)
-    assert clipped == 3 and np.allclose(W.T @ W, S1, atol=1e-8 * np.abs(S1).max())
+    for overwrite in (False, True):                          # in place: S comes back from the triangle LAPACK left
+        W, clipped = overlap_root(S1.copy(), overwrite=overwrite)
+        assert clipped == 3 and np.allclose(W.T @ W, S1, atol=1e-8 * np.abs(S1).max())
+    Sf = np.asfortranarray(S.copy())
+    W, clipped = overlap_root(Sf, overwrite=True)
+    assert clipped == 0 and np.allclose(W.T @ W, S, atol=1e-12) and np.allclose(W, np.triu(W)) and np.shares_memory(W, Sf)
     with pytest.raises(ValueError, match="square"):
         overlap_root(np.zeros((3, 4)))
 
