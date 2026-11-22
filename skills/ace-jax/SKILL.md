@@ -418,6 +418,42 @@ structures. User page: `docs/user/howto/hamiltonians.md`; measurements: `docs/de
   (`meta_json` kind "operator"); `HamiltonianPredictor.from_file`.
 - float64 (`jax.config.update("jax_enable_x64", True)`; the commands set it).
 
+### Electron-density models (`aj density`; new, interface may change)
+
+Linear model of the electron density as coefficients of atom-centred auxiliary functions (the DFT code's
+density-fitting basis): each shell's coefficient vector is linear in the site features of (l, (-1)^l). Closed-form
+fit from a few structures. User page: `docs/user/howto/density.md`; measurements: `docs/dev/ham-results.md`
+(section of 2026-11-22). No extra needed (no h5py).
+
+- Data: a directory of density files (`ace_jax.ham.density.write(path, DensityData(...))`, one `.npz` per
+  structure: structure, `coefficients` (atom, then shell, then m = -l..l in ace-jax's real harmonics),
+  optional `overlap` of the auxiliary functions, `charges_<Z>` (integral of each function), electron count,
+  `info`), or DeepH directories holding `density.npz`. ace-jax reads no DFT code's files: convert outside, and
+  bring the code's m order and signs to ace-jax's first (the fit cannot detect a wrong convention; check by
+  rotating a structure).
+- `aj density fit --data DIR --out model.npz [--validation DIR] [--metric overlap|plain] [--scaled R]
+  [--prior none|NUMBER|evidence|loo|press] [--order 1] [--site-rcut 7] [--site-radials 12] [--lmax L]`.
+  `overlap` (default when every structure has the overlap) minimises the L2 density error dc^T S dc and is the
+  one to use: `plain` (per coefficient) was 6 times worse on aluminium, no better than the mean coefficients.
+  The overlap metric factorises each structure's overlap: O(n^3) time, O(n^2) memory in the number of auxiliary
+  functions of the cell, so train on small cells. Order 1 with the default ridge (`--scaled 1e-6` times the
+  Gram diagonal) is the tested setting; `--prior` replaces `--scaled`.
+- `aj density predict --model M --data <extxyz | DIR> --out DIR`: one density file per structure with the
+  coefficients corrected to the electron count; prints and records `dN`, the count error before the
+  correction: hundredths of an electron in distribution, electrons out of it. Treat a large `dN` as a
+  warning that the structure is unlike the training set.
+- `aj eval --model M --data DIR [--metrics-out F]`: density error sqrt(dc S dc) per structure (needs the
+  reference's overlap), relative error, coefficient RMSE over the labels' spread, `dN`.
+- Python: `ace_jax.ham.density`: `read`, `write`, `names`, `DensityPredictor(model).predict(atoms)` (a
+  `DensityData`; `.info["dN"]`), `conserve(c, numbers, charges, nelectrons)`, `density_metrics`, `projections`.
+  Generic layer: `ace_jax.operators.centred.CentredModel` / `CentredPredictor`,
+  `ace_jax.operators.fit.fit_centred(basis, [CentredData], metric=, overlaps=, sigma_c=, scaled=, jackknife=)`;
+  `jackknife=True` (also on `fit_onsite`, `fit_offsite`) gives the delete-one-structure jackknife in closed
+  form (`DesignStats.jack`, `centred_jackknife`). The model is the `centred` part of an operator model file
+  (`operators.io.save(path, centred=model, info=)`, `load(path).centred`).
+- Not there: forces or density derivatives, conversions between density and Hamiltonian, writing a DFT code's
+  restart files.
+
 ### JAX-MD (MD fully on the device)
 
 `pip install "ace-jax[jaxmd]"`. User page: `docs/user/howto/jax-md.md`.

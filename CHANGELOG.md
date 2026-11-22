@@ -32,6 +32,25 @@
 
 ### Added
 
+- **Electron-density models (`aj density`).** A model that predicts the electron density of a structure
+  as the coefficients of auxiliary functions on the atoms. Each coefficient vector is a linear function of
+  the site features of the atom, as the on-site blocks of a Hamiltonian model. `aj density fit` fits the
+  model to density files, `aj density predict` writes the predicted coefficients, and `aj eval` gives
+  the errors of a density model. The default fit minimises the L2 norm of the density error and uses
+  the overlap matrix of the auxiliary functions of each training structure. Each prediction is corrected
+  to the electron count and gives the count error before the correction. See
+  `docs/user/howto/density.md`. In Python: `ace_jax.ham.density`,
+  `ace_jax.operators.centred` and `ace_jax.operators.fit.fit_centred`. The interface can change.
+
+- `fit_onsite`, `fit_offsite` and `fit_centred` have `jackknife=True`. The statistics of the fit then contain
+  the change of the coefficients when one training structure is left out (`DesignStats.jack`), calculated in
+  closed form for the prior of the fit. Before, only `sigma_c="loo"` and `"press"` kept the data for it.
+
+- `OrbitalBasis` can contain the radial functions of its shells (`radials`), and the model file stores
+  them. No calculation uses them at this time. Two bases with the same shells are equal.
+
+- `build_site_basis(..., natural_parity=True)` builds only the features of parity $(-1)^L$.
+
 - `aj ham fit --noise-floor SIGMA` (`noise=` of `fit_onsite` and `fit_offsite`) sets the smallest noise
   of H that `--prior evidence` can select, in the unit of the data. The difference of H between SCF
   calculations of the same structure is a measured value for it: approximately 1e-7 eV for off-site blocks

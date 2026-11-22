@@ -22,7 +22,7 @@ project.
 | `ace-jax[native]` | matscipy-neighbours | native C++ code on CPUs: faster neighbour lists (ASE's list is the fallback), with the C++ kernel |
 | `ace-jax[lammps]` | lammps-jax | LAMMPS export |
 | `ace-jax[jaxmd]` | jax-md (and approximately 40 dependencies, for example flax and pymatgen) | [MD with JAX-MD](howto/jax-md.md) |
-| `ace-jax[ham]` | h5py | [Hamiltonian models](howto/hamiltonians.md): the DeepH file layout |
+| `ace-jax[ham]` | h5py | [Hamiltonian models](howto/hamiltonians.md): the DeepH file layout. [Electron-density models](howto/density.md) do not need it |
 
 You can combine extras, for example `ace-jax[gp,cuda]`.
 
