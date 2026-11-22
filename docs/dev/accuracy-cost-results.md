@@ -1062,4 +1062,3 @@ Single runs on this node still differ by up to 50% (o4d14's third float64, o4d12
 column is one run each, so the o4d16 and o4d14 entries there are within the scatter of each other. The user table
 says: o4d20 1.1 to 1.2 times (CPU) and 1.2 (A100); o4d16 1.0 to 1.2 and 1.1; o4d14 and smaller no gain. With the
 DAG it was 1.39 at o4d20 and 1.10 at o4d16 and o4d14 (job 2283977). The rows are not added to the plotted files.
-
