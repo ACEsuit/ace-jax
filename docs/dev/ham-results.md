@@ -1307,3 +1307,42 @@ on-site and 0.338 meV off-site. Off-site, by B:
 - On-site: the four models that differ from the new default only in bond features have its
   on-site model, so d = 0 and the width is the constant; the largest model (other site basis)
   ranks on-site errors at 0.05 to 0.11 and widens the mean (7.73 to 8.08 against 7.68 meV).
+
+## Energy without self-consistency: predicted density and predicted H on aluminium, in and out of distribution (2026-11-22)
+
+Question: can a predicted start replace the self-consistent cycle (one Kohn-Sham solve, then the energy), and is there a label-free signal that says when it cannot? Scripts, runs and models are outside the repository (`ham-ref/work/salted/`: `scripts/oneshot.py`, `harsh_table.py`, `harsh/analysis/table.json`).
+
+Set-up. Aluminium, PBE, 32-atom cubic cells, 2 x 2 x 2 k-points with an offset, Gaussian smearing 0.1 eV. Two models fitted to the same six rattled bulk cells: a density model (density-fitting coefficients per atom, linear on site features, electron count corrected after prediction) and an H and S model (`aj ham fit`, defaults; 7.4 meV band error from own Fermi levels on five bulk test cells). "One-shot energy": the total energy after the first Kohn-Sham solve from the start density, against the converged one. "First density change": the code's density residual of that first solve, known without a reference.
+
+In distribution (bulk test cells, rattle 0.1 Å): free-atom start 48 to 92 meV per atom, first density change 0.28 to 0.32; predicted density 0.3 to 3.6 meV per atom, 0.018 to 0.042; exact coefficients 0.09 to 0.15 meV per atom, 0.008 to 0.012. Over the 9 distinct runs |dE| = 552 x change^1.74 meV per atom.
+
+Out of distribution: 16 cells, four each of a vacancy (31 atoms), strong rattle (0.30 to 0.35 Å), strained lattice (a x 0.94, 1.08, 0.97, 1.04) and a (100) slab with 12 Å of vacuum (2 x 2 x 1 k-points), all from the bulk-only models.
+
+| class | free-atom one-shot / meV per atom | predicted-density one-shot | first density change | bulk law's estimate | iterations, predicted / free start | electron-count error before correction / e |
+|---|---|---|---|---|---|---|
+| bulk test (in distribution) | 48 to 92 | 0.3 to 3.6 | 0.018 to 0.042 | (fitted) | 14 to 16 / 17 to 19 | 0.01 to 0.08 |
+| strong rattle | 98 to 134 | 11 to 17 | 0.078 to 0.086 | 6.5 to 7.7 | 18 to 19 / 20 to 24 | 0.04 to 0.45 |
+| vacancy | 52 to 56 | 12 to 36 | 0.067 to 0.107 | 4.9 to 11 | 16 to 17 / 18 to 21 | 0.6 to 0.9 |
+| strain | 46 to 64 | 2.8 to 14 | 0.074 to 0.133 | 5.9 to 17 | 16 to 19 / 17 to 21 | 3.6 to 6.4 |
+| slab | 95 to 99 | 876 to 972 | 0.50 to 0.53 | 167 to 181 | 22 to 25 / 22 to 24 | 7.3 to 7.8 |
+
+- **The one-shot energy does not survive leaving the training distribution**: 3 to 36 meV per atom on the bulk-like classes (five to ten times the in-distribution error, still two to ten times better than free atoms) and 0.9 eV per atom on the slab, ten times worse than free atoms.
+- **The first density change flags the failure but does not size it.** It rises with every class and separates the slab at once (0.5 against 0.02 to 0.04 in distribution; free atoms give 0.3). As an estimate through the bulk law it is low by 1.7 to 3.2 times for rattle and vacancy, high by 1.3 to 2.5 times for strain and low by 5 times for the slab. Refitted with half of the harsh cells (1,167 x change^1.93) the other half lie within a factor 0.27 to 2.9. Within the bulk-like classes it does not rank cells (rank correlation 0.15 over 12 cells).
+- **The electron-count error before correction is a free out-of-distribution flag**, large for strain and slab, but it does not follow the energy error (strain: count error 4 to 6 e, energy error among the smallest).
+- Starting the cycle from the predicted density saves 1 to 4 iterations of about 20 on the bulk-like classes and none on the slab.
+
+**The H model out of distribution, and its mismatch with the H built from the predicted density.** For each harsh cell: the bulk H model's band error against the converged H (from own Fermi levels, −12 to 5 eV), and the same measure between the model's H and the H the DFT code builds from the predicted density (one build, no solve: a run stopped after one iteration with the mixing switched off).
+
+| class | H model, true band error / meV | mismatch with H built from predicted density / meV | true / mismatch |
+|---|---|---|---|
+| bulk test | 7.4 (set) | not run | |
+| strong rattle | 28 to 36 | 35 to 43 | 0.64 to 0.95 |
+| vacancy | 30 to 37 | 41 to 48 | 0.65 to 0.90 |
+| strain | 93 to 270 | 98 to 271 | 0.96 to 1.02 |
+| slab | 479 to 501 | 414 to 442 | 1.09 to 1.21 |
+
+- **The mismatch is the H model's error to within a factor 0.64 to 1.21 on all 16 cells** (rank correlation 0.85), with no reference H: the two models fail differently, and the H built from the predicted density is the more accurate of the two wherever the H model is poor. It costs one H build. This is the converse-pair result on gold the other way round: the cross-check tracks the error of the worse member, here the H model.
+- The H model's band error out of distribution is 4 to 70 times its in-distribution 7.4 meV; the calibrated constant widths of `aj ham calibrate` cannot know this. The electron-count error of the density model ranks it as well (0.93), which says both follow how far the cell is from the training set.
+- The mismatch does not rank the density route's energy error (0.3).
+
+**Not obtained: the one-shot energy from an injected predicted H.** Injection of the converged reference H of these cells (the control that gave the converged energy at once on 64-atom cells) gives spurious deep states and energies wrong by 1 to 7 eV per atom, on a bulk test cell as on the harsh ones; the same blocks reproduce the DFT code's eigenvalues to 5e-6 eV in `block_bands`. So the fault is in the injection path on these 8.1 Å cells, where an atom pair appears in several periodic images, and the H-route energies of this test are void. Also learnt: the first energy after injection equals the converged energy for an exact H, and a predicted H folder must be written on the atoms as the ingestion maps them into the cell.
