@@ -1363,3 +1363,94 @@ With the correction, the bulk-only H model's blocks injected into the 5 bulk tes
 - **The H route's label-free signals rank its errors, which the density route's did not.** Density change after injection against the E_1 error: rank correlation 0.99 on the 16 harsh cells, 0.97 without the slabs. E_init − E_1 against the E_init error: 0.78, and 0.95 without the slabs, where it is also 56 to 93 % of the error. The density route's first density change gave 0.64 and 0.15.
 - The mismatch between the predicted H and the H built from the predicted density does not rank the injected energy's error (0.23; −0.78 without the slabs, since the strained cells have the largest band error and the smallest energy error): a strain error in H is mostly a shift that the energy does not see.
 - Every run converged to the reference energy; the injected H saves no SCF iterations at this mixing (16 to 24, against 17 to 24 from free atoms).
+
+### Solves saved at practical tolerances
+
+Kohn–Sham solves until the total energy stays within a tolerance of the converged one (free atoms / predicted density / injected predicted H; bulk-only models, same Pulay settings, read from the runs above):
+
+| cells | 1 meV per atom | 0.1 | 0.01 | density converged to 1e-6 |
+|---|---|---|---|---|
+| bulk test | 4–5 / – / 2–3 | 6–7 / – / 3–4 | 8–9 / – / 3–5 | 17–19 / – / 14–17 |
+| rattled | 5–6 / 3–4 / 3–4 | 7 / 5 / 5 | 8–9 / 7 / 6–7 | 20–24 / 18–19 / 19–20 |
+| vacancy | 4–5 / 2–3 / 3–4 | 6–7 / 4 / 5 | 7–8 / 6 / 6–7 | 18–21 / 16–17 / 17–19 |
+| strained | 4–5 / 2–4 / 2–3 | 5–6 / 4–5 / 3–4 | 8–9 / 6 / 5–7 | 17–21 / 16–19 / 16–20 |
+| slab | 6 / 7 / 5–6 | 7–8 / 8 / 7–8 | 9 / 9–10 / 9 | 22–24 / 22–25 / 22–24 |
+
+Both routes save about 2 solves at every energy tolerance on bulk-like cells (a third to a half at 1 meV per atom), nothing on slabs, and 0 to 5 of about 20 to full density convergence: after about 10 solves every start is on the same tail. The exact H as a control converges in 2 solves (5 on the slab). The tolerance is measured against the converged energy, so a run's own stopping test would stop a little later; forces were not measured.
+
+## Aluminium out of distribution: retraining on half the harsh cells, and what would have predicted the failures (2026-11-22)
+
+Same cells and models as the section above. Scripts and runs under `ham-ref/work/salted/{scripts,uq,cons,harsh}` on storage.
+
+### Both models retrained on the six bulk cells + cells 0 and 1 of each harsh class (14 structures)
+
+Tested on cells 2 and 3 of each class and the five bulk test cells (meV per atom from the converged energy; bulk-only → retrained).
+
+| cells | density route, one-shot | first density change | H band error / meV | injected H, E_init | E_1 |
+|---|---|---|---|---|---|
+| rattled | −16 to −17 → −5.4 to −8.3 | 0.084 → 0.059 to 0.071 | 28 to 30 → 38 to 42 | −28 to −32 → −43 to −62 | −7.8 to −9.5 → −8.0 to −18 |
+| vacancy | −12 to −36 → −0.7 to −3.7 | 0.067 to 0.107 → 0.028 to 0.040 | 30 to 36 → 37 | −21 to −30 → −26 to −29 | −3.3 to −4.8 → −4.0 to −4.1 |
+| strained | −2.8 to −3.5 → −0.5 to −1.6 | 0.074 to 0.085 → 0.028 to 0.031 | 93 to 117 → 35 to 36 | −3.0 to −4.4 → −4.1 to −9.9 | −0.3 to −0.6 → −0.7 |
+| slab | −945 to −972 → −1.2 to −1.6 | 0.52 → 0.033 to 0.035 | 479 to 483 → 55 to 57 | −89 to −224 → −46 to −106 | −43 to −86 → −5 to −19 |
+| bulk test | 0.3 to 3.6 → −0.4 to −2.8 | unchanged | 5.5 to 9.6 → 23 to 33 | −2.2 to −9.7 → −3.2 to −25 | −0.2 to −2.4 → −0.2 to −5.3 |
+
+- **Two cells of a class are enough for the density model** (394 parameters): every held-out harsh cell within 8.3 meV per atom, slabs within 1.6, bulk kept. Solves to 0.1 meV per atom: 3 to 5 against 6 to 8 from free atoms, on every class.
+- **The H model (default `aj ham fit`, no prior) becomes uniform at 23 to 57 meV**: far better on strained cells and slabs, worse on bulk (7.4 → 27 meV), rattled and vacancy cells, and its injected energies are worse wherever its band error rose. Cause not established (no prior; one basis for four kinds of cell).
+- **The mismatch between the retrained H model and the H built from the retrained density is the H model's band error**: ratio 0.85 to 0.99 on the eight held-out cells (0.64 to 1.21 for the bulk-only pair), for one H build.
+
+### Would an error estimate have predicted the bulk-only H model's failures?
+
+True band error from own Fermi levels: bulk test 5.5 to 9.6 meV, rattled 28 to 36, vacancy 30 to 37, strained 93 to 270, slab 479 to 501.
+
+**The calibrated constant widths (`aj ham calibrate`) do not.** Calibrated on s035–s037 (13.5 meV half-width at 0.90 for every energy): the two other bulk cells are covered (0.96 of eigenvalues at 0.90, 0.98 of H elements), the harsh cells are not, and nothing says so:
+
+| cells | eigenvalues inside at 0.90 | H elements inside at 0.90 |
+|---|---|---|
+| rattled | 0.31 | 0.63 |
+| vacancy | 0.35 | 0.79 |
+| strained | 0.15 | 0.50 |
+| slab | 0.03 | 0.39 |
+
+**Label-free estimates of the band error**, each the band RMSE between the bulk-only model's spectrum and another's (rank correlation with the true band error; 21 test cells = 5 bulk test + 16 harsh; scale = true / estimate):
+
+| estimate | 21 cells | 16 harsh | 12 without slabs | scale, bulk | scale, harsh | harsh cells above the largest bulk value |
+|---|---|---|---|---|---|---|
+| second model, other bond environment (`--env 5 6 4 4 4`; same on-site model) | 0.86 | 0.71 | 0.54 | 0.34 to 0.66 | 0.43 to 3.8 | 15 of 16 |
+| second model, smaller (8 site radials within 5.5 Å, 8 bond radials, old environment) | 0.86 | 0.76 | 0.55 | 0.31 to 0.58 | 0.40 to 1.6 | 13 |
+| second model, larger (16 site radials) | 0.98 | 0.95 | 0.94 | 5.2 to 8.3 | 0.9 to 5.3 | 16 |
+| residual model fitted on the training cells' residual (16 site radials) | 0.98 | 0.95 | 0.94 | 5.1 to 7.9 | 0.9 to 5.4 | 16 |
+| residual model fitted on the errors on six other bulk cells (s009–s014) | 0.97 | 0.94 | 0.89 | 2.0 to 3.1 | 0.6 to 3.6 | 16 |
+| delete-one-structure jackknife (six refits) | 0.96 | 0.92 | 0.87 | 2.2 to 2.6 | 0.7 to 4.0 | 16 |
+| mismatch with the H built from the predicted density (16 harsh cells only) | – | 0.85 | – | – | 0.64 to 1.21 | – |
+
+- **A second model must differ on-site.** With the same on-site model the on-site disagreement is zero and slabs are underestimated 3 to 4 times; with a larger site basis the slab disagreement is 425 to 478 meV against 479 to 501. A smaller second model's own error hides the vacancies.
+- **A linear residual model fitted on the training residual is the larger model** (the two rows agree): the residual carries information only where it is a prediction error.
+- **Scale calibrated on six further bulk cells (s015–s020), then applied to the 21 test cells** (true / scaled estimate):
+
+| | scale (range over the six) | bulk test | rattled | vacancy | strained | slab |
+|---|---|---|---|---|---|---|
+| jackknife | 2.6 (2.1 to 3.1) | 0.85 to 0.99 | 1.1 to 1.5 | 0.50 to 0.56 | 0.28 to 0.90 | 0.61 to 0.67 |
+| residual model | 2.1 (1.6 to 2.9) | 0.96 to 1.47 | 1.2 to 1.7 | 0.59 to 0.67 | 0.28 to 1.15 | 0.70 to 0.78 |
+| both in quadrature | 1.6 (1.3 to 1.8) | 0.96 to 1.23 | 1.2 to 1.6 | 0.56 to 0.63 | 0.29 to 1.02 | 0.67 to 0.74 |
+
+- **The jackknife and the residual model give the same estimate cell by cell** (rattled 7 to 10 against 8 to 12 meV, slabs 285 to 303 against 306 to 331, the same strained cell overestimated 3.5 times), so their sum adds nothing. Both are right within about a factor 2 out of distribution, on the safe side except on rattled cells. With six training cells the error out of distribution is extrapolation along directions the data leave open, which delete-one refits show; the factor 2.6 that remains, in and out of distribution, is what no refit of the same basis sees. The gold test in which nothing ranked eigenvalue errors was in distribution, with a narrow range of errors.
+- **The mismatch with the density's H is the only estimate that needs no scale**, and it is independent in kind; it needs the DFT code's H build, it follows the larger of the two models' errors (here always the H model's), and it was not tested in distribution.
+- Elements: every estimate ranks off-site errors (0.90 to 0.97 on all cells), on-site less (jackknife 0.89, held-out residual 0.72), and all underestimate on-site errors on slabs.
+- None ranks the injected H's energy error (tested for the first second model: 0.02).
+
+### A consistency check without the DFT code
+
+H to density is a diagonalisation; density to H needs the Hartree and xc integrals. So the cheap direction: per-atom populations of same-l shell pairs from the predicted H (SCF k-grid), mapped by a linear link fitted on the six bulk cells' reference data, against the density model's prediction.
+
+- **Fitted atom charges are no common language**: the monopole coefficient varies by 0.4 to 0.8 e between bulk atoms (Mulliken: 0.01 to 0.03 e), since the fit moves charge between neighbours, and the link is wrong by 0.24 to 0.40 e on its own training cells.
+- **Projections w = S_aux c are** (under 3 % spread over bulk atoms). Mismatch of the ten monopole projections per atom, in units of each one's bulk spread, bulk-only pair, on the 13 cells with an auxiliary overlap matrix:
+
+| cells | H band error / meV | mismatch | H side | density side | link error |
+|---|---|---|---|---|---|
+| bulk test | 5.5 to 9.6 | 0.18 to 0.80 | 0.16 to 0.79 | 0.17 to 0.61 | 0.11 to 0.25 |
+| rattled | 28 to 36 | 2.1 to 5.4 | 2.0 to 5.5 | 0.5 to 0.7 | 0.5 to 0.6 |
+| vacancy | 35 to 37 | 1.4 to 1.7 | 0.9 | 1.3 to 1.5 | 0.3 |
+| strained | 266 to 270 | 11 to 14 | 2.5 to 4.3 | 11 to 12 | 0.5 to 1.0 |
+| slab | 499 to 501 | 39 to 41 | 46 to 49 | 11 | 1.0 to 1.1 |
+
+- Every harsh cell is above every bulk one; rank correlation with the band error 0.93 (13 cells), 0.79 (8 harsh). It follows whichever model is worse in the density (the density model on strained and vacancy cells, the H model on rattled cells and slabs), sizes the band error only within a factor 3 (5 to 37 meV per unit) and does not rank either route's energy error. The auxiliary overlap was taken from the DFT output: it is two-centre and geometry-only, to be computed or learnt like S before the check stands alone.
