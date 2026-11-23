@@ -148,6 +148,23 @@ def test_calculator_from_a_model_file_and_aj_eval(models, tmp_path, capsys):  # 
     assert m["aligned_rmse"] < 1e-8 and abs(m["band_rmse"] - shift) < 1e-8 and abs(m["fermi_rmse"] - shift) < 1e-8 and m["n"] == 2
     assert "bands at a common zero" in out and not m["outliers"]
     assert (tmp_path / "pred" / "0001" / "hamiltonians_pred.h5").exists()                       # the layout: the write_results test
+    cal = str(tmp_path / "cal.npz")                               # calibrated intervals: zero-width here (the shift leaves no error from own Fermi levels)
+    main(["ham", "calibrate", "--model", path, "--data", str(tmp_path / "ref"), *args, "--window", "-50", "50", "--bands", "2", "--out", cal])
+    assert "calibration: 2 structures" in capsys.readouterr().out
+    cc = HamiltonianCalculator(cal, **kw)
+    at = Atoms(numbers=structure(0)[2], positions=structure(0)[0], cell=structure(0)[1], pbc=True)
+    h, hj = cc.eigenvalue_half_widths(at, 0.9), cc.eigenvalue_half_widths(at, 0.9, joint=True)
+    assert h.shape == cc.get_property("eigenvalues", at).shape and np.nanmax(h) < 1e-8 and np.isinf(hj).all()      # two structures: no joint width at any level
+    with pytest.raises(ValueError, match="no calibration"):
+        calc.eigenvalue_half_widths(at)
+    bh, bw = cc.block_half_widths(at), cc.block_half_widths(at, channel="S", level=0.68, whole=True)      # of matrix elements: zero for S (its own blocks)
+    Hat = cc.get_hamiltonian(at)
+    assert set(bh) == set(Hat) and all(bh[k].shape == Hat[k].shape for k in Hat) and max(bw.values()) < 1e-9
+    with pytest.raises(ValueError, match="no block calibration"):
+        calc.block_half_widths(at)
+    main(["eval", "--model", cal, "--data", str(tmp_path / "ref"), *args, "--window", "-50", "50"])
+    out = capsys.readouterr().out
+    assert "coverage of the model's calibrated intervals" in out and "coverage of the calibrated block intervals" in out
     write_cextxyz(str(tmp_path / "s.xyz"), [f[0] for f in frames])
     main(["eval", "--model", path, "--data", str(tmp_path / "s.xyz"), *args, "--out", str(tmp_path / "o.xyz")])
     for f, (_, e, mu, F) in zip(read_cextxyz(str(tmp_path / "o.xyz"), index=":", create_calc=False), frames):
@@ -202,6 +219,12 @@ def test_aj_ham_fit_predict_bands(models, tmp_path, capsys):  # noqa: F811
     mh = json.load(open(tmp_path / "h.json"))
     assert mh["summary"]["overlap_threshold"] == 1e-8
     assert "with the reference S" in capsys.readouterr().out and mh["summary"]["overlap"] == "reference" and mh["summary"]["band_rmse"] < 1e-3
+    (tmp_path / "c").mkdir()                                       # other file names: calibrate refuses structures of the fit
+    for i in range(3):
+        (tmp_path / "c" / f"c{i}.npz").write_bytes((tmp_path / "a" / f"{i}.npz").read_bytes())
+    main(["ham", "calibrate", "--model", honly, "--data", str(tmp_path / "c"), *spec, "--bands", "2"])
+    with pytest.raises(ValueError, match="reference S"):          # the calculator's own eigenvalues of such a model use S = 1
+        HamiltonianCalculator(honly, kpts=(2, 1, 2), nelectrons=40, width=0.2, overlap=None).eigenvalue_half_widths(frames[0])
     capsys.readouterr()
     write_cextxyz(str(tmp_path / "s.xyz"), frames)
     main(["ham", "predict", "--model", second, "--data", str(tmp_path / "s.xyz"), "--out", str(tmp_path / "pred")])

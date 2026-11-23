@@ -50,7 +50,10 @@ class HamiltonianCalculator(Calculator):
     def __init__(self, predictor, kpts=(1, 1, 1), weights=None, nelectrons=None, width=0.1, smearing="fermi-dirac",
                  overlap="S", channel="H", degeneracy=2.0, device=False, core_bands=None, threads=1, **kwargs):
         super().__init__(**kwargs)
+        self.calibration = None                         # `ham.uq.calibrate`'s record: read from a model file that `aj ham calibrate` wrote
         if isinstance(predictor, (str, os.PathLike)):
+            from ..operators import io
+            self.calibration = io.load(predictor).meta["info"].get("calibration")
             predictor = HamiltonianPredictor.from_file(predictor, threads=threads)
         self.predictor = predictor if isinstance(predictor, HamiltonianPredictor) else HamiltonianPredictor(*predictor, threads=threads)
         if smearing not in SMEARINGS:
@@ -120,6 +123,33 @@ class HamiltonianCalculator(Calculator):
 
     def get_eigenvalues(self, kpt=0, spin=0):
         return self.get_property("eigenvalues")[kpt]
+
+    def eigenvalue_half_widths(self, atoms=None, level=0.9, joint=False):
+        """(n_k, n) half-widths of the calibrated intervals of the eigenvalues at `level` (`ham.uq`:
+        constant within an energy band from the Fermi level; `joint`: one width that holds for every
+        eigenvalue of the window at once), NaN outside the calibration's window.  Needs a model
+        calibrated by `aj ham calibrate`, or `calc.calibration = ham.uq.calibrate(...)`; the
+        k-points and smearing should be those of the calibration."""
+        from . import uq
+        if not self.calibration:
+            raise ValueError("this model has no calibration: run `aj ham calibrate`, or set calc.calibration")
+        if self.calibration.get("overlap") == "reference":   # calibrated on eigenvalues with the data's S; this calculator's use S = 1
+            raise ValueError("this model has no overlap and its calibration used the reference S: its intervals are for eigenvalues "
+                             "with that S (ham.uq.half_width on such eigenvalues), not for this calculator's")
+        return uq.half_width(self.calibration, self.get_property("eigenvalues", atoms) - self.get_property("fermi_level", atoms), level, joint)
+
+    def block_half_widths(self, atoms=None, channel=None, level=0.9, whole=False):
+        """{block key: half-widths} of the calibrated intervals of the matrix elements of `channel`
+        (default: the Hamiltonian channel) at `level`, for the blocks of `get_hamiltonian`: an array
+        in each block's shape, or with `whole` one number for the block's largest element error
+        (`ham.uq.BlockErrors`: constant per species pair, distance band and shell pair)."""
+        from . import uq
+        if not (self.calibration and self.calibration.get("blocks")):
+            raise ValueError("this model has no block calibration: run `aj ham calibrate`")
+        atoms = self.atoms if atoms is None else atoms
+        c = channel or self.channel
+        return uq.block_half_widths(self.calibration["blocks"], self.predictor.orbitals, atoms.numbers, atoms.positions, np.asarray(atoms.cell),
+                                    self._blocks(atoms)[c], c, level, whole)
 
     def get_fermi_level(self):
         return self.get_property("fermi_level")

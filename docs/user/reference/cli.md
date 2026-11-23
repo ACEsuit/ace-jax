@@ -15,7 +15,7 @@ The commands, in the order of a typical workflow:
 - [`aj calibrate`](#aj-calibrate) recalibrates the per-atom force
   uncertainty of a `--uq ard` fit on labelled target-regime data.
 - [`aj basis`](#aj-basis) builds a basis and saves it on its own.
-- [`aj ham`](#aj-ham) fits and uses Hamiltonian models: `aj ham fit`,
+- [`aj ham`](#aj-ham) fits and uses Hamiltonian models: `aj ham fit`, `aj ham calibrate`,
   `aj ham predict` and `aj ham bands`.
 
 Each command exits with status 0 if it is successful. The default label
@@ -98,6 +98,10 @@ a Hamiltonian model on reference structures.
 ### aj ham fit
 
 <!-- aj-help ham fit -->
+
+### aj ham calibrate
+
+<!-- aj-help ham calibrate -->
 
 ### aj ham predict
 
