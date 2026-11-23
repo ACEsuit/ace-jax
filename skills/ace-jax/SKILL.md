@@ -395,6 +395,14 @@ structures. User page: `docs/user/howto/hamiltonians.md`; measurements: `docs/de
 - Data: a directory of DeepH-layout subdirectories (`hamiltonians.h5`, `overlaps.h5`; `up/` + `dn/` inside =
   collinear spin, channels `H_up`, `H_dn`, `S`) or of operator caches (`ace_jax.ham.cache.save`), one orbital
   basis for all. FHI-aims output goes through Quoll.jl (`ham/julia/ingest.jl`).
+- `aj ham calibrate --model model.npz --data DIR` (structures the fit did not use; same `--kpts`, `--nelectrons`, `--width` as
+  later predictions): split-conformal half-widths of the eigenvalues per energy band and level, stored in the model file;
+  `aj eval` then prints their coverage, `HamiltonianCalculator.eigenvalue_half_widths(atoms, level=0.9, joint=False)` returns
+  them. Constant per energy band, valid for structures like the calibration set only. An H-only model is scored (and calibrated)
+  with the data's S for both spectra; the calculator then refuses to give half-widths (its eigenvalues use S = 1).
+  The same command calibrates the matrix elements: a half-width per channel, species pair, distance band (`--distance-bands`,
+  default 6; on-site separate) and shell pair, and one for a whole block; `aj eval` prints that coverage too, and
+  `HamiltonianCalculator.block_half_widths(atoms, channel=None, level=0.9, whole=False)` returns `{block key: array or number}`.
 - `aj ham fit --data DIR --out model.npz [--validation DIR] [--prior none|loo|evidence|press|<number>]`
   (`--site-rcut`, `--site-radials`, `--bond-radials`, `--bond-rcut`, `--coupled N L`, `--env R N L NB LB` or
   `--no-env`, `--bonds N` to subsample off-site blocks). The bond-environment group gives most of the

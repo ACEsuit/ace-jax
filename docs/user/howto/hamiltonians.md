@@ -162,8 +162,94 @@ states that it removes are far above the bands.
 
 !!! warning
     The option changes the reference bands by a small amount. Compare the
-    reference bands with the option and without it. The band energy, the forces and the stress of `HamiltonianCalculator` do
-    not use the option.
+    reference bands with the option and without it. The band energy, the
+    forces and the stress of `HamiltonianCalculator` do not use the option.
+
+## Calibrate the eigenvalue errors
+
+A calibrated model gives an interval for each eigenvalue. The calibration set
+is a set of structures with reference blocks that the fit did not use.
+
+!!! warning
+    The intervals are correct only for structures that are similar to the
+    calibration set. The intervals do not become wider for a structure that is
+    different from the training data. They do not show that a structure is
+    different.
+
+    Example: a model of bulk aluminium, calibrated on bulk cells. At level
+    0.9, 96 % of the eigenvalues of other bulk cells were in their intervals.
+    For cells of other types, the fractions were much smaller:
+
+    | Cells | Eigenvalues in the interval | Matrix elements in the interval |
+    |---|---|---|
+    | Atoms moved from their sites (hot) | 31 % | 63 % |
+    | One vacancy | 35 % | 79 % |
+    | Strained | 15 % | 50 % |
+    | Slab | 3 % | 39 % |
+
+1. Calibrate the model:
+
+    ```bash
+    aj ham calibrate --model gold.npz --data calibration/ --nelectrons 79:11
+    ```
+
+2. Examine the coverage on a validation set:
+
+    ```bash
+    aj eval --model gold.npz --data validation/ --nelectrons 79:11
+    ```
+
+3. Get the half-widths of the intervals in Python:
+
+    ```python
+    calc = HamiltonianCalculator("gold.npz", kpts=(3, 3, 3), nelectrons={79: 11})
+    h = calc.eigenvalue_half_widths(atoms, level=0.9)
+    ```
+
+The command prints a half-width for each energy band and each level (0.68, 0.9
+and 0.95 by default). The eigenvalues are relative to the Fermi level of their
+own spectrum. An eigenvalue is in its interval when the difference from the
+reference is not larger than the half-width.
+
+- The half-width is constant in an energy band. It does not change with the
+  structure.
+- At level 0.9, approximately 90 % of the eigenvalues are in their intervals.
+  This is a mean for many structures. For one structure the fraction can be
+  smaller or larger, because the eigenvalues of one structure have a common
+  error.
+- The **whole window** half-width is larger. At level 0.9, all eigenvalues of
+  a structure are in this interval for approximately 90 % of the structures.
+  Give `joint=True` to `eigenvalue_half_widths` to get it. It needs
+  approximately 10 calibration structures for level 0.9 and 20 for level 0.95.
+
+Use the same `--kpts`, `--width`, `--smearing` and `--nelectrons` for the
+calibration and for the predictions.
+
+For a model without an overlap (`--channels H`), the calibration uses the
+overlap of the calibration set. `eigenvalue_half_widths` then gives an error,
+because the eigenvalues of the calculator have no overlap. Fit H and S to get
+intervals from the calculator.
+
+### Intervals for the matrix elements
+
+`aj ham calibrate` also calibrates the errors of the matrix elements of each
+channel. `aj eval` prints the coverage of these intervals.
+
+```python
+h = calc.block_half_widths(atoms, level=0.9)               # an array for each block of H
+w = calc.block_half_widths(atoms, level=0.9, whole=True)   # one number for each block
+```
+
+- The half-width of an element is constant for a group. A group is one channel,
+  the species of the two atoms, one distance band and one pair of shells.
+  On-site blocks are a group of their own.
+- `--distance-bands` sets the number of distance bands (6 by default). Each
+  band has the same number of calibration blocks.
+- With `whole=True`, the number is a limit for the largest element error of
+  the block.
+- A half-width is infinite for a species pair that the calibration set does
+  not have, and for a group with too few blocks for the level.
+
 
 ## Predict H and S
 

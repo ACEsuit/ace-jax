@@ -8,7 +8,9 @@
   the model's H and of the reference H are now both from the generalised problem with the reference S,
   when the reference structures have one. Before, both used S = 1, and the band metrics were not those of
   the physical spectrum (bulk gold, default model: 2.19 meV with S = 1, 2.14 meV with the reference S).
-  The command prints which overlap it uses, and `--metrics-out` records it.
+  The command prints which overlap it uses, and `--metrics-out` records it. `aj ham calibrate` records it
+  too: `HamiltonianCalculator.eigenvalue_half_widths` refuses such a calibration, because the eigenvalues
+  of the calculator use S = 1.
 
 - **`aj ham fit` has a larger default bond environment: `--env 5 8 4 6 4` (was `5 6 4 4 4`).** Fits with
   the default options change. With 32 training structures the band error from own Fermi levels decreased
@@ -81,6 +83,17 @@
   them. No calculation uses them at this time. Two bases with the same shells are equal.
 
 - `build_site_basis(..., natural_parity=True)` builds only the features of parity $(-1)^L$.
+
+- **`aj ham calibrate` gives calibrated intervals for the eigenvalues of a Hamiltonian model.** The command
+  uses structures with reference blocks that the fit did not use. It stores a half-width for each energy
+  band and each level (0.68, 0.9 and 0.95 by default) in the model file. `aj eval` then prints the coverage
+  of the intervals, and `HamiltonianCalculator.eigenvalue_half_widths` returns the half-widths. The intervals
+  are correct only for structures that are similar to the calibration set.
+
+- **`aj ham calibrate` also gives calibrated intervals for the matrix elements.** It stores a half-width for
+  each channel, species pair, distance band (`--distance-bands`, 6 by default; on-site blocks apart) and
+  pair of shells, and a half-width for the largest element error of a block. `aj eval` prints their
+  coverage. `HamiltonianCalculator.block_half_widths` returns them for the blocks of a structure.
 
 - **`--overlap-threshold X` for `aj eval`, `aj ham fit --validation` and `aj ham bands`.** The option removes
   the combinations of orbitals with an overlap eigenvalue below X at a k-point, then calculates the bands.
