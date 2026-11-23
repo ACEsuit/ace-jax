@@ -273,8 +273,8 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
   the table's ~1e-8) for analytic, unsplined radials with lmax <= 8; learned/splined radials and PACE-shaped
   bases keep the table (`"table"`). `ACEJAX_FFI_RADIAL=table` forces the table.
   `ffi_precision="mixed"` (off by default; float64 only; CPU and CUDA kernels, the same library): the
-  product basis in float32, everything else float64. Worth it only for large models (o4d20: 1.4x in LAMMPS
-  on 128 cores, 1.4x on an A100; nothing below o4d14). Forces within ~5e-5 eV/A (o4d20), but the energy
+  product basis in float32, everything else float64. Worth it only for large models (from 0.7.2, o4d20:
+  1.1-1.2x in LAMMPS on 128 cores, 1.2x on an A100; o4d16 at most 1.2x; nothing from o4d14 down). Forces within ~5e-5 eV/A (o4d20), but the energy
   carries ~0.1 meV of noise per 200 atoms (1 meV at o4d16), so energy line-search optimisers (L-BFGS/CG with
   Armijo or Wolfe, LAMMPS `min_style cg`) fail near a minimum: use force-only ones (ODE12r, FIRE,
   `min_style fire`). `calc.ffi["precision"]` reports it. Also on `BatchCalculator` and
@@ -407,16 +407,19 @@ structures. User page: `docs/user/howto/hamiltonians.md`; measurements: `docs/de
   (`--site-rcut`, `--site-radials`, `--bond-radials`, `--bond-rcut`, `--coupled N L`, `--env R N L NB LB` or
   `--no-env`, `--bonds N` to subsample off-site blocks). The bond-environment group gives most of the
   accuracy and most of the cost. Default `--env 5 8 4 6 4`; `5 6 4 4 4` (the default to 0.7.2) is ~1.2x faster to predict,
-  ~2x to fit, with 1.5x (gold) to 2.7x (aluminium) the band error. With many elements or nearly dependent overlaps use `--prior evidence`:
+  ~2x to fit, with 1.5x (gold) to 2.7x (aluminium) the band error. An H-only model is scored by `aj eval` with the data's S for
+  both spectra. With many elements or nearly dependent overlaps use `--prior evidence`:
   without a prior one spurious eigenvalue can appear that the block errors do not show (`loo` did not remove
   it on the four-element alloy, and costs hours and tens of GB of scratch there). `--noise-floor SIGMA`
   (data units; the SCF scatter of H, ~1e-7 to 3e-6 eV at `sc_accuracy_rho 1e-5`) bounds the evidence's noise
-  from below; a selected prior is never weaker than the ridge.
+  from below; a selected prior is never weaker than the ridge. `--data-memory GB` (default 8): the training blocks kept in memory; a larger set is read again on each of the fit's four passes, so memory does not grow with the number of structures (Python: `operators.data.LazyData(n, read, budget)` in place of the list of structures).
 - `aj eval --model model.npz --data DIR` (or `--validation` on the fit): block errors and the
   electronic-structure errors of `ace_jax.ham.metrics` (band RMSE at a common zero and from own Fermi levels,
   Fermi level, band energy per atom, density-of-states Wasserstein distance, outlier structures).
   `--nelectrons` (per cell, or `Z:n,...` per atom; default the atomic numbers), `--kpts`, `--width`,
-  `--smearing`, `--window LO HI`. Quote the band RMSE from own Fermi levels when comparing with
+  `--smearing`, `--window LO HI`, `--overlap-threshold X` (drop the combinations of orbitals whose S(k)
+  eigenvalue is below X before diagonalising, model and reference alike; try 1e-3 when a diffuse basis gives band
+  errors of eV from block errors of meV; scoring and `aj ham bands` only, not the calculator's energy). Quote the band RMSE from own Fermi levels when comparing with
   publications; a per-structure rigid shift of a few meV sits in the common-zero number.
 - `aj ham predict --model M --data <extxyz | DIR> --out DIR`: `hamiltonians_pred.h5`, `overlaps_pred.h5` per
   structure (DeepH layout). `aj ham bands --model M --structure S [--index i] [--path GXMG] --out bands.npz

@@ -63,7 +63,10 @@ def spectrum_metrics(e_ref, e_pred, nelectrons, n_atoms, weights=None, width=0.1
     lo, hi = mu0 + window[0], mu0 + window[1]
     w = (e0 > lo) & (e0 < hi)
     ww = (wk[:, None] * w)
-    d, da = e1 - e0, (e1 - mu1) - (e0 - mu0)
+    out = np.isinf(e0) & np.isinf(e1)                   # directions an overlap threshold left out of both (`operator.block_bands`): no state
+    e0z, e1z = np.where(np.isinf(e0), 0.0, e0), np.where(np.isinf(e1), 0.0, e1)
+    with np.errstate(invalid="ignore"):                 # inf - inf where both left the direction out
+        d, da = np.where(out, 0.0, e1 - e0), np.where(out, 0.0, (e1 - mu1) - (e0 - mu0))
     avg = lambda x: float((ww * x).sum() / ww.sum()) if ww.sum() else float("nan")
     occ = wk[:, None] * f0
     x = np.concatenate([e0.ravel(), e1.ravel()])        # N~ - N is a step function: +w_k at a predicted state, -w_k at a reference one
@@ -75,7 +78,7 @@ def spectrum_metrics(e_ref, e_pred, nelectrons, n_atoms, weights=None, width=0.1
         band_rmse=float(np.sqrt(avg(d ** 2))), band_mae=avg(np.abs(d)), band_max=float(np.abs(d[w]).max()) if w.any() else float("nan"),
         aligned_rmse=float(np.sqrt(avg(da ** 2))), fermi=mu1 - mu0,
         ee=float((np.abs(da) * occ).sum() / occ.sum()), ee_abs=float((np.abs(d) * occ).sum() / occ.sum()),
-        band_energy=float(((wk[:, None] * f1 * e1).sum() - (wk[:, None] * f0 * e0).sum()) / n_atoms),
+        band_energy=float(((wk[:, None] * f1 * e1z).sum() - (wk[:, None] * f0 * e0z).sum()) / n_atoms),
         dos=w1 / float(ww.sum()) if ww.sum() else float("nan"),
         n_states=int(w.sum()), fermi_ref=mu0)
 

@@ -195,10 +195,27 @@ ROW_BATCH = 16      # atoms per step of the bond-environment loops on a GPU (RTX
 
 
 def _rows(f, xs):
-    """f over the leading (atom) axis.  On a CPU one atom at a time: its (bonds x environment
-    atoms) intermediates fit the cache, where all atoms at once is a pass over hundreds of MB per
-    operation.  On a GPU that loop is sequential steps of a small program, so `ROW_BATCH` atoms a step."""
-    return jax.lax.map(f, xs) if jax.default_backend() == "cpu" else jax.lax.map(f, xs, batch_size=ROW_BATCH)
+    """f over the leading (atom) axis of the tuple of arrays xs.  On a CPU one atom at a time: its
+    (bonds x environment atoms) intermediates fit the cache, where all atoms at once is a pass over
+    hundreds of MB per operation.  On a GPU that loop is sequential steps of a small program, so
+    `ROW_BATCH` atoms a step.
+
+    The batches are made here: the rows padded (with the first row) to a multiple of the batch,
+    reshaped to (batches, batch, ...) and mapped.  `jax.lax.map(f, xs, batch_size=)` is not used: it
+    scans the whole batches and vmaps the remaining rows apart, and XLA's GPU compiler (jax 0.11.2,
+    RTX 4000 Ada) then read one input of the second batch from the first.  For 42 rows of 96 bond
+    slots, 32 environment atoms, 8 radials and l <= 4, `_env_side` multiplied the rows 16 to 31 by
+    the bond mask of the rows 0 to 15, so that live bond slots had no environment; it was right for
+    92, 100 or 104 slots and for batches of 8 or 32."""
+    if jax.default_backend() == "cpu":
+        return jax.lax.map(f, xs)
+    n = xs[0].shape[0]
+    b = max(1, min(ROW_BATCH, n))
+    pad = (-n) % b
+    ys = tuple(jnp.concatenate([x, jnp.broadcast_to(x[:1], (pad, *x.shape[1:]))]).reshape(-1, b, *x.shape[1:]) if pad else x.reshape(-1, b, *x.shape[1:])
+               for x in xs)
+    out = jax.lax.map(jax.vmap(f), ys)
+    return out.reshape(-1, *out.shape[2:])[:n]
 
 
 @highest

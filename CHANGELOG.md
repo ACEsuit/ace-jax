@@ -41,7 +41,23 @@
   2,304 functions on one core. `spectrum_fn` and `bands_fn`, which differentiate the eigenvalues,
   and every GPU path are unchanged.
 
+- The documentation gives the gain of mixed precision with the kernels of 0.7.2: 1.1 to 1.2 times for the
+  silicon model o4d20 (1.4 times before 0.7.2, when the product basis used more of the time), and no gain
+  from o4d14 down. The kernel row of the five-element alloy table is timed again and did not change.
+
+- **The alloy speed table uses a linear ACE model that ace-jax builds.** The model has polynomial radial
+  functions, and the CUDA kernel calculates them with no table. The kernel then costs 0.064 µs/atom-step on an
+  A100 for the five-element alloy (0.15 with the model of splined radials that the table used before). The
+  CPU row did not change. `bench/scaling/models.py ace-poly` builds the model.
+- The alloy speed table has a row for grace-runtime (`pace/runtime`) on the PACE model: 0.27 µs/atom-step on
+  an A100 and 0.25 on 128 CPU cores.
+
 ### Fixed
+
+- **Hamiltonian models on a GPU: some off-site blocks were wrong for some sizes of structure.** The block
+  prediction on a GPU gave some blocks a wrong bond environment when the number of atoms of an element and
+  their number of bonds had particular values. The affected blocks were wrong by electron-volts. Predictions on a CPU were correct. The cause was the batched loop over atoms in the compiled
+  program. The loop now makes its batches in a different way.
 
 - `HamiltonianCalculator` and `aj eval` now refuse an electron count that does not fit in the orbitals of
   the model. For a model with valence orbitals only, give the valence electrons (`--nelectrons 79:11`).
@@ -59,6 +75,13 @@
   each channel, species pair, distance band (`--distance-bands`, 6 by default; on-site blocks apart) and
   pair of shells, and a half-width for the largest element error of a block. `aj eval` prints their
   coverage. `HamiltonianCalculator.block_half_widths` returns them for the blocks of a structure.
+
+- **`--overlap-threshold X` for `aj eval`, `aj ham fit --validation` and `aj ham bands`.** The option removes
+  the combinations of orbitals with an overlap eigenvalue below X at a k-point, then calculates the bands.
+  It applies to the model and to the reference. A large diffuse basis has such combinations, and an error
+  of a few meV in H then moves states by electron-volts into the bands. In Python: `block_bands`,
+  `eigvals` and `HamiltonianPredictor.bands` take `overlap_threshold`. The band energy, the forces and
+  the stress do not use the option.
 
 - `aj ham fit --noise-floor SIGMA` (`noise=` of `fit_onsite` and `fit_offsite`) sets the smallest noise
   of H that `--prior evidence` can select, in the unit of the data. The difference of H between SCF

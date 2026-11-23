@@ -103,6 +103,11 @@ two SCF calculations of the same structure. For FHI-aims with
 `sc_accuracy_rho 1e-5`, this difference is approximately 1e-7 eV for off-site
 blocks and 3e-6 eV for on-site blocks.
 
+`--data-memory` sets the memory for the blocks of the training structures, in
+GB. The default is 8. The fit reads a larger dataset from disk again for each
+of its four passes. The memory of the fit then does not increase with the
+number of structures.
+
 !!! warning
     A fit with no prior can give an eigenvalue far from the bands when the
     overlap matrix is almost singular. The block errors do not show this
@@ -136,10 +141,48 @@ larger than 5 times the median.
 Energies are in the unit of the data. For FHI-aims data the unit is eV, and the
 tables show meV.
 
+### Diffuse basis sets
+
+A large basis of diffuse orbitals has combinations of orbitals with almost no
+norm. The overlap matrix at a k-point then has eigenvalues near zero. A small
+error in H along such a combination moves its energy by electron-volts. The
+predicted bands can then be wrong by electron-volts although the block errors
+are a few meV.
+
+1. Give `--overlap-threshold 1e-3` to `aj eval`, `aj ham fit --validation` or
+   `aj ham bands`.
+2. Compare the band errors with those without the option.
+
+The option removes the combinations with an overlap eigenvalue below the value
+before the diagonalisation. It applies to the model and to the reference. The
+states that it removes are far above the bands.
+
+!!! warning
+    The option changes the reference bands by a small amount. Compare the
+    reference bands with the option and without it. The band energy, the
+    forces and the stress of `HamiltonianCalculator` do not use the option.
+
 ## Calibrate the eigenvalue errors
 
 A calibrated model gives an interval for each eigenvalue. The calibration set
 is a set of structures with reference blocks that the fit did not use.
+
+!!! warning
+    The intervals are correct only for structures that are similar to the
+    calibration set. The intervals do not become wider for a structure that is
+    different from the training data. They do not show that a structure is
+    different.
+
+    Example: a model of bulk aluminium, calibrated on bulk cells. At level
+    0.9, 96 % of the eigenvalues of other bulk cells were in their intervals.
+    For cells of other types, the fractions were much smaller:
+
+    | Cells | Eigenvalues in the interval | Matrix elements in the interval |
+    |---|---|---|
+    | Atoms moved from their sites (hot) | 31 % | 63 % |
+    | One vacancy | 35 % | 79 % |
+    | Strained | 15 % | 50 % |
+    | Slab | 3 % | 39 % |
 
 1. Calibrate the model:
 
@@ -204,10 +247,6 @@ w = calc.block_half_widths(atoms, level=0.9, whole=True)   # one number for each
 - A half-width is infinite for a species pair that the calibration set does
   not have, and for a group with too few blocks for the level.
 
-!!! warning
-    The intervals are correct only for structures that are similar to the
-    calibration set. They do not show that a structure is different from the
-    training data.
 
 ## Predict H and S
 

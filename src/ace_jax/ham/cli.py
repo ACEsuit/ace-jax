@@ -84,6 +84,7 @@ def _calc(a, kpts):
     if calc.channel not in ch:
         raise UsageError(f"--channel {calc.channel}: the model has {', '.join(ch)}")
     calc.degeneracy = 2.0 if calc.channel == "H" else 1.0      # a spin channel holds one electron per state
+    calc.overlap_threshold = float(getattr(a, "overlap_threshold", 0.0) or 0.0)   # of the scored and plotted bands (`operator.block_bands`), not of the energy
     return calc
 
 
@@ -99,6 +100,7 @@ def score(calc, data, window, metrics_out=None, blocks_out=None, pairs=None, blo
     receives each structure's (reference, predicted) eigenvalues from their own Fermi levels (`ham.uq`).
     block_errors: a `uq.BlockErrors` that receives every structure's block errors.
     A model with a calibration (`aj ham calibrate`) also gets the coverage of its intervals here.
+    calc.overlap_threshold > 0 (--overlap-threshold): both spectra in the subspace of S(k) above it (`operator.block_bands`).
     A model without an overlap is scored with the data's S where it has one (its H and the reference
     H in the same generalised problem; summary["overlap"] "reference"), else with S = 1 ("identity")."""
     from . import metrics as M
@@ -106,11 +108,13 @@ def score(calc, data, window, metrics_out=None, blocks_out=None, pairs=None, blo
     ch, orb = calc.predictor.channels, calc.predictor.orbitals
     names = block_names(data)
     err, per, bad, spectra, overlap = {}, [], [], ([] if pairs is None else pairs), None
+    cut = getattr(calc, "overlap_threshold", 0.0)
     held = getattr(calc, "calibration", None) if pairs is None else None      # a calibrated model being scored (not calibrated)
     if held and held.get("blocks") and block_errors is None:
         from . import uq
         block_errors = uq.BlockErrors(orb)
-    print(f"{len(names)} reference structures; eigenvalues on {len(calc.kpts)} k-points, {window[0]:g} to {window[1]:g} from the Fermi level")
+    print(f"{len(names)} reference structures; eigenvalues on {len(calc.kpts)} k-points, {window[0]:g} to {window[1]:g} from the Fermi level"
+          + (f"; overlap eigenvalues below {cut:g} left out" if cut > 0 else ""))
     for i, (name, at, d) in enumerate(s for n in names for s in structures(n)):
         if d.basis != orb:
             raise UsageError(f"{name}: its orbital basis is not the model's")
@@ -129,17 +133,21 @@ def score(calc, data, window, metrics_out=None, blocks_out=None, pairs=None, blo
                 given = "reference"; Sb, P = d.blocks["S"], pred[calc.channel]
                 keys = sorted(set(Hb) | set(Sb) | set(P))
                 bs = BlockSum(keys, d.numbers, orb); full = lambda B, keys=keys, z=d.numbers: _filled(B, keys, z, orb); Sf = full(Sb)
-                e1, e0 = block_bands(bs, full(P), Sf, calc.kpts), block_bands(bs, full(Hb), Sf, calc.kpts)
+                e1, e0 = block_bands(bs, full(P), Sf, calc.kpts, overlap_threshold=cut), block_bands(bs, full(Hb), Sf, calc.kpts, overlap_threshold=cut)
             else:
                 given = "model" if calc.overlap else "identity"
-                e1 = np.asarray(calc.get_property("eigenvalues", at))
                 Sb = d.blocks[calc.overlap] if calc.overlap else {k: np.eye(*v.shape) * float(onsite(k)) for k, v in Hb.items()}
-                e0 = block_bands(BlockSum(sorted(Hb), d.numbers, orb), Hb, Sb, calc.kpts) if np.isfinite(e1).all() else None
+                if cut > 0 and calc.overlap:             # the model's H and S, as the reference's: each in the subspace of its own S(k)
+                    P = pred[calc.channel]
+                    e1 = block_bands(BlockSum(sorted(P), d.numbers, orb), P, pred[calc.overlap], calc.kpts, overlap_threshold=cut)
+                else:
+                    e1 = np.asarray(calc.get_property("eigenvalues", at))
+                e0 = block_bands(BlockSum(sorted(Hb), d.numbers, orb), Hb, Sb, calc.kpts, overlap_threshold=cut if calc.overlap else 0.0) if not np.isnan(e1).any() else None
             if overlap is None:
                 overlap = given
                 print({"reference": "the model has no overlap: eigenvalues of its H and of the reference H with the reference S",
                        "identity": "the model and the data have no overlap: eigenvalues with S = 1", "model": f"overlap: the model's {calc.overlap}"}[given], flush=True)
-            if not np.isfinite(e1).all():                # the eigensolver's answer to an overlap that is not positive definite
+            if np.isnan(e1).any():                       # the eigensolver's answer to an overlap that is not positive definite
                 print(f"  {name}: no eigenvalues: the predicted {calc.overlap or 'H'} gives a generalised eigenproblem that is not "
                       f"positive definite; no band metrics for this structure", flush=True)
                 bad.append(name)
@@ -162,6 +170,8 @@ def score(calc, data, window, metrics_out=None, blocks_out=None, pairs=None, blo
             summary["block_coverage"] = cov
     if summary is not None:
         summary["overlap"] = overlap
+        if cut > 0:
+            summary["overlap_threshold"] = cut
         if bad:
             summary["no_eigenvalues"] = bad
     if per:
@@ -203,28 +213,35 @@ def cmd_fit(a):
     from ..operators.features import build_site_basis
     from ..operators.fit import fit_offsite, fit_onsite
     names = block_names(a.data)[:a.max_structures]
-    train = [_read_blocks(n) for n in names]
+    from ..operators.data import LazyData
+    budget = a.data_memory * 2.0 ** 30                   # the blocks kept in memory; a larger set is read again on each pass
+    train = LazyData(len(names), lambda i: _read_blocks(names[i]), budget)
     orb = train[0].basis
-    if any(d.basis != orb for d in train):
-        raise UsageError(f"{a.data}: the structures do not share one orbital basis")
     ch = tuple(a.channels) if a.channels else tuple(train[0].blocks)
-    missing = [c for c in ch if any(c not in d.blocks for d in train)]
-    if missing:
-        raise UsageError(f"--channels: {', '.join(missing)} is not in every structure (the first has {', '.join(train[0].blocks)})")
+    n_atoms, longest = 0, 0.0
+    for d in train:                                      # one pass: what the basis and the messages need of every structure
+        if d.basis != orb:
+            raise UsageError(f"{a.data}: the structures do not share one orbital basis")
+        missing = [c for c in ch if c not in d.blocks]
+        if missing:
+            raise UsageError(f"--channels: {', '.join(missing)} is not in every structure (the first has {', '.join(train[0].blocks)})")
+        n_atoms += len(d.numbers)
+        if not a.bond_rcut:
+            longest = max(longest, max(np.linalg.norm(d.bond(k)) for k in d.blocks[ch[0]]))
     prior = None if a.prior == "none" else a.prior if a.prior in PRIORS else float(a.prior)
     els = [int(z) for z in orb.species]
-    rcut = a.bond_rcut or float(np.ceil(10 * max(np.linalg.norm(d.bond(k)) for d in train for k in d.blocks[ch[0]])) / 10)
+    rcut = a.bond_rcut or float(np.ceil(10 * longest) / 10)
     sb = build_site_basis(els, order=1, totaldegree=40, lmax_feat=2 * orb.lmax, rcut=a.site_rcut, wL=0.5, nmax_by_order=(a.site_radials,),
                           lmax_by_order=(2 * orb.lmax,)).with_table()
     basis = B.BondBasis(site=sb, rcut_bond=rcut, n_bond=a.bond_radials, n_cpl=a.coupled[0], l_cpl=a.coupled[1])
     if not a.no_env:
         r, n, l, nb, lb = a.env
         basis = basis._replace(r_env=float(r), n_env=int(n), l_env=int(l), n_ebond=int(nb), l_ebond=int(lb))
-    print(f"{len(train)} structures, {sum(len(d.numbers) for d in train)} atoms, elements {els}, channels {', '.join(ch)}; "
+    print(f"{len(train)} structures, {n_atoms} atoms, elements {els}, channels {', '.join(ch)}; "
           f"site cutoff {a.site_rcut:g}, bond cutoff {rcut:g}; prior {a.prior}" + (f", noise floor {a.noise_floor:g}" if a.noise_floor else ""), flush=True)
     t = time.perf_counter()
     on, rep_on = fit_onsite(sb, train, channels=ch, ridge=a.ridge, sigma_c=prior, noise=a.noise_floor)
-    off, rep_off = fit_offsite(basis, [_subset(d, a.bonds, a.seed + i) for i, d in enumerate(train)], channels=ch, ridge=a.ridge, sigma_c=prior, noise=a.noise_floor)
+    off, rep_off = fit_offsite(basis, LazyData(len(names), lambda i: _subset(train[i], a.bonds, a.seed + i)) if a.bonds else train, channels=ch, ridge=a.ridge, sigma_c=prior, noise=a.noise_floor)
     fit_s = time.perf_counter() - t
     n_coef = int(sum(np.asarray(c).size for m in (on, off) for c in m.coef.values()))
     resid = {}
@@ -245,6 +262,7 @@ def cmd_fit(a):
         calc.overlap = "S" if "S" in ch else None
         calc.channel = "H" if "H" in ch else next(c for c in ch if c != "S")
         calc.degeneracy = 2.0 if calc.channel == "H" else 1.0
+        calc.overlap_threshold = float(a.overlap_threshold or 0.0)
         print(f"validation set {a.validation}:")
         table, summary = score(calc, a.validation, a.window)
         info["validation"] = dict(data=os.path.abspath(a.validation), blocks={f"{c} {p}": v for (c, p), v in table.items()}, metrics=summary)
@@ -309,18 +327,19 @@ def band_structure(calc, atoms, path=None, npoints=200, reference=None):
     p = calc.predictor
     prep = p.prepare_auto(atoms.positions, np.asarray(atoms.cell), atoms.numbers, atoms.pbc)
     nel = calc.electrons(atoms.numbers)
+    cut = getattr(calc, "overlap_threshold", 0.0)
     mu = lambda e: float(smeared_occupations(jnp.asarray(e), jnp.asarray(calc.weights), nel, calc.width, calc.smearing, calc.degeneracy)[1])
     out = dict(x=x, ticks=ticks, labels=np.asarray(labels), kpts=bp.kpts, grid_kpts=calc.kpts, grid_weights=calc.weights,
                nelectrons=nel, degeneracy=calc.degeneracy, formula=atoms.get_chemical_formula())
     for tag, ks in (("bands", bp.kpts), ("grid_bands", calc.kpts)):
-        out[tag] = np.asarray(p.bands(prep, ks, overlap=calc.overlap, channel=calc.channel), float)
+        out[tag] = np.asarray(p.bands(prep, ks, overlap=calc.overlap, channel=calc.channel, overlap_threshold=cut), float)
     out["fermi_level"] = mu(out["grid_bands"])
     if reference is not None:
         Hb = reference.blocks[calc.channel]
         Sb = reference.blocks[calc.overlap] if calc.overlap else {k: np.eye(*v.shape) * float(onsite(k)) for k, v in Hb.items()}
         bs = BlockSum(sorted(Hb), reference.numbers, p.orbitals)
         for tag, ks in (("bands_ref", bp.kpts), ("grid_bands_ref", calc.kpts)):
-            out[tag] = np.asarray(block_bands(bs, Hb, Sb, ks), float)
+            out[tag] = np.asarray(block_bands(bs, Hb, Sb, ks, overlap_threshold=cut if calc.overlap else 0.0), float)
         out["fermi_level_ref"] = mu(out["grid_bands_ref"])
     return out
 
@@ -424,6 +443,9 @@ def _add_spectrum_args(p, kpts):
     p.add_argument("--window", type=float, nargs=2, default=[-12.0, 5.0],
                    help="eigenvalues scored: from LO to HI of the reference Fermi level (default -12 5)")
     p.add_argument("--threads", type=int, default=1, help="threads of the off-site evaluation on a CPU (default 1)")
+    p.add_argument("--overlap-threshold", type=float, default=0.0, metavar="X",
+                   help="drop the combinations of orbitals whose overlap eigenvalue at a k-point is below X before diagonalising "
+                        "(default 0: none); 1e-3 for a diffuse basis whose predicted bands are far off although the blocks are close")
 
 
 def add_parser(sub):
@@ -435,6 +457,8 @@ def add_parser(sub):
     f.add_argument("--out", required=True, help="the model file (.npz)")
     f.add_argument("--validation", default=None, help="structures with blocks to score the fitted model on (as aj eval)")
     f.add_argument("--channels", nargs="+", default=None, help="operator channels to fit (default: every channel of the data, e.g. H S)")
+    f.add_argument("--data-memory", type=float, default=8.0, metavar="GB",
+                   help="blocks of the training structures kept in memory (default 8); a larger set is read from disk again on each pass of the fit")
     f.add_argument("--max-structures", type=int, default=None, help="use the first N structures of --data (name order)")
     f.add_argument("--bonds", type=int, default=0, help="fit to a random N off-site blocks of each structure (default 0: all)")
     f.add_argument("--seed", type=int, default=0, help="seed of the --bonds choice")

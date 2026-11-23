@@ -4,7 +4,10 @@ import jax
 
 jax.config.update("jax_enable_x64", True)
 
+import jax.numpy as jnp
 import numpy as np
+import pytest
+import scipy.linalg
 
 from ace_jax.ham import metrics as M
 
@@ -70,3 +73,37 @@ def test_dos_distance_is_the_wasserstein_distance():
     mu = M.spectrum_metrics(e, e, nel, na, width=0.05)["fermi_ref"]
     m = M.spectrum_metrics(e, one, nel, na, width=0.05, window=(-30.0, hi - mu))
     assert 0.0 <= m["dos"] < 1e-3 / e.shape[1]
+
+
+def test_overlap_threshold_drops_near_null_directions():
+    """`operator._host_eig(cut=)` and its device form: the generalised problem in the subspace of S above the
+    threshold, the directions left out +inf at the end; a threshold below the spectrum of S changes nothing; and a
+    small error in H that moves a state of the full problem by electron-volts moves none of the subspace's."""
+    from ace_jax.ham import operator as O
+    g = np.random.default_rng(0); n = 12
+    Q = np.linalg.qr(g.normal(size=(n, n)) + 1j * g.normal(size=(n, n)))[0]
+    s = np.r_[1e-6, np.linspace(0.3, 2.0, n - 1)]
+    S = (Q * s) @ Q.conj().T
+    A = g.normal(size=(n, n)) + 1j * g.normal(size=(n, n)); H = A + A.conj().T
+    full = scipy.linalg.eigh(H, S, eigvals_only=True)
+    assert np.allclose(O._host_eig(H[None], S[None], cut=1e-9)[0], full, rtol=1e-7, atol=1e-7 * abs(full).max())
+    X = Q[:, 1:] / np.sqrt(s[1:])
+    want = np.linalg.eigvalsh(X.conj().T @ H @ X)
+    e = O._host_eig(H[None], S[None], cut=1e-3)[0]
+    assert np.isposinf(e[-1]) and np.allclose(e[:-1], want, atol=1e-10)
+    dev = np.asarray(O._eigvals_cut_k_dev(jnp.asarray(H[None]), jnp.asarray(S[None]), 1e-3))[0]
+    assert np.isposinf(dev[-1]) and np.allclose(dev[:-1], want, atol=1e-9)
+    v = Q[:, 0]; dH = 1e-3 * np.outer(v, v.conj())                  # 1e-3 along the direction of norm 1e-6: 1e3 in its energy
+    assert abs(scipy.linalg.eigh(H + dH, S, eigvals_only=True) - full).max() > 1.0
+    assert abs(O._host_eig((H + dH)[None], S[None], cut=1e-3)[0][:-1] - want).max() < 1e-10
+    with pytest.raises(ValueError, match="eigenvectors"):
+        O._host_eig(H[None], S[None], vectors=True, cut=1e-3)
+
+
+def test_metrics_ignore_directions_left_out():
+    """+inf columns (an overlap threshold) hold no electrons and no error: the metrics are those without them."""
+    e, nel, na = spectra()
+    m = M.spectrum_metrics(e, e + 0.02, nel, na, width=0.05)
+    pad = lambda x: np.concatenate([x, np.full((len(x), 3), np.inf)], 1)
+    q = M.spectrum_metrics(pad(e), pad(e + 0.02), nel, na, width=0.05)
+    assert all(np.isclose(m[k], q[k], rtol=1e-5, atol=1e-5) for k in m)       # the Fermi level in a gap is defined to the bisection's roundoff
