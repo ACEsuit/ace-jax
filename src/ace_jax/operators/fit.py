@@ -17,6 +17,7 @@ from typing import NamedTuple
 import jax
 import jax.numpy as jnp
 import numpy as np
+import scipy.linalg as sla
 
 from ..basis import cg
 from ..fit.linear import lml_svd
@@ -26,6 +27,7 @@ from ..fit.linear import objective as lo
 from ..fit.linear import stats as ls
 from .data import LazyData
 from .maps import make_room
+from . import centred as C
 from .onsite import OnsiteModel, _features, design, parts_of, shell_pairs, site_graph
 
 
@@ -38,6 +40,9 @@ class DesignStats(NamedTuple):
     factor: ls.Factor
     keys: tuple
     hyper: object = None
+    gamma: object = None                 # what the fit was given for this design's columns (`_solve`): the prior precision
+    ridge: float = 0.0                   # added to the ridge, or with `hyper` the smoothness of each column
+    jack: object = None                  # structures kept apart: (n_rhs, columns, structures), the jackknife deviations (`_jackknife`)
 
 
 class _Prior(NamedTuple):
@@ -134,7 +139,7 @@ SELECT = ("evidence", "loo", "press")                  # sigma_c= by a criterion
 LOO_RHO = np.arange(-24.0, 6.01, 0.5)                  # log10 sigma^2 / sigma_c^2 tried by "loo" and "press"
 
 
-def _loo(fac, gamma, ridge, blocks, press):
+def _loo(fac, gamma, ridge, blocks, press, jackknife=False):
     """The leave-one-structure-out fit of one design.  blocks: per structure (R_g, c_g, e_g), the
     triangular factor of its rows, Q_g^T Y and the squared norm of the part of each target
     outside its columns.  For every rho = sigma^2 / sigma_c^2 of LOO_RHO (prior precision
@@ -146,7 +151,8 @@ def _loo(fac, gamma, ridge, blocks, press):
     shared by the atoms of a structure count once per structure, where the evidence reads them
     as independent noise.  A rho at which a structure has leverage 1 within roundoff is skipped.
     rho values below `_rho_floor` are not tried (see `_evidence`).
-    Returns (mean, hyper) as `_evidence` (hyper[:, 2]: the criterion)."""
+    Returns (mean, hyper) as `_evidence` (hyper[:, 2]: the criterion), and with `jackknife` the deviations of
+    `_jackknife` at the prior chosen (else None: they are (right-hand sides, columns, structures) numbers)."""
     gamma, n = np.asarray(gamma, float), float(fac.n)
     blocks = [_Spill.get(b) for b in blocks]
     m = max(len(b[0]) for b in blocks)                   # a structure with fewer rows than columns keeps only those rows
@@ -165,7 +171,42 @@ def _loo(fac, gamma, ridge, blocks, press):
     best, q = crit.argmax(0), np.arange(crit.shape[1])
     sig = np.sqrt(np.asarray(s2)[best, q])
     sc = sig / 10.0 ** (0.5 * grid[best])
-    return np.asarray(means)[best, :, q].T, np.stack([sig, sc, crit[best, q], sc], axis=1)
+    mean = np.asarray(means)[best, :, q].T
+    return mean, np.stack([sig, sc, crit[best, q], sc], axis=1), _jackknife(fac, gamma, ridge, blocks, grid[best], mean) if jackknife else None
+
+
+def _jackknife(fac, gamma, ridge, blocks, rho, mean):
+    """(n_rhs, columns, structures): the change of each right-hand side's coefficients when one
+    structure is left out, at its own prior, times sqrt((G - 1) / G): the
+    delete-one-structure jackknife (CR3), whose outer product over the structures is the
+    covariance of the coefficients that the scatter between structures supports.  In closed form
+    from the structure's rows P_g and residual r_g: -A^-1 P_g^T (1 - P_g A^-1 P_g^T)^-1 r_g, with
+    A = R^T R + diag(prior).  A leverage of 1 within roundoff is clamped (`uq.jackknife`).
+
+    rho: (n_rhs,) log10 sigma^2 / sigma_c^2 of each right-hand side, the prior precision
+    gamma_j^2 rho on the columns with a smoothness gamma_j and `ridge` on the others (a selected
+    prior: `_loo`, `_evidence`); None: the fixed prior of `_solve`, ridge + gamma (gamma None: the
+    ridge alone), the same for every right-hand side.  blocks: per structure (R_g, c_g, e_g), or
+    the `_Spill` paths of them."""
+    R = np.asarray(fac.R, float)
+    G = len(blocks)
+    out = np.zeros((mean.shape[1], R.shape[1], G))
+    fixed = rho is None
+    rho = np.zeros(mean.shape[1]) if fixed else np.asarray(rho, float)
+    for r in np.unique(rho):
+        q = np.flatnonzero(rho == r)
+        lin = (np.full(R.shape[1], float(ridge)) + (0.0 if gamma is None else np.asarray(gamma, float)) if fixed
+               else np.where(gamma > 0, gamma ** 2 * 10.0 ** r, ridge))
+        U = np.linalg.qr(np.concatenate([R, np.diag(np.sqrt(lin))]), mode="r")
+        for g, b in enumerate(blocks):
+            Pg, Yg = (b if not isinstance(b, str) else _Spill.get(b))[:2]
+            if not len(Pg):                                  # a structure without rows of this design
+                continue
+            W = sla.solve_triangular(U, Pg.T, trans="T")                     # U^-T P_g^T: H_g = W^T W
+            mu, V = np.linalg.eigh(np.eye(len(Pg)) - W.T @ W)
+            res = Yg[:, q] - Pg @ mean[:, q]
+            out[q, :, g] = -sla.solve_triangular(U, W @ (V @ ((V.T @ res) / np.maximum(mu, 1e-10)[:, None]))).T
+    return out * np.sqrt((G - 1) / G)
 
 
 class _Spill:
@@ -218,7 +259,7 @@ def _need_x64():
         raise ValueError("the block fit needs float64: jax.config.update('jax_enable_x64', True)")
 
 
-def _fit(designs, n_chunks, rows, nc, ridge, device=False, gamma=None, select=None, groups=None, floor=None):
+def _fit(designs, n_chunks, rows, nc, ridge, device=False, gamma=None, select=None, groups=None, floor=None, jackknife=False):
     """Stream and solve.  designs: {design key: (n columns, [coefficient keys])}; rows(i) ->
     {design key: (A (n_rows, n_columns), Y (n_rows, n_keys * nc))} for chunk i (a design without
     rows in the chunk is left out).  Returns (coef, report, stats).
@@ -227,9 +268,19 @@ def _fit(designs, n_chunks, rows, nc, ridge, device=False, gamma=None, select=No
     with zero rows to a fixed size (n_rows: the real ones), and the triangular factors are
     merged there (`design.qr_merge`): nothing the size of the design rows comes to the host.
 
-    groups (select "loo" or "press"): the structure of each chunk.  Each structure's rows are
-    then merged into a factor of their own, kept on disk for `_loo` (`_Spill`: per design,
-    structures x columns^2 numbers), and the factor of all the rows is the merge of those."""
+    groups (select "loo" or "press", or `jackknife`): the structure of each chunk.  Each
+    structure's rows are then merged into a factor of their own, kept on disk for `_loo` and
+    `_jackknife` (`_Spill`: per design, structures x columns^2 numbers), and the factor of all the
+    rows is the merge of those.
+
+    jackknife: the statistics carry the delete-one-structure jackknife deviations
+    (`DesignStats.jack`, `_jackknife`) at the prior the coefficients were solved with, whatever
+    `select` is: a fixed prior needs no selection for it.  Needs `groups`.
+
+    gamma[d] may be a function of the diagonal of the design's Gram matrix R^T R (a prior scaled
+    to the columns, e.g. r diag(G)); the statistics hold its value."""
+    if jackknife and groups is None:
+        raise ValueError("_fit: the jackknife needs the structure of each chunk (groups)")
     live = [d for d, (k, _) in designs.items() if k > 0]
     yy = {d: np.zeros(len(keys) * nc) for d, (_, keys) in designs.items()}
     n = dict.fromkeys(designs, 0)
@@ -255,7 +306,10 @@ def _fit(designs, n_chunks, rows, nc, ridge, device=False, gamma=None, select=No
                     Rs[(g, d)] = qr_merge(Rs.get((g, d), jnp.zeros((w, w))), A, jnp.asarray(Y))
         close()
         acc = {d: (R[:designs[d][0], :designs[d][0]], R[:designs[d][0], designs[d][0]:]) for (_, d), R in Rs.items()}
-        return _solve(designs, acc, yy, n, nc, ridge, gamma, select, blocks, floor)
+        try:
+            return _solve(designs, acc, yy, n, nc, ridge, gamma, select, blocks, floor, jackknife)
+        finally:
+            spill.dir.cleanup()
 
     def parts(i):
         out = rows(int(i))
@@ -282,14 +336,18 @@ def _fit(designs, n_chunks, rows, nc, ridge, device=False, gamma=None, select=No
             for p in parts_d:
                 if p is not None:
                     yy[d] += (p[1] ** 2).sum(0); n[d] += len(p[1])
-    return _solve(designs, acc, yy, n, nc, ridge, gamma, select, blocks, floor)
+    try:
+        return _solve(designs, acc, yy, n, nc, ridge, gamma, select, blocks, floor, jackknife)
+    finally:
+        spill.dir.cleanup()
 
 
-def _solve(designs, acc, yy, n, nc, ridge, gamma=None, select=None, blocks=None, floor=None):
+def _solve(designs, acc, yy, n, nc, ridge, gamma=None, select=None, blocks=None, floor=None, jackknife=False):
     """Coefficients, report and statistics from the factors (R, c) of each design.  gamma:
     {design key: prior precision of each column} added to the ridge (the smoothness prior), or,
     with `select` (one of SELECT), {design key: smoothness of each column} for `_evidence` or,
-    with the per-structure `blocks` of `_fit`, `_loo`."""
+    with the per-structure `blocks` of `_fit`, `_loo`.  jackknife: `DesignStats.jack` from the
+    blocks at the prior solved with (`_jackknife`)."""
     coef, report, stats = {}, {}, {}
     for d, (k, keys) in designs.items():
         if not n[d]:
@@ -301,23 +359,31 @@ def _solve(designs, acc, yy, n, nc, ridge, gamma=None, select=None, blocks=None,
         R, c = acc[d]
         make_room(40_000 if select else 25_000)          # every design shape is a program of its own (`operators.maps`)
         fac = ls.Factor(R, c, jnp.asarray(yy[d]), jnp.asarray(float(n[d])), jnp.zeros(()))
-        hyper = None
+        hyper = jack = None
+        g = None if gamma is None else gamma[d]
+        if callable(g):
+            g = g((np.asarray(R, float) ** 2).sum(0))
         if select == "evidence":
-            mu, hyper = _evidence(fac, gamma[d], ridge, nc, floor)
+            mu, hyper = _evidence(fac, g, ridge, nc, floor)
+            if jackknife:                                # at the prior each right-hand side was solved with
+                jack = _jackknife(fac, np.asarray(g, float), ridge, blocks[d], 2.0 * np.log10(hyper[:, 0] / hyper[:, 3]), mu)
         elif select:
-            mu, hyper = _loo(fac, gamma[d], ridge, blocks[d], select == "press")
+            mu, hyper, jack = _loo(fac, g, ridge, blocks[d], select == "press", jackknife)
         else:
-            lin = jnp.full(k, ridge) if gamma is None else ridge + jnp.asarray(gamma[d])
+            lin = jnp.full(k, ridge) if g is None else ridge + jnp.asarray(g)
             mu = np.asarray(lo.posterior_qr(lin, [fac], [0.0])[0])                       # (k, n_keys * nc)
+            if jackknife:
+                jack = _jackknife(fac, g, ridge, blocks[d], None, mu)
         res2 = ((np.asarray(R) @ mu - np.asarray(c)) ** 2).sum(0) + np.maximum(yy[d] - (np.asarray(c) ** 2).sum(0), 0.0)
         for q, key in enumerate(keys):
             coef[key] = mu[:, q * nc:(q + 1) * nc].T.copy()
             report[key] = (n[d], k, np.sqrt(res2[q * nc:(q + 1) * nc] / n[d]))
-        stats[d] = DesignStats(fac, tuple(keys), hyper)
+        stats[d] = DesignStats(fac, tuple(keys), hyper, None if g is None else np.asarray(g, float), float(ridge), jack)
     return coef, report, stats
 
 
-def fit_onsite(basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10, atoms=None, stats=False, sigma_c=None, noise=None):
+def fit_onsite(basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10, atoms=None, stats=False, sigma_c=None, noise=None,
+               jackknife=False):
     """An `OnsiteModel` fitted to the on-site blocks of `datasets` (`OperatorData`s).
 
     Returns (model, report): report[(z, s1, s2, L)] = (rows, columns, rms residual per channel).
@@ -334,7 +400,11 @@ def fit_onsite(basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10,
     shell pair and channel maximise its evidence (`_evidence`; the values are in the statistics'
     `hyper`).  "loo": sigma_c of every shell pair and channel maximises the predictive density of
     the structures left out one at a time (`_loo`; `aj fit --objective loo` for these rows);
-    "press": it minimises their squared prediction error."""
+    "press": it minimises their squared prediction error.
+
+    jackknife: keep a factor per structure and give the statistics the closed-form
+    delete-one-structure jackknife of the coefficients (`DesignStats.jack`, `_jackknife`) at the
+    prior of the fit, whichever `sigma_c`.  It holds (right-hand sides, columns, structures) numbers for each design."""
     _need_x64()
     datasets, orbitals, same_basis = _datasets(datasets, orbitals, "fit_onsite")
     nc = len(channels)
@@ -372,13 +442,13 @@ def fit_onsite(basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10,
     smooth = lambda L, p: np.concatenate([basis.smoothness(L, p), np.zeros(int(L == 0))])
     gamma = None if sigma_c is None else {(z, L, p): smooth(L, p) if ev else smooth(L, p) ** 2 / sigma_c ** 2 for z, L, p in designs}
     coef, report, st = _fit(designs, len(datasets), rows, nc, ridge, gamma=gamma, select=sigma_c if ev else None, floor=_noise_floor(noise, channels),
-                            groups=np.arange(len(datasets)) if ev and sigma_c != "evidence" else None)
+                            groups=np.arange(len(datasets)) if (ev and sigma_c != "evidence") or jackknife else None, jackknife=jackknife)
     model = OnsiteModel(basis=basis, coef=coef, orbitals=orbitals, channels=tuple(channels))
     return (model, report, st) if stats else (model, report)
 
 
 def fit_offsite(bond_basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10, chunk=2048, stats=False, compiled=True,
-                sigma_c=None, noise=None):
+                sigma_c=None, noise=None, jackknife=False):
     """An `OffsiteModel` fitted to the off-site blocks present in `datasets` (`OperatorData`s).
 
     Every bond within the bond cutoff whose block (R, i, j) is in the data is a sample; to fit
@@ -394,7 +464,7 @@ def fit_offsite(bond_basis, datasets, orbitals=None, channels=("H", "S"), ridge=
 
     sigma_c: as `fit_onsite`, with `bond.smoothness` for the columns of each design.  "loo" and
     "press" hold a triangular factor per structure and design on the host: structures x
-    columns^2 numbers each."""
+    columns^2 numbers each.  jackknife: as `fit_onsite` (it holds the same factors)."""
     from . import bond as B
     from .offsite import OffsiteModel, block_lps, canonical_pairs, site_features
 
@@ -452,7 +522,8 @@ def fit_offsite(bond_basis, datasets, orbitals=None, channels=("H", "S"), ridge=
         raise ValueError(f"sigma_c: None, a number or one of {SELECT}, got {sigma_c!r}")
     gamma = None if sigma_c is None else {
         key: B.smoothness(bond_basis, key[2], key[3], key[4]) ** (1 if ev else 2) / (1.0 if ev else sigma_c ** 2) for key in designs}
-    sel = dict(floor=_noise_floor(noise, channels), select=sigma_c if ev else None, groups=[c[0] for c in chunks] if ev and sigma_c != "evidence" else None)
+    sel = dict(floor=_noise_floor(noise, channels), select=sigma_c if ev else None, groups=[c[0] for c in chunks] if (ev and sigma_c != "evidence") or jackknife else None,
+               jackknife=jackknife)
     if compiled:
         from .design import bond_designs
         progs, dev = {}, {}
@@ -487,3 +558,188 @@ def fit_offsite(bond_basis, datasets, orbitals=None, channels=("H", "S"), ridge=
         coef, report, st = _fit(designs, len(chunks), rows, nc, ridge, gamma=gamma, **sel)
     model = OffsiteModel(bond=bond_basis, coef=coef, orbitals=orbitals, channels=tuple(channels))
     return (model, report, st) if stats else (model, report)
+
+
+METRICS = ("plain", "overlap")
+CLIP = 1e-12                                           # eigenvalues of an overlap below this, of the largest, are raised to it
+
+
+def overlap_root(S, overwrite=False):
+    """(W, clipped): W (n, n) with W^T W = S, the metric of an overlap-weighted fit as a row
+    transform (|W x|^2 = x^T S x).  The upper Cholesky factor; for an S that is not positive
+    definite to roundoff (nearly dependent functions), sqrt(e) V^T of its eigen-decomposition
+    with the eigenvalues raised to CLIP of the largest, and `clipped` how many were.
+    overwrite: the factor may take S's memory (S is O(n^2): at 10^4.5 functions, 8 GB)."""
+    S = np.asarray(S, float)
+    if S.ndim != 2 or S.shape[0] != S.shape[1]:
+        raise ValueError(f"an overlap must be square, got {S.shape}")
+    if not np.isfinite(S).all():
+        raise ValueError("an overlap has entries that are not finite")
+    a = S.T if S.flags.c_contiguous else S               # S is symmetric: its transpose is the Fortran-ordered array LAPACK factors in place
+    diag = np.diag(a).copy()
+    U, info = sla.lapack.dpotrf(a, lower=0, clean=0, overwrite_a=overwrite)
+    if info == 0:
+        for r in range(0, len(U), 1024):                 # the triangle LAPACK did not touch still holds S
+            U[r:r + 1024] = np.triu(U[r:r + 1024], k=r)
+        return U, 0
+    S = np.tril(U, -1)                                   # not positive definite: S again, from that triangle
+    S = S + S.T
+    S[np.diag_indices_from(S)] = diag
+    e, V = np.linalg.eigh(S)
+    lo_ = CLIP * e[-1]
+    return np.sqrt(np.maximum(e, lo_))[:, None] * V.T, int((e < lo_).sum())
+
+
+def fit_centred(basis, datasets, shells=None, channels=("rho",), metric=None, overlaps=None, ridge=1e-10, sigma_c=None, scaled=None,
+                noise=None, stats=False, jackknife=False, chunk=4096):
+    """A `centred.CentredModel` fitted to the atom-centred coefficients of `datasets`
+    (`data.CentredData`s; `shells`: their auxiliary basis).
+
+    metric "plain": least squares on each coefficient.  As `fit_onsite`: one design per (z, l),
+    columns the features of (l, (-1)^l) (and the constant for l = 0), rows (atom, m), every shell
+    of that l and every channel a right-hand side.  Returns (model, report) with
+    report[(z, s)] = (rows, columns, rms residual per channel) and, `stats=True`,
+    {(z, l): `DesignStats`}.
+
+    metric "overlap" (the default when every structure has one): the sum over structures of
+    (P b - c)^T S (P b - c), S = `overlaps[k]`, the structure's (n_total, n_total) overlap of the
+    functions in the coefficients' layout, the same for every channel (an array, or a function
+    without arguments that returns it: called when the structure's rows are made, so one overlap
+    is in memory at a time).  S couples shells, l and atoms, so there is ONE design, its columns
+    the parameters of all species and shells (`centred.columns`), and with S = W^T W
+    (`overlap_root`) its rows are W P and its targets W c: ordinary least squares, through the
+    same statistics and solves.  P is never formed: an atom's rows touch only the columns of its
+    species' shells, so W P is assembled a shell at a time, in chunks of `chunk` rows.  The cost
+    is the root of S, O(n_total^3) time and O(n_total^2) memory per structure.
+    report[("overlap",)] = (rows, columns, sqrt of the mean over rows of the S-weighted squared
+    residual, per channel) and report[("clipped",)] = per structure, the eigenvalues of S that
+    were raised (`overlap_root`; 0: the Cholesky factor); statistics {("overlap",): `DesignStats`},
+    one right-hand side per channel.
+
+    sigma_c: as `fit_onsite`: None, a number, "evidence", "loo" or "press", with
+    `SiteBasis.smoothness(l, p)` for the feature columns and none for the constants.
+    scaled: r, a prior precision of r times the diagonal of the design's Gram matrix on every
+    feature column, added to the ridge (a ridge relative to the size of each column; the
+    constants keep the ridge alone).  Not with `sigma_c`.
+    jackknife: the statistics carry the delete-one-structure jackknife (`DesignStats.jack`;
+    `centred_jackknife` for the coefficients of each model with a structure left out)."""
+    _need_x64()
+    datasets = list(datasets)
+    shells = datasets[0].basis if shells is None else shells
+    if any(d.basis != shells for d in datasets):
+        raise ValueError("fit_centred: the datasets have different auxiliary bases")
+    nc = len(channels)
+    have = overlaps is not None and len(overlaps) == len(datasets) and all(S is not None for S in overlaps)
+    metric = ("overlap" if have else "plain") if metric is None else metric
+    if metric not in METRICS:
+        raise ValueError(f"metric: one of {METRICS}, got {metric!r}")
+    if metric == "overlap" and not have:
+        raise ValueError("fit_centred: metric='overlap' needs the overlap of every structure (overlaps=)")
+    ev = isinstance(sigma_c, str)
+    if ev and sigma_c not in SELECT:
+        raise ValueError(f"sigma_c: None, a number or one of {SELECT}, got {sigma_c!r}")
+    if scaled is not None and sigma_c is not None:
+        raise ValueError("fit_centred: give sigma_c or scaled, not both")
+    smooth = lambda l: np.concatenate([basis.smoothness(l, C.parity(l)), np.zeros(int(l == 0))])
+    feat = lambda l: np.concatenate([np.ones(basis.n(l, C.parity(l))), np.zeros(int(l == 0))])      # 1 on feature columns, 0 on constants
+    prior = lambda sm, ft: (lambda diag, r=float(scaled), ft=ft: r * ft * diag) if scaled is not None else None if sigma_c is None else sm if ev else sm ** 2 / sigma_c ** 2
+    off = [C.offsets(shells, d.numbers) for d in datasets]
+    for d, o in zip(datasets, off):
+        if any(np.shape(d.coefficients[c]) != (o[-1],) for c in channels):
+            raise ValueError(f"fit_centred: a structure's coefficients are not ({o[-1]},) per channel, the size of its atoms' shells")
+
+    def atom_rows(k, z, sls):
+        """(atoms of z in structure k, their rows of the shells' slices: (atoms, shells, 2l+1))"""
+        idx = np.flatnonzero(np.asarray(datasets[k].numbers) == z)
+        return idx, off[k][idx][:, None, None] + np.asarray([np.arange(sl.start, sl.stop) for sl in sls])[None]
+
+    def features(k):
+        d = datasets[k]
+        rij, zi, zj, seg, n = site_graph(basis, d.positions, d.cell, d.numbers, getattr(d, "pbc", True))
+        if len(rij) == 0:
+            return {(L, p): np.zeros((n, basis.n(L, p), 2 * L + 1)) for L, p in basis.lps}
+        return {key: np.asarray(v) for key, v in _features(basis, rij, zi, zj, seg, n).items()}
+
+    kw = dict(select=sigma_c if ev else None, floor=_noise_floor(noise, channels), jackknife=jackknife)
+    if metric == "plain":
+        designs, members = {}, {}                       # (z, l) -> (columns, keys); -> [s]
+        for z in shells.species:
+            for s, l in enumerate(shells.ls(z)):
+                designs.setdefault((z, l), (C.n_columns(basis, l), []))[1].append((z, s))
+                members.setdefault((z, l), []).append(s)
+
+        def rows(k):
+            F, c = features(k), np.stack([np.asarray(datasets[k].coefficients[ch], float) for ch in channels], axis=-1)   # (n_total, nc)
+            out = {}
+            for (z, l), mem in members.items():
+                idx, r = atom_rows(k, z, [shells.shell_slice(z, s) for s in mem])
+                if len(idx):
+                    A = design(F.get((l, C.parity(l))), idx, l).reshape(len(idx) * (2 * l + 1), -1)
+                    out[(z, l)] = (A, np.moveaxis(c[r], 1, 2).reshape(len(idx) * (2 * l + 1), len(mem) * nc))    # (a, s, m, c) -> rows (a, m), columns (s, c)
+            return out
+
+        gamma = None if sigma_c is None and scaled is None else {(z, l): prior(smooth(l), feat(l)) for z, l in designs}
+        coef, report, st = _fit(designs, len(datasets), rows, nc, ridge, gamma=gamma, groups=np.arange(len(datasets)) if (ev and sigma_c != "evidence") or jackknife else None, **kw)
+    else:
+        cols, npar = C.columns(basis, shells)
+        chunks = [(k, r0, min(r0 + chunk, o[-1])) for k, o in enumerate(off) for r0 in range(0, o[-1], chunk)]
+        cache, clipped = {}, [0] * len(datasets)
+
+        def rows(i):
+            k, r0, r1 = chunks[i]
+            if cache.get("k") != k:                      # chunks come structure by structure: its features, root and targets once
+                cache.clear()
+                S = overlaps[k]() if callable(overlaps[k]) else overlaps[k]
+                if np.shape(S) != (off[k][-1],) * 2:
+                    raise ValueError(f"fit_centred: the overlap of structure {k} is {np.shape(S)}, its coefficients ({off[k][-1]},)")
+                own = callable(overlaps[k])              # ours to overwrite: the root in the overlap's memory
+                W, clipped[k] = overlap_root(S if own and isinstance(S, np.ndarray) and S.dtype == np.float64 and S.flags.writeable else np.array(S, float), overwrite=True)
+                del S
+                cache.update(k=k, F=features(k), W=W, Y=W @ np.stack([np.asarray(datasets[k].coefficients[ch], float) for ch in channels], axis=-1))
+            F, W = cache["F"], cache["W"][r0:r1]
+            A = np.zeros((r1 - r0, npar))
+            for z in shells.species:
+                for s, l in enumerate(shells.ls(z)):
+                    idx, r = atom_rows(k, z, [shells.shell_slice(z, s)])
+                    if len(idx) and cols[(z, s)].stop > cols[(z, s)].start:
+                        A[:, cols[(z, s)]] = W[:, r.ravel()] @ design(F.get((l, C.parity(l))), idx, l).reshape(len(idx) * (2 * l + 1), -1)
+            return {("overlap",): (A, cache["Y"][r0:r1])}
+
+        parts = [(smooth(l), feat(l)) for z in shells.species for l in shells.ls(z)]
+        sm, ft = (np.concatenate([p[i] for p in parts]) if parts else np.zeros(0) for i in (0, 1))
+        gamma = None if sigma_c is None and scaled is None else {("overlap",): prior(sm, ft)}
+        coef, report, st = _fit({("overlap",): (npar, [("overlap",)])}, len(chunks), rows, nc, ridge, gamma=gamma,
+                                groups=[c[0] for c in chunks] if (ev and sigma_c != "evidence") or jackknife else None, **kw)
+        cache.clear()
+        b = coef.pop(("overlap",), None)                # (nc, npar)
+        coef = {} if b is None else {key: b[:, sl].copy() for key, sl in cols.items() if sl.stop > sl.start}
+        report[("clipped",)] = tuple(clipped)
+    model = C.CentredModel(basis=basis, coef=coef, shells=shells, channels=tuple(channels))
+    return (model, report, st) if stats else (model, report)
+
+
+def centred_jackknife(model, stats):
+    """[coef, ...], one per training structure: the coefficients of `model` (a `fit_centred` with
+    `jackknife=True` and its statistics) refitted without that structure at
+    the prior of the fit, in closed form: the fitted coefficients plus `DesignStats.jack` with
+    its factor sqrt((G - 1) / G) taken out.  Each is the `coef` of a `CentredModel`
+    (`eqx.tree_at(lambda m: m.coef, model, coef)`): the spread of their predictions about the
+    model's, times sqrt((G - 1) / G), is the jackknife standard error."""
+    nc = len(model.channels)
+    cols, _ = C.columns(model.basis, model.shells)
+    out = None
+    for st in stats.values():
+        if st.jack is None:
+            raise ValueError("no jackknife in these statistics: fit with jackknife=True")
+        G = st.jack.shape[2]
+        out = [{key: np.array(c, float) for key, c in model.coef.items()} for _ in range(G)] if out is None else out
+        dev = st.jack / np.sqrt((G - 1) / G)                                 # (n_rhs, columns, G)
+        for g in range(G):
+            if st.keys == (("overlap",),):
+                for key in out[g]:
+                    out[g][key] += dev[:, cols[key], g]
+            else:
+                for i, key in enumerate(st.keys):
+                    if key in out[g]:
+                        out[g][key] += dev[i * nc:(i + 1) * nc, :, g]
+    return out

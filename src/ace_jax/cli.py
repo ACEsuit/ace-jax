@@ -346,6 +346,11 @@ def _is_operator(path):
     return "meta_json" in z.files and json.loads(bytes(z["meta_json"]).decode()).get("kind") == "operator"
 
 
+def _is_density(path):
+    """An operator model file with a centred part (`operators.centred`: an electron-density model)."""
+    return json.loads(bytes(np.load(path)["meta_json"]).decode()).get("centred") is not None
+
+
 def _eval_operator(a):
     """`aj eval` of a Hamiltonian model file, through `HamiltonianCalculator`.
 
@@ -409,8 +414,13 @@ def cmd_eval(a):
     bucket); with one, config by config through its calculator.  A linear model is evaluated
     exactly (lean, never splined: spline_tol=None).
 
-    An operator model (`operators.io`, a Hamiltonian): `_eval_operator`."""
+    An operator model (`operators.io`, a Hamiltonian): `_eval_operator`; one with a centred part
+    (an electron-density model): the density errors against --data's density files
+    (`ham.cli.density_score`; --metrics-out writes the per-structure records as JSON)."""
     if _is_operator(a.model):
+        if _is_density(a.model):                          # a density model: `ham.cli.density_score` on --data's density files
+            from .ham import cli as hc
+            return hc.cmd_density_eval(a)
         return _eval_operator(a)
     from ase import Atoms
     from ase.stress import voigt_6_to_full_3x3_stress
@@ -1078,6 +1088,7 @@ def _parser():
                           "ACEJAX_FFI_GPU_FLAGS)")
     from .ham import cli as ham_cli
     ham_cli.add_parser(sub)
+    ham_cli.density_add_parser(sub)
     con = sub.add_parser("basis", help="author a new ACE basis: a frozen model (seeded radial init) saved as .npz")
     add_basis_args(con, fit=False)
     con.add_argument("--out", required=True)
@@ -1173,7 +1184,7 @@ def main(argv=None):
     a = _parse(argv)
     try:
         {"eval": cmd_eval, "basis": cmd_basis, "calibrate": cmd_calibrate, "export": cmd_export,
-         "native": cmd_native, "ham": ham_cli.run}.get(a.cmd, run)(a)
+         "native": cmd_native, "ham": ham_cli.run, "density": ham_cli.density_run}.get(a.cmd, run)(a)
     except (BasisUnavailable, UsageError, ham_cli.UsageError) as e:       # a user-facing condition, not a crash
         print(f"aj {a.cmd}: error: {e}", file=sys.stderr)
         raise SystemExit(2) from None

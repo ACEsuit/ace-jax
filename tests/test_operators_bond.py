@@ -8,8 +8,8 @@ import pathlib
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from conftest import wigner
 
-from ace_jax.eval.harmonics import real_spherical_harmonics
 from ace_jax.operators import bond
 from ace_jax.operators.features import build_site_basis
 from ace_jax.operators.onsite import _features, site_graph
@@ -35,14 +35,6 @@ def all_features(basis, pos, cell, numbers):
     F = {k: np.asarray(v) for k, v in _features(basis.site, rij, zi, zj, seg, n).items()}
     g = bond.bond_graph(basis, pos, cell, numbers)
     return g, bond.features(basis, F, g, np.arange(len(g.i)), LPS)
-
-
-def wigner(L, Q):
-    pts = np.random.default_rng(1).normal(size=(80, 3))
-    sl = slice(L * L, (L + 1) ** 2)
-    Y0 = np.asarray(real_spherical_harmonics(pts, max(L, 1)))[:, sl]
-    Y1 = np.asarray(real_spherical_harmonics(pts @ Q.T, max(L, 1)))[:, sl]
-    return np.linalg.lstsq(Y0, Y1, rcond=None)[0].T
 
 
 def test_radial():

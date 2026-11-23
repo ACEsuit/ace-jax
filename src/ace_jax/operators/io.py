@@ -1,12 +1,16 @@
 """Operator models on disk: one `.npz`, laid out as the potentials' export schema (`eval.io`).
 
 A file holds one site basis, optionally the bond basis on it, and the coefficients of an on-site
-and / or an off-site model.  It is self-contained: the coupling is stored, so loading needs no
+and / or an off-site model, and / or of a centred model (`operators.centred`: coefficients on
+atoms; a file may hold a site basis and a centred model only).  It is self-contained: the coupling is stored, so loading needs no
 coupling library and no rebuild, and `load(save(...))` predicts the same blocks to the last bit.
 
     meta_json                       schema_version = 1, kind = "operator", and
         elements, channels          atomic numbers (the site basis' order); operator channels
-        orbitals                    {"Z": [l, l, ...]}: the shells of each species
+        orbitals                    {"Z": [l, l, ...]}: the shells of each species ({} and channels []
+                                    in a file without an on-site or off-site model)
+        centred                     absent or null, or {shells: {"Z": [l, ...]}, channels: [...]}:
+                                    the auxiliary shells and the channels of the centred model
         site                        rcut, lmax, solid, lps [[L, parity], ...], n_B, and radial:
                                     {"kind": "table", "grid": [r_min, h, n]} or {"kind": "tensor",
                                     radial_kind, rnl_basis, rnl_grid}
@@ -22,6 +26,12 @@ coupling library and no rebuild, and `load(save(...))` predicts the same blocks 
     {onsite,offsite}_keys           (n, 4) (z, s1, s2, L) / (n, 5) (zi, zj, s1, s2, L): the blocks' L parts
     {onsite,offsite}_ptr            (n + 1,): part i has columns ptr[i]:ptr[i + 1] of
     {onsite,offsite}_coef           (n_channel, total columns) float64
+    centred_keys                    (n, 2) (z, shell): the shells with coefficients
+    centred_ptr, centred_coef       as the on-site model's
+    {orbitals,centred}_radial_grid_<Z>, {orbitals,centred}_radial_values_<Z>
+                                    optional: the radial functions of the orbital basis / of the
+                                    centred model's shells (`OrbitalBasis.radials`): (n_r,) and
+                                    (n_shells, n_r) per species
 
 Layer 3 (an application module, like `eval.io`)."""
 import dataclasses
@@ -33,6 +43,7 @@ import numpy as np
 
 from ..eval.radial import TensorRadial
 from . import bond as B
+from .centred import CentredModel
 from .features import RadialTable, SiteBasis
 from .offsite import OffsiteModel
 from .onsite import OnsiteModel
@@ -48,6 +59,7 @@ class OperatorFile(NamedTuple):
     onsite: OnsiteModel
     offsite: OffsiteModel
     meta: dict
+    centred: CentredModel = None
 
 
 def _same(a, b):
@@ -114,23 +126,43 @@ def _unpack(z, name):
     return {tuple(int(v) for v in k): np.array(c[:, a:b]) for k, a, b in zip(keys, ptr[:-1], ptr[1:])}
 
 
-def save(path, onsite=None, offsite=None, info=None):
+def _radial_arrays(name, basis):
+    return {} if basis.radials is None else {f"{name}_radial_{part}_{z}": np.asarray(basis.radials[z][i], np.float64)
+                                             for z in basis.species for i, part in enumerate(("grid", "values"))}
+
+
+def _basis(z, name, shells):
+    """The `OrbitalBasis` of meta shells {"Z": [l, ...]}, with the radial functions the file has for it."""
+    shells = {int(k): v for k, v in shells.items()}
+    has = shells and all(f"{name}_radial_grid_{k}" in z for k in shells)
+    return OrbitalBasis.of(shells, {k: (z[f"{name}_radial_grid_{k}"], z[f"{name}_radial_values_{k}"]) for k in shells} if has else None)
+
+
+def save(path, onsite=None, offsite=None, centred=None, info=None):
     """Write an on-site and / or an off-site model (of one site basis, one orbital basis and the
-    same channels) to `path` (.npz).  info: a JSON-serialisable dictionary kept in the meta."""
+    same channels) and / or a centred model (of the same site basis; its own shells and channels)
+    to `path` (.npz).  info: a JSON-serialisable dictionary kept in the meta."""
     models = [m for m in (onsite, offsite) if m is not None]
-    if not models:
-        raise ValueError("operators.io.save: give an on-site model, an off-site model or both")
-    sb = onsite.basis if onsite is not None else offsite.bond.site
+    if not models and centred is None:
+        raise ValueError("operators.io.save: give an on-site model, an off-site model, a centred model or several")
+    sb = onsite.basis if onsite is not None else offsite.bond.site if offsite is not None else centred.basis
     if len(models) == 2 and not (_same(sb, offsite.bond.site) and onsite.orbitals == offsite.orbitals and onsite.channels == offsite.channels):
         raise ValueError("operators.io.save: the two models differ in site basis, orbitals or channels")
+    if centred is not None and not _same(sb, centred.basis):
+        raise ValueError("operators.io.save: the centred model is on another site basis")
     out = _site_arrays(sb)
     out["elements"] = np.asarray(sb.elements, np.int64)
-    meta = dict(schema_version=SCHEMA_VERSION, kind="operator", elements=[int(z) for z in sb.elements], channels=list(models[0].channels),
-                orbitals={str(z): list(ls) for z, ls in models[0].orbitals.shells}, site=_site_meta(sb), bond=None, info=info or {})
+    orb = models[0].orbitals if models else OrbitalBasis.of({})
+    meta = dict(schema_version=SCHEMA_VERSION, kind="operator", elements=[int(z) for z in sb.elements], channels=list(models[0].channels) if models else [],
+                orbitals={str(z): list(ls) for z, ls in orb.shells}, site=_site_meta(sb), bond=None, info=info or {})
+    out.update(_radial_arrays("orbitals", orb))
     if offsite is not None:
         b = offsite.bond
         meta["bond"] = {k: (getattr(b, k) if k != "env_emb" or b.env_emb is None else [list(r) for r in b.env_emb]) for k in _BOND}
-    for name, m in (("onsite", onsite), ("offsite", offsite)):
+    if centred is not None:
+        meta["centred"] = dict(shells={str(z): list(ls) for z, ls in centred.shells.shells}, channels=list(centred.channels))
+        out.update(_radial_arrays("centred", centred.shells))
+    for name, m in (("onsite", onsite), ("offsite", offsite), ("centred", centred)):
         if m is not None:
             out[f"{name}_keys"], out[f"{name}_ptr"], out[f"{name}_coef"] = _pack(m.coef)
     out["meta_json"] = np.frombuffer(json.dumps(meta).encode(), np.uint8)
@@ -138,7 +170,7 @@ def save(path, onsite=None, offsite=None, info=None):
 
 
 def load(path):
-    """`OperatorFile(onsite, offsite, meta)` of a file `save` wrote."""
+    """`OperatorFile(onsite, offsite, meta, centred)` of a file `save` wrote."""
     z = np.load(path)
     if "meta_json" not in z:
         raise ValueError(f"{path}: not an ace-jax model file (no meta_json)")
@@ -148,7 +180,7 @@ def load(path):
     if meta["schema_version"] != SCHEMA_VERSION:
         raise ValueError(f"unsupported schema_version {meta['schema_version']}")
     sb = _site(z, meta["site"])
-    orb, ch = OrbitalBasis.of({int(k): v for k, v in meta["orbitals"].items()}), tuple(meta["channels"])
+    orb, ch = _basis(z, "orbitals", meta["orbitals"]), tuple(meta["channels"])
     on = OnsiteModel(basis=sb, coef=_unpack(z, "onsite"), orbitals=orb, channels=ch) if "onsite_keys" in z else None
     off = None
     if "offsite_keys" in z:
@@ -156,4 +188,8 @@ def load(path):
         b.setdefault("env_core", 0.0)                        # a file of ace-jax 0.7.0: the environment harmonics as they were
         b["env_emb"] = None if b["env_emb"] is None else tuple(tuple(float(v) for v in r) for r in b["env_emb"])
         off = OffsiteModel(bond=B.BondBasis(site=sb, **b), coef=_unpack(z, "offsite"), orbitals=orb, channels=ch)
-    return OperatorFile(on, off, meta)
+    cen = None
+    if "centred_keys" in z:
+        c = meta["centred"]
+        cen = CentredModel(basis=sb, coef=_unpack(z, "centred"), shells=_basis(z, "centred", c["shells"]), channels=tuple(c["channels"]))
+    return OperatorFile(on, off, meta, cen)

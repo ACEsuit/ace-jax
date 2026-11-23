@@ -133,9 +133,11 @@ def _all_bodies(bb):
     return True
 
 
-def _coupled(radial, lmax_feat, mb, Rnl, Ylm, zs, rcut, solid, coupling_cache_dir, channels=1):
-    """The `SiteBasis` of a radial and a many-body spec: every (L, +-1), L <= lmax_feat, that has a function."""
-    lps = [(L, p) for L in range(lmax_feat + 1) for p in (1, -1)]
+def _coupled(radial, lmax_feat, mb, Rnl, Ylm, zs, rcut, solid, coupling_cache_dir, channels=1, natural_parity=False):
+    """The `SiteBasis` of a radial and a many-body spec: every (L, +-1), L <= lmax_feat, that has a
+    function; natural_parity: only (L, (-1)^L), what a model of vectors of harmonics reads
+    (`centred`), so that the other parities are neither coupled nor evaluated."""
+    lps = [(L, p) for L in range(lmax_feat + 1) for p in (1, -1) if not natural_parity or p == (-1) ** L]
     es = couple_equivariant_set(lps, mb, list(Rnl), list(Ylm), cache_dir=coupling_cache_dir)
     lps = [lp for lp in lps if es.A2B[lp].shape[0]]
     k = lambda lp: 2 * lp[0] + 1
@@ -220,7 +222,7 @@ def build_embedding_site_basis(elements, order, totaldegree, lmax_feat, embeddin
 
 
 def build_site_basis(elements, order, totaldegree, lmax_feat, *, rcut, wL=1.5, coupling_cache_dir=None,
-                     nmax_by_order=None, lmax_by_order=None, **radial):
+                     nmax_by_order=None, lmax_by_order=None, natural_parity=False, **radial):
     """A `SiteBasis` on the TotalDegree basis of `basis.model.build_model` (the same
     radials and one-particle basis, built here without the model), with every (L, +-1), L <= lmax_feat, that has a
     function.  lmax_feat = 2 * (largest orbital l).  `radial`: `build_model`'s
@@ -231,7 +233,10 @@ def build_site_basis(elements, order, totaldegree, lmax_feat, *, rcut, wL=1.5, c
     neighbour density, each L part with its own radial profile, so the basis that pays is
     many radial functions at order 1 for l <= lmax_feat and few at higher orders
     (docs/dev/ham-results.md); a plain total-degree bound gives high l too few radials.  With
-    caps, radials and harmonics the bodies do not use are not evaluated."""
+    caps, radials and harmonics the bodies do not use are not evaluated.
+
+    natural_parity: keep only the features of (L, (-1)^L) (`_coupled`); at order 1 there are no
+    others."""
     caps = None if nmax_by_order is None and lmax_by_order is None else (nmax_by_order, lmax_by_order)
     known = {"r0", "rin", "radial_mode", "seed", "n_q_factor", "rnl_basis"}
     if set(radial) - known:
@@ -249,4 +254,4 @@ def build_site_basis(elements, order, totaldegree, lmax_feat, *, rcut, wL=1.5, c
         polys_A=jnp.asarray(t["polys_A"]), polys_B=jnp.asarray(t["polys_B"]), polys_C=jnp.asarray(t["polys_C"]),
         radial_kind="analytic", rnl_basis=rnl_basis, rnl_grid=(0.0, 1.0, 2))
     # the categorical radial index carries the neighbour element, n = (n' - 1) NZ + z': the prior counts n'
-    return _coupled(tr, lmax_feat, mb, Rnl, Ylm, zs, rcut, True, coupling_cache_dir, channels=len(zs))
+    return _coupled(tr, lmax_feat, mb, Rnl, Ylm, zs, rcut, True, coupling_cache_dir, channels=len(zs), natural_parity=natural_parity)

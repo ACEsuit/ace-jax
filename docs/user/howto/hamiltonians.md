@@ -8,6 +8,9 @@ calculation.
 ace-jax fits the model to the matrices of DFT calculations. The fit is a linear
 least-squares problem. It has no training loop and needs only a few structures.
 
+For a model of the electron density, see
+[Electron-density models](density.md).
+
 !!! warning
     Hamiltonian models are new. The command names, the options and the model
     file can change in the next releases.
