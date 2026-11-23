@@ -404,7 +404,7 @@ structures. User page: `docs/user/howto/hamiltonians.md`; measurements: `docs/de
   without a prior one spurious eigenvalue can appear that the block errors do not show (`loo` did not remove
   it on the four-element alloy, and costs hours and tens of GB of scratch there). `--noise-floor SIGMA`
   (data units; the SCF scatter of H, ~1e-7 to 3e-6 eV at `sc_accuracy_rho 1e-5`) bounds the evidence's noise
-  from below; a selected prior is never weaker than the ridge.
+  from below; a selected prior is never weaker than the ridge. `--data-memory GB` (default 8): the training blocks kept in memory; a larger set is read again on each of the fit's four passes, so memory does not grow with the number of structures (Python: `operators.data.LazyData(n, read, budget)` in place of the list of structures).
 - `aj eval --model model.npz --data DIR` (or `--validation` on the fit): block errors and the
   electronic-structure errors of `ace_jax.ham.metrics` (band RMSE at a common zero and from own Fermi levels,
   Fermi level, band energy per atom, density-of-states Wasserstein distance, outlier structures).

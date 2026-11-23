@@ -184,28 +184,35 @@ def cmd_fit(a):
     from ..operators.features import build_site_basis
     from ..operators.fit import fit_offsite, fit_onsite
     names = block_names(a.data)[:a.max_structures]
-    train = [_read_blocks(n) for n in names]
+    from ..operators.data import LazyData
+    budget = a.data_memory * 2.0 ** 30                   # the blocks kept in memory; a larger set is read again on each pass
+    train = LazyData(len(names), lambda i: _read_blocks(names[i]), budget)
     orb = train[0].basis
-    if any(d.basis != orb for d in train):
-        raise UsageError(f"{a.data}: the structures do not share one orbital basis")
     ch = tuple(a.channels) if a.channels else tuple(train[0].blocks)
-    missing = [c for c in ch if any(c not in d.blocks for d in train)]
-    if missing:
-        raise UsageError(f"--channels: {', '.join(missing)} is not in every structure (the first has {', '.join(train[0].blocks)})")
+    n_atoms, longest = 0, 0.0
+    for d in train:                                      # one pass: what the basis and the messages need of every structure
+        if d.basis != orb:
+            raise UsageError(f"{a.data}: the structures do not share one orbital basis")
+        missing = [c for c in ch if c not in d.blocks]
+        if missing:
+            raise UsageError(f"--channels: {', '.join(missing)} is not in every structure (the first has {', '.join(train[0].blocks)})")
+        n_atoms += len(d.numbers)
+        if not a.bond_rcut:
+            longest = max(longest, max(np.linalg.norm(d.bond(k)) for k in d.blocks[ch[0]]))
     prior = None if a.prior == "none" else a.prior if a.prior in PRIORS else float(a.prior)
     els = [int(z) for z in orb.species]
-    rcut = a.bond_rcut or float(np.ceil(10 * max(np.linalg.norm(d.bond(k)) for d in train for k in d.blocks[ch[0]])) / 10)
+    rcut = a.bond_rcut or float(np.ceil(10 * longest) / 10)
     sb = build_site_basis(els, order=1, totaldegree=40, lmax_feat=2 * orb.lmax, rcut=a.site_rcut, wL=0.5, nmax_by_order=(a.site_radials,),
                           lmax_by_order=(2 * orb.lmax,)).with_table()
     basis = B.BondBasis(site=sb, rcut_bond=rcut, n_bond=a.bond_radials, n_cpl=a.coupled[0], l_cpl=a.coupled[1])
     if not a.no_env:
         r, n, l, nb, lb = a.env
         basis = basis._replace(r_env=float(r), n_env=int(n), l_env=int(l), n_ebond=int(nb), l_ebond=int(lb))
-    print(f"{len(train)} structures, {sum(len(d.numbers) for d in train)} atoms, elements {els}, channels {', '.join(ch)}; "
+    print(f"{len(train)} structures, {n_atoms} atoms, elements {els}, channels {', '.join(ch)}; "
           f"site cutoff {a.site_rcut:g}, bond cutoff {rcut:g}; prior {a.prior}" + (f", noise floor {a.noise_floor:g}" if a.noise_floor else ""), flush=True)
     t = time.perf_counter()
     on, rep_on = fit_onsite(sb, train, channels=ch, ridge=a.ridge, sigma_c=prior, noise=a.noise_floor)
-    off, rep_off = fit_offsite(basis, [_subset(d, a.bonds, a.seed + i) for i, d in enumerate(train)], channels=ch, ridge=a.ridge, sigma_c=prior, noise=a.noise_floor)
+    off, rep_off = fit_offsite(basis, LazyData(len(names), lambda i: _subset(train[i], a.bonds, a.seed + i)) if a.bonds else train, channels=ch, ridge=a.ridge, sigma_c=prior, noise=a.noise_floor)
     fit_s = time.perf_counter() - t
     n_coef = int(sum(np.asarray(c).size for m in (on, off) for c in m.coef.values()))
     resid = {}
@@ -387,6 +394,8 @@ def add_parser(sub):
     f.add_argument("--out", required=True, help="the model file (.npz)")
     f.add_argument("--validation", default=None, help="structures with blocks to score the fitted model on (as aj eval)")
     f.add_argument("--channels", nargs="+", default=None, help="operator channels to fit (default: every channel of the data, e.g. H S)")
+    f.add_argument("--data-memory", type=float, default=8.0, metavar="GB",
+                   help="blocks of the training structures kept in memory (default 8); a larger set is read from disk again on each pass of the fit")
     f.add_argument("--max-structures", type=int, default=None, help="use the first N structures of --data (name order)")
     f.add_argument("--bonds", type=int, default=0, help="fit to a random N off-site blocks of each structure (default 0: all)")
     f.add_argument("--seed", type=int, default=0, help="seed of the --bonds choice")

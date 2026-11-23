@@ -103,6 +103,11 @@ two SCF calculations of the same structure. For FHI-aims with
 `sc_accuracy_rho 1e-5`, this difference is approximately 1e-7 eV for off-site
 blocks and 3e-6 eV for on-site blocks.
 
+`--data-memory` sets the memory for the blocks of the training structures, in
+GB. The default is 8. The fit reads a larger dataset from disk again for each
+of its four passes. The memory of the fit then does not increase with the
+number of structures.
+
 !!! warning
     A fit with no prior can give an eigenvalue far from the bands when the
     overlap matrix is almost singular. The block errors do not show this
