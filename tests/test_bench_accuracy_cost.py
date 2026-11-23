@@ -1251,14 +1251,20 @@ def test_multicomponent_cases(monkeypatch):
     Symmetrix v0.3.0 with its own extraction, and the gate on Cantor cells of the row's size."""
     from accuracy_cost import multicomponent as mc, timing
     from scaling import models
+    monkeypatch.setenv("ACEJAX_EXPORT_FFI", "1")
+    assert all("spline_tol" not in c["row"] for c in mc.cases())                  # the kernel: the file's radials
+    monkeypatch.delenv("ACEJAX_EXPORT_FFI")
     cs = mc.cases()
-    assert sorted(c["row"]["code"] for c in cs) == ["acejax-ace", "acejax-pace", "mace-symx3", "mlpace"]
+    assert {c["row"]["code"]: c["row"].get("spline_tol") for c in cs}["acejax-ace"] == mc.XLA_SPLINE_TOL
+    assert sorted(c["row"]["code"] for c in cs) == ["acejax-ace", "acejax-pace", "mace-symx3", "mlpace", "pace-rt"]
     assert all((c["mode"], c["dtype"]) == ("lammps", "float64") for c in cs)
     by = {c["row"]["code"]: c["row"] for c in cs}
     assert all(r["system"] == "Cantor" and r["elements"] == models.ELEMENTS["Cantor"] and r["gate_n"] == 256 for r in by.values())
+    assert by["acejax-ace"]["path"].endswith("ace_Cantor_medium_poly.npz")       # ace-jax's builder: analytic radials
     assert by["acejax-pace"]["path"] == by["mlpace"]["path"] and by["mlpace"]["path"].endswith("pace_Cantor_medium.yace")
     assert by["mace-symx3"]["symmetrix"].endswith("mace_medium_Cantor-symx3.json")
-    assert len({tuple({**r, "dtype": "float64", "mode": "lammps", "device": "gpu"}[f] for f in timing.KEY) for r in by.values()}) == 4
+    assert len({tuple({**r, "dtype": "float64", "mode": "lammps", "device": "gpu"}[f] for f in timing.KEY) for r in by.values()}) == 5
+    assert by["pace-rt"]["path"].endswith("pace_Cantor_medium.yaml") and by["pace-rt"]["ref"] == by["mlpace"]["path"]   # grace-runtime
     cells = timing.gate_cells("Cantor", 256)
     assert len(cells) == timing.GATE_CELLS and all(len(a) == 256 and set(a.get_chemical_symbols()) == set(models.ELEMENTS["Cantor"]) for a in cells)
     assert set(timing.gate_cells()[0].get_chemical_symbols()) == {"Si"} and len(timing.gate_cells()[0]) == timing.GATE_N
