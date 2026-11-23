@@ -1463,6 +1463,7 @@ Do the estimates that ranked the harsh cells also work where the model is good? 
 |---|---|---|---|---|
 | constant (calibration median) | none | none | | 0.76 to 1.31 |
 | jackknife, 6 delete-groups | 0.59 | 0.36, 0.18 | 5.9 (4.5 to 8.5) | 0.74 to 1.58 |
+| jackknife, delete-one (34), closed form | 0.21 | 0.12, 0.16 | 5.1 (3.4 to 8.2) | 0.72 to 1.39 |
 | larger model (16 site radials) | -0.28 | 0.38, 0.09 | 5.7 (1.7 to 15.5) | 0.31 to 2.44 |
 | residual model | 0.69 | -0.13, 0.39 | 4.3 (2.5 to 5.7) | 0.78 to 1.53 |
 | jackknife and residual in quadrature | 0.74 | 0.24, 0.26 | 3.4 (2.3 to 4.7) | 0.77 to 1.48 |
@@ -1470,7 +1471,9 @@ Do the estimates that ranked the harsh cells also work where the model is good? 
 - **No estimate beats the constant width in distribution.** The rank correlations of the jackknife and the residual model are the fcc/bcc difference; within one phase none ranks (20 structures, 10 a phase: correlations below 0.4 are not distinguishable from zero).
 - **The jackknife's scale is not transferable**: 5.9 here, 2.6 on the 32-atom cells with six training structures. With 34 training structures the raw jackknife is 0.7 to 2.0 meV against 5 to 9 meV true: most of the error is not sampling variance.
 - **The larger model fails in distribution** (it ranked the harsh cells at 0.98): its disagreement with the default model is 0.6 to 3.6 meV and unrelated to the error.
-- One calibration structure (bcc_011) has 15.1 meV, twice any other; no estimate flags it (jackknife 1.8 against a median 1.1).
+- **The jackknife needs no refits and no second diagonalisation** (2026-11-23). The coefficients without a group of structures follow from the full fit's factors at the fixed prior, c_-g - c = -A^-1 P_g' (I - P_g A^-1 P_g')^-1 r_g (`work/aluq/akjk.py`): against six explicit refits the coefficient changes agree to 5e-7 to 9e-7 of the change. The band shift of each then follows to first order from one eigensolve of the full model, d eps_n(k) = C_n' (dH - eps_n dS) C_n (`work/aluq/jk1st.py`): the band RMSE to the full model is 0.989 to 1.010 of the exact one over 6 groups x 40 structures, and the row above it in the table is unchanged (rank 0.58, scale 5.9). The cost left is the block prediction of each deleted model.
+- **Delete-one is no better than six groups.** All 34 delete-one models: raw estimate 1.4 meV (six groups 1.2), rank 0.21 on the test structures, scaled range 0.72 to 1.39, the constant's 0.76 to 1.31. Removing a bcc structure moves bcc bands by 0.27 meV and fcc bands by 0.16 (fcc: 0.26 and 0.16), so the estimate is a measure of phase, and the six groups' 0.58 was that with less noise.
+- One calibration structure (bcc_011) has 15.1 meV, twice any other; no estimate flags it (jackknife 1.8 against a median 1.1; delete-one 1.9 against 1.4).
 
 The mismatch with H[rho_pred], in distribution: the bulk-only pair of the 32-atom cells on the five bulk test cells (`harsh/hrho_bt`, `hdata/bulk_hrho`).
 
