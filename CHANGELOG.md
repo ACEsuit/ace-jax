@@ -4,6 +4,19 @@
 
 ### Changed
 
+- **`aj eval` scores a Hamiltonian model without an overlap with the S of the data.** The eigenvalues of
+  the model's H and of the reference H are now both from the generalised problem with the reference S,
+  when the reference structures have one. Before, both used S = 1, and the band metrics were not those of
+  the physical spectrum (bulk gold, default model: 2.19 meV with S = 1, 2.14 meV with the reference S).
+  The command prints which overlap it uses, and `--metrics-out` records it.
+
+- **`aj ham fit` has a larger default bond environment: `--env 5 8 4 6 4` (was `5 6 4 4 4`).** Fits with
+  the default options change. With 32 training structures the band error from own Fermi levels decreased
+  from 2.15 to 1.41 meV on bulk gold, and from 18.8 to 6.9 meV on bulk aluminium (34 structures, H and S).
+  The cost increased: 17.2 against 14.3 ms per atom for the blocks on one CPU core, and 1.5 to 2.2 times
+  the fit time. `--env 5 6 4 4 4` gives the basis of 0.7.2. `BondBasis` in Python has no bond environment
+  unless given one, and does not change.
+
 - **`--prior evidence`, `loo` and `press`: the limit on the prior is part of the selection.** In 0.7.1
   the fit added the ridge to the prior after the selection, so the coefficients were not those of the
   model that the evidence was calculated for. The selection now has a lower limit on the ratio of the
@@ -30,6 +43,24 @@
   silicon model o4d20 (1.4 times before 0.7.2, when the product basis used more of the time), and no gain
   from o4d14 down. The kernel row of the five-element alloy table is timed again and did not change.
 
+- **The alloy speed table uses a linear ACE model that ace-jax builds.** The model has polynomial radial
+  functions, and the CUDA kernel calculates them with no table. The kernel then costs 0.064 µs/atom-step on an
+  A100 for the five-element alloy (0.15 with the model of splined radials that the table used before). The
+  CPU row did not change. `bench/scaling/models.py ace-poly` builds the model.
+- The alloy speed table has a row for grace-runtime (`pace/runtime`) on the PACE model: 0.27 µs/atom-step on
+  an A100 and 0.25 on 128 CPU cores.
+
+### Fixed
+
+- **Hamiltonian models on a GPU: some off-site blocks were wrong for some sizes of structure.** The block
+  prediction on a GPU gave some blocks a wrong bond environment when the number of atoms of an element and
+  their number of bonds had particular values. The affected blocks were wrong by electron-volts. Predictions on a CPU were correct. The cause was the batched loop over atoms in the compiled
+  program. The loop now makes its batches in a different way.
+
+- `HamiltonianCalculator` and `aj eval` now refuse an electron count that does not fit in the orbitals of
+  the model. For a model with valence orbitals only, give the valence electrons (`--nelectrons 79:11`).
+  Before, the Fermi level was above the last band and the band metrics were wrong, with no message.
+
 ### Added
 
 - **Electron-density models (`aj density`).** A model that predicts the electron density of a structure
@@ -50,6 +81,13 @@
   them. No calculation uses them at this time. Two bases with the same shells are equal.
 
 - `build_site_basis(..., natural_parity=True)` builds only the features of parity $(-1)^L$.
+
+- **`--overlap-threshold X` for `aj eval`, `aj ham fit --validation` and `aj ham bands`.** The option removes
+  the combinations of orbitals with an overlap eigenvalue below X at a k-point, then calculates the bands.
+  It applies to the model and to the reference. A large diffuse basis has such combinations, and an error
+  of a few meV in H then moves states by electron-volts into the bands. In Python: `block_bands`,
+  `eigvals` and `HamiltonianPredictor.bands` take `overlap_threshold`. The band energy, the forces and
+  the stress do not use the option.
 
 - `aj ham fit --noise-floor SIGMA` (`noise=` of `fit_onsite` and `fit_offsite`) sets the smallest noise
   of H that `--prior evidence` can select, in the unit of the data. The difference of H between SCF

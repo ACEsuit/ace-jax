@@ -67,11 +67,14 @@ class HamiltonianCalculator(Calculator):
 
     def electrons(self, numbers):
         """The number of electrons of a cell with these atomic numbers."""
-        if self.nelectrons is None:
-            return float(np.sum(numbers))
-        if isinstance(self.nelectrons, dict):
-            return float(sum(self.nelectrons[int(z)] for z in numbers))
-        return float(self.nelectrons)
+        n = float(np.sum(numbers)) if self.nelectrons is None else float(sum(self.nelectrons[int(z)] for z in numbers)) if isinstance(self.nelectrons, dict) \
+            else float(self.nelectrons)
+        orb = getattr(getattr(self, "predictor", None), "orbitals", None)
+        room = np.inf if orb is None else getattr(self, "degeneracy", 2.0) * sum(orb.n_orb(int(z)) for z in numbers)
+        if n > room:                                    # a valence-only basis scored with every electron put the Fermi level above the last band, silently
+            raise ValueError(f"{n:g} electrons do not fit the model's orbitals ({room:g} states in this cell): for a valence-only basis give the "
+                             "valence electrons (nelectrons=, --nelectrons, e.g. 79:11)")
+        return n
 
     def core(self, numbers):
         """The number of lowest bands of the cell left out of the band energy."""

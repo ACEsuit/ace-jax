@@ -1,0 +1,6 @@
+{
+ "lmp": "/home/e/essswb/bench-scaling/lmp-gracert-cpu.sh",
+ "python": "/home/e/essswb/bench-scaling/venv/bin/python",
+ "root": "/home/e/essswb/bench-scaling",
+ "pythonpath": "/home/e/essswb/bench-scaling/ace-jax-mc/bench:/home/e/essswb/bench-scaling/ace-jax-mc/src"
+}

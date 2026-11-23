@@ -80,8 +80,12 @@ with these options:
 | `--bond-radials` | number of radial functions of the distance between the two atoms of a block |
 | `--bond-rcut` | longest distance that has a block. The default is the longest distance in the data |
 | `--coupled N L` | features that couple the bond with the environments of its two atoms |
-| `--env R N L NB LB` | features of the atoms near the bond. This group gives most of the accuracy and most of the cost |
+| `--env R N L NB LB` | features of the atoms near the bond. This group gives most of the accuracy and most of the cost. The default is `5 8 4 6 4` |
 | `--no-env` | no features of the atoms near the bond. The model is fast and less accurate |
+
+`--env 5 6 4 4 4` is a smaller basis. It was the default to version 0.7.2. The fit and the
+prediction are approximately 1.2 to 2 times faster, and the band error is larger: 1.5 times
+on bulk gold and 2.7 times on bulk aluminium, each with approximately 32 training structures.
 
 ### The prior
 
@@ -102,6 +106,11 @@ two SCF calculations of the same structure. For FHI-aims with
 `sc_accuracy_rho 1e-5`, this difference is approximately 1e-7 eV for off-site
 blocks and 3e-6 eV for on-site blocks.
 
+`--data-memory` sets the memory for the blocks of the training structures, in
+GB. The default is 8. The fit reads a larger dataset from disk again for each
+of its four passes. The memory of the fit then does not increase with the
+number of structures.
+
 !!! warning
     A fit with no prior can give an eigenvalue far from the bands when the
     overlap matrix is almost singular. The block errors do not show this
@@ -112,6 +121,10 @@ blocks and 3e-6 eV for on-site blocks.
 
 `aj ham fit --validation` and `aj eval --model gold.npz --data validation/`
 print the same tables.
+
+For a model without an overlap, the eigenvalues of the model and of the
+reference are both calculated with the overlap of the reference structures.
+If the structures have no overlap, the two spectra use S = 1.
 
 - **Blocks**: the error of the matrix elements, for the on-site and the
   off-site blocks of each channel.
@@ -130,6 +143,27 @@ larger than 5 times the median.
 
 Energies are in the unit of the data. For FHI-aims data the unit is eV, and the
 tables show meV.
+
+### Diffuse basis sets
+
+A large basis of diffuse orbitals has combinations of orbitals with almost no
+norm. The overlap matrix at a k-point then has eigenvalues near zero. A small
+error in H along such a combination moves its energy by electron-volts. The
+predicted bands can then be wrong by electron-volts although the block errors
+are a few meV.
+
+1. Give `--overlap-threshold 1e-3` to `aj eval`, `aj ham fit --validation` or
+   `aj ham bands`.
+2. Compare the band errors with those without the option.
+
+The option removes the combinations with an overlap eigenvalue below the value
+before the diagonalisation. It applies to the model and to the reference. The
+states that it removes are far above the bands.
+
+!!! warning
+    The option changes the reference bands by a small amount. Compare the
+    reference bands with the option and without it. The band energy, the forces and the stress of `HamiltonianCalculator` do
+    not use the option.
 
 ## Predict H and S
 

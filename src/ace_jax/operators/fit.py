@@ -25,6 +25,7 @@ from ..fit.linear import loo
 from ..fit.linear import multistart
 from ..fit.linear import objective as lo
 from ..fit.linear import stats as ls
+from .data import LazyData
 from .maps import make_room
 from . import centred as C
 from .onsite import OnsiteModel, _features, design, parts_of, shell_pairs, site_graph
@@ -138,7 +139,7 @@ SELECT = ("evidence", "loo", "press")                  # sigma_c= by a criterion
 LOO_RHO = np.arange(-24.0, 6.01, 0.5)                  # log10 sigma^2 / sigma_c^2 tried by "loo" and "press"
 
 
-def _loo(fac, gamma, ridge, blocks, press):
+def _loo(fac, gamma, ridge, blocks, press, jackknife=False):
     """The leave-one-structure-out fit of one design.  blocks: per structure (R_g, c_g, e_g), the
     triangular factor of its rows, Q_g^T Y and the squared norm of the part of each target
     outside its columns.  For every rho = sigma^2 / sigma_c^2 of LOO_RHO (prior precision
@@ -150,7 +151,8 @@ def _loo(fac, gamma, ridge, blocks, press):
     shared by the atoms of a structure count once per structure, where the evidence reads them
     as independent noise.  A rho at which a structure has leverage 1 within roundoff is skipped.
     rho values below `_rho_floor` are not tried (see `_evidence`).
-    Returns (mean, hyper) as `_evidence` (hyper[:, 2]: the criterion)."""
+    Returns (mean, hyper) as `_evidence` (hyper[:, 2]: the criterion), and with `jackknife` the deviations of
+    `_jackknife` at the prior chosen (else None: they are (right-hand sides, columns, structures) numbers)."""
     gamma, n = np.asarray(gamma, float), float(fac.n)
     blocks = [_Spill.get(b) for b in blocks]
     m = max(len(b[0]) for b in blocks)                   # a structure with fewer rows than columns keeps only those rows
@@ -170,7 +172,7 @@ def _loo(fac, gamma, ridge, blocks, press):
     sig = np.sqrt(np.asarray(s2)[best, q])
     sc = sig / 10.0 ** (0.5 * grid[best])
     mean = np.asarray(means)[best, :, q].T
-    return mean, np.stack([sig, sc, crit[best, q], sc], axis=1), _jackknife(fac, gamma, ridge, blocks, grid[best], mean)
+    return mean, np.stack([sig, sc, crit[best, q], sc], axis=1), _jackknife(fac, gamma, ridge, blocks, grid[best], mean) if jackknife else None
 
 
 def _jackknife(fac, gamma, ridge, blocks, rho, mean):
@@ -232,6 +234,24 @@ def _live_rows(R, c):
     size = np.sqrt((R ** 2).sum(1) + (c ** 2).sum(1))
     keep = size > 1e-13 * max(size.max(), 1e-300)
     return R[keep], c[keep]
+
+
+def _datasets(datasets, orbitals, who):
+    """The structures of a fit, their orbital basis, and the check that a structure has it.  A
+    `LazyData` is kept as it is and checked as each structure is read; anything else is a list
+    in memory, checked now."""
+    lazy = isinstance(datasets, LazyData)
+    datasets = datasets if lazy else list(datasets)
+    orbitals = datasets[0].basis if orbitals is None else orbitals
+
+    def same_basis(d):
+        if d.basis != orbitals:
+            raise ValueError(f"{who}: the datasets have different orbital bases")
+        return d
+    if not lazy:
+        for d in datasets:
+            same_basis(d)
+    return datasets, orbitals, same_basis
 
 
 def _need_x64():
@@ -327,7 +347,7 @@ def _solve(designs, acc, yy, n, nc, ridge, gamma=None, select=None, blocks=None,
     {design key: prior precision of each column} added to the ridge (the smoothness prior), or,
     with `select` (one of SELECT), {design key: smoothness of each column} for `_evidence` or,
     with the per-structure `blocks` of `_fit`, `_loo`.  jackknife: `DesignStats.jack` from the
-    blocks at the prior solved with (`_jackknife`; "loo" and "press" always have it)."""
+    blocks at the prior solved with (`_jackknife`)."""
     coef, report, stats = {}, {}, {}
     for d, (k, keys) in designs.items():
         if not n[d]:
@@ -348,7 +368,7 @@ def _solve(designs, acc, yy, n, nc, ridge, gamma=None, select=None, blocks=None,
             if jackknife:                                # at the prior each right-hand side was solved with
                 jack = _jackknife(fac, np.asarray(g, float), ridge, blocks[d], 2.0 * np.log10(hyper[:, 0] / hyper[:, 3]), mu)
         elif select:
-            mu, hyper, jack = _loo(fac, g, ridge, blocks[d], select == "press")
+            mu, hyper, jack = _loo(fac, g, ridge, blocks[d], select == "press", jackknife)
         else:
             lin = jnp.full(k, ridge) if g is None else ridge + jnp.asarray(g)
             mu = np.asarray(lo.posterior_qr(lin, [fac], [0.0])[0])                       # (k, n_keys * nc)
@@ -384,12 +404,9 @@ def fit_onsite(basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10,
 
     jackknife: keep a factor per structure and give the statistics the closed-form
     delete-one-structure jackknife of the coefficients (`DesignStats.jack`, `_jackknife`) at the
-    prior of the fit, whichever `sigma_c` ("loo" and "press" have it without asking)."""
+    prior of the fit, whichever `sigma_c`.  It holds (right-hand sides, columns, structures) numbers for each design."""
     _need_x64()
-    datasets = list(datasets)
-    orbitals = datasets[0].basis if orbitals is None else orbitals
-    if any(d.basis != orbitals for d in datasets):
-        raise ValueError("fit_onsite: the datasets have different orbital bases")
+    datasets, orbitals, same_basis = _datasets(datasets, orbitals, "fit_onsite")
     nc = len(channels)
     designs, members = {}, {}                           # (z, L, p) -> (columns, keys); -> [(s1, s2, l1, l2)]
     for z in orbitals.species:
@@ -399,7 +416,7 @@ def fit_onsite(basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10,
                 members.setdefault((z, L, p), []).append((s1, s2, l1, l2))
 
     def rows(k):
-        d = datasets[k]
+        d = same_basis(datasets[k])
         rij, zi, zj, seg, n = site_graph(basis, d.positions, d.cell, d.numbers)
         F = {key: np.asarray(v) for key, v in _features(basis, rij, zi, zj, seg, n).items()}
         out = {}
@@ -452,10 +469,7 @@ def fit_offsite(bond_basis, datasets, orbitals=None, channels=("H", "S"), ridge=
     from .offsite import OffsiteModel, block_lps, canonical_pairs, site_features
 
     _need_x64()
-    datasets = list(datasets)
-    orbitals = datasets[0].basis if orbitals is None else orbitals
-    if any(d.basis != orbitals for d in datasets):
-        raise ValueError("fit_offsite: the datasets have different orbital bases")
+    datasets, orbitals, same_basis = _datasets(datasets, orbitals, "fit_offsite")
     lps = block_lps(orbitals)
     nc = len(channels)
     designs, members = {}, {}                           # (za, zb, L, p, same) -> ...; -> [(s1, s2, l1, l2)]
@@ -471,6 +485,7 @@ def fit_offsite(bond_basis, datasets, orbitals=None, channels=("H", "S"), ridge=
     # the chunks: (dataset, species pair, bonds); the graph of each dataset is cheap, its features are not
     graphs, chunks = [], []
     for k, d in enumerate(datasets):
+        same_basis(d)
         g = B.bond_graph(bond_basis, d.positions, d.cell, d.numbers)
         keys = [(int(r[0]), int(r[1]), int(r[2]), int(a), int(b)) for r, a, b in zip(g.R, g.i, g.j)]
         have = np.asarray([all(key in d.blocks[c] for c in channels) for key in keys], bool)
@@ -705,7 +720,7 @@ def fit_centred(basis, datasets, shells=None, channels=("rho",), metric=None, ov
 
 def centred_jackknife(model, stats):
     """[coef, ...], one per training structure: the coefficients of `model` (a `fit_centred` with
-    `jackknife=True`, or "loo" / "press", and its statistics) refitted without that structure at
+    `jackknife=True` and its statistics) refitted without that structure at
     the prior of the fit, in closed form: the fitted coefficients plus `DesignStats.jack` with
     its factor sqrt((G - 1) / G) taken out.  Each is the `coef` of a `CentredModel`
     (`eqx.tree_at(lambda m: m.coef, model, coef)`): the spread of their predictions about the
