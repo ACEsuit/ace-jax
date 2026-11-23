@@ -34,6 +34,8 @@
   functions, and the CUDA kernel calculates them with no table. The kernel then costs 0.064 µs/atom-step on an
   A100 for the five-element alloy (0.15 with the model of splined radials that the table used before). The
   CPU row did not change. `bench/scaling/models.py ace-poly` builds the model.
+- The alloy speed table has a row for grace-runtime (`pace/runtime`) on the PACE model: 0.27 µs/atom-step on
+  an A100 and 0.25 on 128 CPU cores.
 
 ### Added
 

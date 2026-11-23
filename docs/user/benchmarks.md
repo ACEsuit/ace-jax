@@ -278,11 +278,13 @@ LAMMPS and in float64.
     - The linear ACE model has 447 basis functions for each element.
       ace-jax builds it, with polynomial radial functions.
     - The PACE model has 496 basis functions for each element. ace-jax and
-      ML-PACE evaluate the same `.yace` file.
+      ML-PACE evaluate the same `.yace` file. grace-runtime reads the
+      B-basis `.yaml` file of the same model.
     - The MACE model is MACE-MP-0b2 medium.
 - **Codes.** The LAMMPS builds are those of the silicon benchmark: ace-jax
   with lammps-jax, ML-PACE as `pair_style pace` and `pair_style pace/kk`,
-  and MACE with Symmetrix v0.3.0.
+  grace-runtime 0.1.4 as `pair_style pace/runtime` and
+  `pair_style pace/runtime/kk`, and MACE with Symmetrix v0.3.0.
 - **ace-jax kernel.** The kernel evaluates linear ACE models only. Thus the
   PACE model runs as the compiled JAX program. On the GPU, the kernel
   calculates the polynomial radial functions directly.
@@ -304,8 +306,15 @@ The results are:
   PACE model: 0.064 against 0.30 µs/atom-step on the A100, and 0.38 against
   0.51 on the CPU. These are different models of approximately the same
   size.
+- The CPU result is different against grace-runtime. grace-runtime on the
+  PACE model costs 0.25 µs/atom-step on the CPU. This is less than the
+  ace-jax kernel on the linear ACE model (0.38). On the A100, the ace-jax
+  kernel costs less (0.064 against 0.27).
+- On the same PACE model, grace-runtime is 2.0 times faster than ML-PACE on
+  the CPU. On the A100, it is 1.1 times faster.
 - On the same PACE model, ML-PACE is 2.4 times faster than ace-jax on the
-  A100. On the CPU, it is 11 times faster.
+  A100. On the CPU, it is 11 times faster. grace-runtime is 2.7 and 22
+  times faster than ace-jax.
 - MACE-MP-0b2 medium costs 7.5 µs/atom-step on the A100 and 29 on the CPU.
   This is 118 and 78 times the cost of the ace-jax kernel on the linear ACE
   model.
