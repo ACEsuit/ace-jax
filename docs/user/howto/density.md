@@ -129,7 +129,10 @@ times larger, and not smaller than the error of the mean coefficients.
 
 `--prior evidence` selects the scale of the smoothness prior with the evidence.
 `--prior loo` and `--prior press` select it by leaving out one training
-structure at a time. When you give `--prior`, the fit does not use `--scaled`.
+structure at a time.
+
+`--scaled` applies only with `--prior none`. If you give `--scaled` together
+with a different `--prior`, the command stops with an error.
 
 ## The electron count
 
