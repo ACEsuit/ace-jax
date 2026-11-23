@@ -4,6 +4,19 @@
 
 ### Changed
 
+- **`aj eval` scores a Hamiltonian model without an overlap with the S of the data.** The eigenvalues of
+  the model's H and of the reference H are now both from the generalised problem with the reference S,
+  when the reference structures have one. Before, both used S = 1, and the band metrics were not those of
+  the physical spectrum (bulk gold, default model: 2.19 meV with S = 1, 2.14 meV with the reference S).
+  The command prints which overlap it uses, and `--metrics-out` records it.
+
+- **`aj ham fit` has a larger default bond environment: `--env 5 8 4 6 4` (was `5 6 4 4 4`).** Fits with
+  the default options change. With 32 training structures the band error from own Fermi levels decreased
+  from 2.15 to 1.41 meV on bulk gold, and from 18.8 to 6.9 meV on bulk aluminium (34 structures, H and S).
+  The cost increased: 17.2 against 14.3 ms per atom for the blocks on one CPU core, and 1.5 to 2.2 times
+  the fit time. `--env 5 6 4 4 4` gives the basis of 0.7.2. `BondBasis` in Python has no bond environment
+  unless given one, and does not change.
+
 - **`--prior evidence`, `loo` and `press`: the limit on the prior is part of the selection.** In 0.7.1
   the fit added the ridge to the prior after the selection, so the coefficients were not those of the
   model that the evidence was calculated for. The selection now has a lower limit on the ratio of the
@@ -36,6 +49,12 @@
   CPU row did not change. `bench/scaling/models.py ace-poly` builds the model.
 - The alloy speed table has a row for grace-runtime (`pace/runtime`) on the PACE model: 0.27 µs/atom-step on
   an A100 and 0.25 on 128 CPU cores.
+
+### Fixed
+
+- `HamiltonianCalculator` and `aj eval` now refuse an electron count that does not fit in the orbitals of
+  the model. For a model with valence orbitals only, give the valence electrons (`--nelectrons 79:11`).
+  Before, the Fermi level was above the last band and the band metrics were wrong, with no message.
 
 ### Added
 
