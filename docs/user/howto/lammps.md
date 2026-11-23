@@ -165,7 +165,7 @@ If the export used the XLA program on a CPU, `ace_jax.ffi_reason` gives the
 reason.
 
 For large models, `--ffi-precision mixed` (`ffi_precision="mixed"` in
-Python) is faster: 1.4 times for the silicon model o4d20 on 128 cores. The
+Python) is faster: 1.1 to 1.2 times for the silicon model o4d20 on 128 cores. The
 kernel then calculates the product basis in float32. It is off by default.
 
 !!! warning "Mixed precision adds noise to the energy"
@@ -222,9 +222,27 @@ same cache.
     lmp -k on g 1 -sf kk -pk kokkos newton on neigh half -in in.lammps
     ```
 
-In float64, the requirements and the accuracy are the same as for the CPU kernel.
-On an A100, the kernel is 4.8 to 8.2 times faster than the compiled JAX
-program, for silicon models from o3d8 to o4d20 with 32,768 atoms.
+In float64, the requirements are the same as for the CPU kernel.
+On an NVIDIA A100 with 32,768 silicon atoms, the GPU kernel is 7 to 13
+times faster than the compiled JAX program. The model o4d20 runs at 0.25
+µs/atom-step in float64 and at 0.15 in float32. See the
+[benchmarks](../benchmarks.md).
+
+The GPU kernel selects two things for each model. The bundle records them in
+`ace_jax.ffi`:
+
+- `radial` is `"analytic"` or `"table"`. For a model with polynomial radials
+  (the default of `aj fit`), the kernel calculates the radial functions
+  directly in the force calculation. The forces then agree with the XLA
+  program to approximately 1e-11 eV/Å. For other models (learned radials,
+  splined radials), the kernel uses the radial table, with the accuracy of
+  the CPU kernel.
+- `form` is `"coupled"` or `"dag"`. It is the form of the
+  [product basis](../concepts.md#terms) that has fewer operations for the
+  model. The two forms give the same energies and forces.
+
+To use the radial table for all models, set `ACEJAX_FFI_RADIAL=table` before
+the export.
 
 The GPU kernel also runs float32 bundles. To export one, add `--dtype float32`.
 The kernel then calculates in float32, with the accuracy of the float32 XLA
@@ -296,3 +314,40 @@ version of the Python package, or export with `layout="dense"`.
   `aj export --dtype float32` does this check on `--structure`.
 - `ffi_precision="mixed"` is for a float64 bundle with the kernel. The kernel
   then calculates the product basis in float32. The default is `"float64"`.
+
+## Export to Symmetrix
+
+[Symmetrix](https://github.com/wcwitt/symmetrix) has a LAMMPS pair style for
+linear ACE, `symmetrix/ace`. On an NVIDIA A100, its kernels are 1.4 to 2.4
+times faster than the ace-jax GPU kernel for the silicon models of the
+[benchmarks](../benchmarks.md). It also has no fixed cost for each step from
+lammps-jax. Thus it is the faster selection for small models.
+
+Symmetrix does the conversion. ace-jax calls the converter of the installed
+Symmetrix package.
+
+1. Install a Symmetrix version that has the ACE converter
+   (`symmetrix.extract_ace_data`).
+2. Export the model:
+
+    ```bash
+    aj export --model fit/model.npz --out model.symmetrix.json --format symmetrix
+    ```
+
+3. Use the two LAMMPS lines that the command prints:
+
+    ```
+    pair_style symmetrix/ace
+    pair_coeff * * model.symmetrix.json Si
+    ```
+
+In Python, the function is `ace_jax.export.symmetrix.export_symmetrix(model_path, out)`.
+
+!!! warning "Give `--format symmetrix`"
+    An `--out` name that ends in `.json` gives a lammps-jax bundle by
+    default. The two files are different.
+
+The converter accepts only some models. At this time, the model must have
+one element, analytic radials and a pair term. For other models, the command
+stops with the message from Symmetrix. Symmetrix tabulates the radials, and
+the export reports the table error.

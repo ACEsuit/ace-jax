@@ -330,7 +330,8 @@ def test_export_ffi_bundle(kernel, tmp_path, monkeypatch):
     b = export_lammps(m, meta, tmp_path / "b.json", **kw)
     aj = b["ace_jax"]
     lib = aj["ffi"]["library"]
-    assert aj["ffi"] == {"target": ffi.TARGET, "library": lib, "handlers": ffi.handlers(lib)}
+    assert aj["ffi"] == {"target": ffi.TARGET, "library": lib, "handlers": ffi.handlers(lib),
+                         "form": "dag", "radial": "table"}       # (`ffi.describe`: this model is too small to couple)
     assert pathlib.Path(lib).parent == tmp_path / "cache" and aj["layout"] == "matrix" and aj["radial_table"]
     assert aj["aa_dag"] == "greedy" and aj["k_dense"] is None and aj["block_rows"] is None
     assert ffi.TARGET in str(b)                       # the contract names the custom call
@@ -359,7 +360,8 @@ def test_export_ffi_gpu_bundle(tmp_path, dtype):
     b = export_lammps(m, meta, tmp_path / "b.json", max_atoms=256, max_owned=64, k_dense=40, max_neighbors=48,
                       platform="cuda", ffi=lib, dtype=dtype)
     aj = b["ace_jax"]
-    assert aj["ffi"] == {"target": ffi.TARGET_GPU, "library": lib, "handlers": ffi.handlers(lib, gpu=True)}
+    assert aj["ffi"] == {"target": ffi.TARGET_GPU, "library": lib, "handlers": ffi.handlers(lib, gpu=True),
+                         "form": "dag", "radial": "table"}
     assert aj["ffi"]["handlers"] == f"ace_jax_direct_gpu={lib}:AceDirectGpu"
     assert ffi.TARGET_GPU in str(b) and aj["layout"] == "matrix" and aj["radial_table"]
     assert b["contract"]["precision"] == dtype

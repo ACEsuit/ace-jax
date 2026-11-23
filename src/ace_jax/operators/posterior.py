@@ -74,8 +74,8 @@ def draws(coef, stats, n, nc, seed=0):
 
 
 def jackknife_draws(coef, stats, n, nc, seed=0):
-    """As `draws`, from the delete-one-structure jackknife of a fit with `sigma_c="loo"` or
-    "press" (`DesignStats.jack`): draw j is the fitted coefficients plus the deviations of the
+    """As `draws`, from the delete-one-structure jackknife of a fit with `jackknife=True`
+    (`DesignStats.jack`, at any prior): draw j is the fitted coefficients plus the deviations of the
     structures weighted by xi_j ~ N(0, 1) per structure, the same weights in every design and
     right-hand side, so the draws keep the correlation of the misfit between shell pairs and
     bonds, which independent noise does not have.  Call it with the same `seed` for the on-site
@@ -85,7 +85,7 @@ def jackknife_draws(coef, stats, n, nc, seed=0):
     for d in sorted(stats, key=str):
         st = stats[d]
         if st.jack is None:
-            raise ValueError("no jackknife in these statistics: fit with sigma_c='loo' or 'press'")
+            raise ValueError("no jackknife in these statistics: fit with jackknife=True")
         if xi is None:
             xi = np.random.default_rng(seed).normal(size=(st.jack.shape[2], n))
         dev = st.jack @ xi                                                    # (n_rhs, columns, n)

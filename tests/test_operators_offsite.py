@@ -263,6 +263,7 @@ def test_fit_leaving_structures_out(basis):
     a, _, sa = fit_offsite(basis, ds, sigma_c="press", stats=True, chunk=512)
     b, _, sb = fit_offsite(basis, ds, sigma_c="press", stats=True, compiled=False, chunk=512)
     _, _, s0 = fit_offsite(basis, ds, stats=True)
+    assert all(st.jack is None for st in sa.values())             # the jackknife is kept only when asked for: (right-hand sides, columns, structures) numbers a design
     assert sa.keys() == sb.keys() == s0.keys()
     for key in sa:
         rho = lambda h: np.log10(h[:, 0] / np.where(h[:, 3] > 0, h[:, 3], 1.0), where=h[:, 0] > 0, out=np.zeros(len(h)))   # the choice (a target that is zero has none)
@@ -270,6 +271,27 @@ def test_fit_leaving_structures_out(basis):
         G = np.asarray(s0[key].factor.G)
         assert np.allclose(sa[key].factor.G, G, atol=1e-8 * np.abs(G).max())
     assert all(np.allclose(a.coef[k], b.coef[k], rtol=1e-3, atol=1e-3) for k in a.coef)                  # the few C-C bonds leave directions of 1e-5 relative; coefficients ~100
+
+
+def test_jackknife_at_a_fixed_prior(basis):
+    """`fit_offsite(jackknife=True)` without prior selection, on the device and on the host: the
+    closed-form deviations are the coefficients of the refit without a structure."""
+    require_optional("h5py")
+    d = deeph.read(FIX)
+    rng = np.random.default_rng(0)
+    ds = [d._replace(positions=d.positions + 0.02 * rng.normal(size=d.positions.shape)) for _ in range(3)]
+    basis = basis._replace(n_cpl=0, l_cpl=0)
+    kw = dict(ridge=1e-4, chunk=512)                     # a ridge that conditions the few C-C bonds
+    a, _, sa = fit_offsite(basis, ds, stats=True, jackknife=True, **kw)
+    b, _, sb = fit_offsite(basis, ds, stats=True, jackknife=True, compiled=False, **kw)
+    ref, _ = fit_offsite(basis, ds[1:], compiled=False, **kw)
+    nc, f = len(a.channels), np.sqrt(2 / 3)
+    for key, st in sb.items():
+        assert st.jack.shape == (len(st.keys) * nc, np.asarray(st.factor.R).shape[1], 3) and st.hyper is None and st.ridge == 1e-4
+        scale = max(np.abs(st.jack).max(), 1e-300)
+        assert np.abs(sa[key].jack - st.jack).max() < 1e-5 * scale, key
+        for i, k in enumerate(st.keys):
+            assert np.abs(st.jack[i * nc:(i + 1) * nc, :, 0] / f - (ref.coef[k] - b.coef[k])).max() < 1e-7 * scale, k
 
 
 def test_fit_reads_structures_on_demand(basis):
@@ -295,3 +317,26 @@ def test_fit_reads_structures_on_demand(basis):
     other = OperatorData(d.cell, d.positions, d.numbers, OrbitalBasis.of({14: (0, 1), 6: (0, 1)}), d.blocks)
     with pytest.raises(ValueError, match="different orbital bases"):
         fit_onsite(basis.site, LazyData(2, lambda i: (d, other)[i]))
+
+
+def test_bond_environment_rows_in_batches_match_one_row_at_a_time(monkeypatch):
+    """`offsite_fast._env_side`, whose rows a GPU takes in batches (`_rows`), against one row at a time, at
+    the shape where `jax.lax.map(batch_size=16)` on a GPU gave the second batch the first batch's bond mask
+    (42 atoms, 96 bond slots, 32 environment atoms, 8 radials, l <= 4)
+    and at shapes with fewer rows than a batch and an exact multiple.  On a CPU the two are one code path."""
+    import jax.numpy as jnp
+    from ace_jax.operators import offsite_fast as OF
+    g = np.random.default_rng(0)
+    env = lambda *a: OF._env_side(*a, 5.0, 9.45, 8, 4, 1.0)
+    for n, K, Ke in ((42, 96, 32), (6, 96, 32), (32, 40, 12)):
+        e_rij = g.uniform(-5, 5, (n, Ke, 3)); e_live = np.arange(Ke)[None] < g.integers(Ke - 4, Ke + 1, (n, 1))
+        e_ch = np.eye(2)[g.integers(0, 2, (n, Ke))]; rvec = g.uniform(-6, 6, (n, K, 3))
+        mask = (np.arange(K)[None] < g.integers(K - 9, K - 3, (n, 1))).astype(float)         # a different number of live slots in each row
+        args = tuple(jnp.asarray(x) for x in (e_rij, e_live, e_ch, rvec, mask))
+        got = np.asarray(jax.jit(env)(*args))
+        monkeypatch.setattr(OF, "_rows", lambda f, xs: jax.lax.map(f, xs))
+        want = np.asarray(jax.jit(lambda *a: env(*a))(*args))             # a new function: traced again, with the other `_rows`
+        monkeypatch.undo()
+        assert got.shape == (n, K, 16, 25) and np.abs(want).max() > 0.1
+        assert np.allclose(got, want, rtol=0, atol=1e-12)
+        assert not np.abs(got[mask == 0]).max()                                              # a slot without a bond has no environment

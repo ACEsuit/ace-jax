@@ -8,6 +8,11 @@ Structures with blocks are a directory of ace-jax operator caches (*.npz, `ham.c
 DeepH-layout subdirectories (`ham.deeph`; with `up/` and `dn/` inside, collinear spin); structures
 alone may also be an extxyz file.  `aj eval --model model.npz` scores a model (`score` here).
 
+    aj density fit --data DIR --out model.npz [--validation DIR]  density files -> a model file
+    aj density predict --model model.npz --data STRUCTURES --out DIR
+
+the electron-density model (`ham.density`; its commands are the `density_*` functions here).
+
 The parser and the commands only: `ace_jax.cli` mounts them (`add_parser`, `run`).  Energies are
 in the unit of the data (eV for FHI-aims through Quoll)."""
 import glob
@@ -84,6 +89,7 @@ def _calc(a, kpts):
     if calc.channel not in ch:
         raise UsageError(f"--channel {calc.channel}: the model has {', '.join(ch)}")
     calc.degeneracy = 2.0 if calc.channel == "H" else 1.0      # a spin channel holds one electron per state
+    calc.overlap_threshold = float(getattr(a, "overlap_threshold", 0.0) or 0.0)   # of the scored and plotted bands (`operator.block_bands`), not of the energy
     return calc
 
 
@@ -99,6 +105,7 @@ def score(calc, data, window, metrics_out=None, blocks_out=None, pairs=None, blo
     receives each structure's (reference, predicted) eigenvalues from their own Fermi levels (`ham.uq`).
     block_errors: a `uq.BlockErrors` that receives every structure's block errors.
     A model with a calibration (`aj ham calibrate`) also gets the coverage of its intervals here.
+    calc.overlap_threshold > 0 (--overlap-threshold): both spectra in the subspace of S(k) above it (`operator.block_bands`).
     A model without an overlap is scored with the data's S where it has one (its H and the reference
     H in the same generalised problem; summary["overlap"] "reference"), else with S = 1 ("identity")."""
     from . import metrics as M
@@ -106,11 +113,13 @@ def score(calc, data, window, metrics_out=None, blocks_out=None, pairs=None, blo
     ch, orb = calc.predictor.channels, calc.predictor.orbitals
     names = block_names(data)
     err, per, bad, spectra, overlap = {}, [], [], ([] if pairs is None else pairs), None
+    cut = getattr(calc, "overlap_threshold", 0.0)
     held = getattr(calc, "calibration", None) if pairs is None else None      # a calibrated model being scored (not calibrated)
     if held and held.get("blocks") and block_errors is None:
         from . import uq
         block_errors = uq.BlockErrors(orb)
-    print(f"{len(names)} reference structures; eigenvalues on {len(calc.kpts)} k-points, {window[0]:g} to {window[1]:g} from the Fermi level")
+    print(f"{len(names)} reference structures; eigenvalues on {len(calc.kpts)} k-points, {window[0]:g} to {window[1]:g} from the Fermi level"
+          + (f"; overlap eigenvalues below {cut:g} left out" if cut > 0 else ""))
     for i, (name, at, d) in enumerate(s for n in names for s in structures(n)):
         if d.basis != orb:
             raise UsageError(f"{name}: its orbital basis is not the model's")
@@ -129,17 +138,21 @@ def score(calc, data, window, metrics_out=None, blocks_out=None, pairs=None, blo
                 given = "reference"; Sb, P = d.blocks["S"], pred[calc.channel]
                 keys = sorted(set(Hb) | set(Sb) | set(P))
                 bs = BlockSum(keys, d.numbers, orb); full = lambda B, keys=keys, z=d.numbers: _filled(B, keys, z, orb); Sf = full(Sb)
-                e1, e0 = block_bands(bs, full(P), Sf, calc.kpts), block_bands(bs, full(Hb), Sf, calc.kpts)
+                e1, e0 = block_bands(bs, full(P), Sf, calc.kpts, overlap_threshold=cut), block_bands(bs, full(Hb), Sf, calc.kpts, overlap_threshold=cut)
             else:
                 given = "model" if calc.overlap else "identity"
-                e1 = np.asarray(calc.get_property("eigenvalues", at))
                 Sb = d.blocks[calc.overlap] if calc.overlap else {k: np.eye(*v.shape) * float(onsite(k)) for k, v in Hb.items()}
-                e0 = block_bands(BlockSum(sorted(Hb), d.numbers, orb), Hb, Sb, calc.kpts) if np.isfinite(e1).all() else None
+                if cut > 0 and calc.overlap:             # the model's H and S, as the reference's: each in the subspace of its own S(k)
+                    P = pred[calc.channel]
+                    e1 = block_bands(BlockSum(sorted(P), d.numbers, orb), P, pred[calc.overlap], calc.kpts, overlap_threshold=cut)
+                else:
+                    e1 = np.asarray(calc.get_property("eigenvalues", at))
+                e0 = block_bands(BlockSum(sorted(Hb), d.numbers, orb), Hb, Sb, calc.kpts, overlap_threshold=cut if calc.overlap else 0.0) if not np.isnan(e1).any() else None
             if overlap is None:
                 overlap = given
                 print({"reference": "the model has no overlap: eigenvalues of its H and of the reference H with the reference S",
                        "identity": "the model and the data have no overlap: eigenvalues with S = 1", "model": f"overlap: the model's {calc.overlap}"}[given], flush=True)
-            if not np.isfinite(e1).all():                # the eigensolver's answer to an overlap that is not positive definite
+            if np.isnan(e1).any():                       # the eigensolver's answer to an overlap that is not positive definite
                 print(f"  {name}: no eigenvalues: the predicted {calc.overlap or 'H'} gives a generalised eigenproblem that is not "
                       f"positive definite; no band metrics for this structure", flush=True)
                 bad.append(name)
@@ -162,6 +175,8 @@ def score(calc, data, window, metrics_out=None, blocks_out=None, pairs=None, blo
             summary["block_coverage"] = cov
     if summary is not None:
         summary["overlap"] = overlap
+        if cut > 0:
+            summary["overlap_threshold"] = cut
         if bad:
             summary["no_eigenvalues"] = bad
     if per:
@@ -252,6 +267,7 @@ def cmd_fit(a):
         calc.overlap = "S" if "S" in ch else None
         calc.channel = "H" if "H" in ch else next(c for c in ch if c != "S")
         calc.degeneracy = 2.0 if calc.channel == "H" else 1.0
+        calc.overlap_threshold = float(a.overlap_threshold or 0.0)
         print(f"validation set {a.validation}:")
         table, summary = score(calc, a.validation, a.window)
         info["validation"] = dict(data=os.path.abspath(a.validation), blocks={f"{c} {p}": v for (c, p), v in table.items()}, metrics=summary)
@@ -316,18 +332,19 @@ def band_structure(calc, atoms, path=None, npoints=200, reference=None):
     p = calc.predictor
     prep = p.prepare_auto(atoms.positions, np.asarray(atoms.cell), atoms.numbers, atoms.pbc)
     nel = calc.electrons(atoms.numbers)
+    cut = getattr(calc, "overlap_threshold", 0.0)
     mu = lambda e: float(smeared_occupations(jnp.asarray(e), jnp.asarray(calc.weights), nel, calc.width, calc.smearing, calc.degeneracy)[1])
     out = dict(x=x, ticks=ticks, labels=np.asarray(labels), kpts=bp.kpts, grid_kpts=calc.kpts, grid_weights=calc.weights,
                nelectrons=nel, degeneracy=calc.degeneracy, formula=atoms.get_chemical_formula())
     for tag, ks in (("bands", bp.kpts), ("grid_bands", calc.kpts)):
-        out[tag] = np.asarray(p.bands(prep, ks, overlap=calc.overlap, channel=calc.channel), float)
+        out[tag] = np.asarray(p.bands(prep, ks, overlap=calc.overlap, channel=calc.channel, overlap_threshold=cut), float)
     out["fermi_level"] = mu(out["grid_bands"])
     if reference is not None:
         Hb = reference.blocks[calc.channel]
         Sb = reference.blocks[calc.overlap] if calc.overlap else {k: np.eye(*v.shape) * float(onsite(k)) for k, v in Hb.items()}
         bs = BlockSum(sorted(Hb), reference.numbers, p.orbitals)
         for tag, ks in (("bands_ref", bp.kpts), ("grid_bands_ref", calc.kpts)):
-            out[tag] = np.asarray(block_bands(bs, Hb, Sb, ks), float)
+            out[tag] = np.asarray(block_bands(bs, Hb, Sb, ks, overlap_threshold=cut if calc.overlap else 0.0), float)
         out["fermi_level_ref"] = mu(out["grid_bands_ref"])
     return out
 
@@ -421,6 +438,214 @@ def cmd_bands(a):
         print(f"wrote {a.plot}")
 
 
+# ------------------------------------------------------------------ aj density
+def density_structures(path):
+    """[(name, ase.Atoms, DensityData or None)] of `path`: a directory of density files (or one
+    file, or one DeepH directory with `density.npz`), or an extxyz file of structures alone."""
+    from ase import Atoms
+
+    from . import density as D
+    if os.path.isdir(path) or path.endswith(".npz"):
+        one = path.endswith(".npz") or os.path.exists(os.path.join(path, D.IN_DIRECTORY))
+        try:
+            files = [path.rstrip("/")] if one else D.names(path)
+        except ValueError as e:
+            raise UsageError(str(e)) from None
+        out = []
+        for f in files:
+            d = D.read(f, overlap="lazy")
+            out.append((os.path.splitext(os.path.basename(f))[0], Atoms(numbers=d.numbers, positions=d.positions, cell=d.cell, pbc=d.pbc), d))
+        return out
+    from ase_extxyz.io import read_cextxyz
+    return [(f"{i:04d}", f, None) for i, f in enumerate(read_cextxyz(path, index=":", create_calc=False))]
+
+
+def density_score(predictor, data, metrics_out=None):
+    """Print the errors of `predictor`'s densities against the reference records under `data`
+    (`ham.density.density_metrics`): per structure the density error (with the record's overlap),
+    the coefficient error over the labels' spread and the electron count error before the
+    correction; then the summary.  Returns (per-structure records, summary)."""
+    from . import density as D
+    per = []
+    todo = density_structures(data)
+    if any(d is None for _, _, d in todo):
+        raise UsageError(f"{data}: scoring a density model needs reference densities (a directory of density files)")
+    print(f"{len(todo)} reference structures")
+    print("structure            atoms   density error    relative     coefficients   count error")
+    for name, at, d in todo:
+        if d.shells != predictor.model.shells:
+            raise UsageError(f"{name}: its auxiliary basis is not the model's")
+        pred = predictor.predict(at, d.nelectrons)
+        m = D.density_metrics(d, pred)
+        m["name"] = name
+        per.append(m)
+        lam = np.sqrt(np.mean([v ** 2 for v in m["rmse_l"].values()]))
+        num = lambda k, f, w, m=m: format(m[k], f) if m.get(k) is not None else "-".rjust(w)
+        print(f"{name:20s} {len(at):5d} {num('error', '15.5f', 15)} {num('relative', '11.3e', 11)} {lam:15.4f} {num('dN_recorded', '+13.5f', 13)}", flush=True)
+    s = D.summary(per)
+    print("\n".join(D.format_summary(s)))
+    if metrics_out:
+        with open(metrics_out, "w") as f:
+            json.dump(dict(summary=s, structures=per), f, indent=1)
+    return per, s
+
+
+def _density_charges(train):
+    """The charges of the auxiliary functions, from the training records (the first that has
+    them; a warning when two records differ), else fitted to the electron counts."""
+    import warnings
+
+    from . import density as D
+    have = [d.charges for d in train if d.charges is not None]
+    if not have:
+        if any(d.nelectrons is None for d in train):
+            return None
+        return D.fit_charges(train)
+    if any(set(q) != set(have[0]) or any(not np.allclose(q[z], have[0][z], rtol=1e-8, atol=1e-12) for z in q) for q in have[1:]):
+        warnings.warn("aj density fit: the training structures record different charges of the auxiliary functions; the first is used", stacklevel=2)
+    return have[0]
+
+
+def cmd_density_fit(a):
+    """Fit an electron-density model to the density files under --data and write one model file.
+    The model: the expansion coefficients of every auxiliary shell of angular momentum l as a
+    linear function of the site features of (l, (-1)^l) (correlation order --order,
+    --site-radials radial functions within --site-rcut).  --metric overlap (the default when
+    every structure has the overlap of the auxiliary functions) minimises the L2 norm of the
+    density error; plain, the error of each coefficient.  --prior: the smoothness prior's scale,
+    a number, or chosen by the evidence or by leaving structures out ("loo", "press");
+    --scaled R: a ridge of R times the diagonal of the Gram matrix on the feature columns."""
+    import warnings
+
+    import jax
+    jax.config.update("jax_enable_x64", True)
+    from ..operators import io
+    from ..operators.features import build_site_basis
+    from ..operators.fit import METRICS, fit_centred
+    from . import density as D
+    try:
+        files = D.names(a.data)[:a.max_structures]
+    except ValueError as e:
+        raise UsageError(str(e)) from None
+    train = [D.read(f, overlap="lazy" if a.metric != "plain" else False) for f in files]
+    shells = train[0].shells
+    if any(d.shells != shells for d in train):
+        raise UsageError(f"{a.data}: the structures do not share one auxiliary basis")
+    have = all(d.overlap is not None for d in train)
+    metric = a.metric or ("overlap" if have else "plain")
+    if metric not in METRICS:
+        raise UsageError(f"--metric: one of {', '.join(METRICS)}")
+    if metric == "overlap" and not have:
+        raise UsageError("--metric overlap: not every structure of --data has the overlap of the auxiliary functions (--metric plain fits without it)")
+    for key, what in (("fit_metric", "definitions of the coefficients (fit_metric)"), (("kpts", "kpt_offset", "smearing", "width"), "k-points or smearing")):
+        vals = {json.dumps([(d.info or {}).get(k) for k in ([key] if isinstance(key, str) else key)]) for d in train}
+        if len(vals) > 1:
+            warnings.warn(f"aj density fit: the training structures record different {what}: {sorted(vals)}", stacklevel=2)
+    prior = None if a.prior == "none" else a.prior if a.prior in PRIORS else float(a.prior)
+    if prior is not None and a.scaled is not None:
+        raise UsageError("--prior and --scaled: give one (--prior none with --scaled)")
+    els, lam = [int(z) for z in shells.species], shells.lmax
+    radials = tuple(a.site_radials) + (5,) * (a.order - len(a.site_radials))            # higher orders: few radial functions,
+    lmax = tuple(a.lmax or [lam]) + (min(3, lam),) * (a.order - len(a.lmax or [lam]))   # low l (the order-1 terms carry the density)
+    sb = build_site_basis(els, order=a.order, totaldegree=40, lmax_feat=lam, rcut=a.site_rcut, wL=0.5, nmax_by_order=radials[:a.order],
+                          lmax_by_order=lmax[:a.order], natural_parity=True).with_table()
+    print(f"{len(train)} structures, {sum(len(d.numbers) for d in train)} atoms, elements {els}, auxiliary l up to {lam}; site features of order {a.order} within "
+          f"{a.site_rcut:g}; metric {metric}, prior {a.prior}" + (f", scaled ridge {a.scaled:g}" if a.scaled is not None else ""), flush=True)
+    t = time.perf_counter()
+    model, rep = fit_centred(sb, [d.centred() for d in train], channels=(D.CHANNEL,), metric=metric, overlaps=[d.overlap for d in train] if metric == "overlap" else None,
+                             ridge=a.ridge, sigma_c=prior, scaled=a.scaled)
+    fit_s = time.perf_counter() - t
+    clipped = rep.pop(("clipped",), None)
+    n_coef = int(sum(np.asarray(c).size for c in model.coef.values()))
+    rows = np.array([r[0] for r in rep.values()], float)
+    resid = float(np.sqrt((rows * np.array([np.asarray(r[2], float).ravel()[0] for r in rep.values()]) ** 2).sum() / rows.sum()))
+    n_rows = int(rows.sum()) if metric == "overlap" else int(sum(len(d.coefficients) for d in train))
+    print(f"{n_rows} rows, {n_coef} parameters; training residual, rms over rows" + (" in the overlap metric" if metric == "overlap" else "") + f": {resid:.6g}", flush=True)
+    if clipped and any(clipped):
+        print(f"overlaps not positive definite: eigenvalues raised per structure {list(clipped)}")
+    print(f"fitted in {fit_s:.1f} s", flush=True)
+    charges = _density_charges(train)
+    if charges is None:
+        warnings.warn("aj density fit: the data has neither charges nor electron counts: the model's predictions will not be corrected to an electron count", stacklevel=2)
+    rec = dict(electrons={str(z): n for z, n in D.electrons_per_atom(train).items()})
+    if charges is not None:
+        rec["charges"] = {str(z): [float(v) for v in q] for z, q in charges.items()}
+    info = dict(command="aj density fit", data=os.path.abspath(a.data), n_train=len(train), structures=[os.path.basename(f) for f in files], metric=metric,
+                prior=a.prior, scaled=a.scaled, ridge=a.ridge, order=a.order, site_rcut=a.site_rcut, site_radials=list(radials[:a.order]), lmax=list(lmax[:a.order]),
+                fit_s=round(fit_s, 1), n_coef=n_coef, n_rows=n_rows, training_residual=resid, clipped=list(clipped or []), density=rec,
+                fit_metric=(train[0].info or {}).get("fit_metric"))
+    os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
+    io.save(a.out, centred=model, info=info)             # before the validation: a failure there does not lose the fit
+    if a.validation:
+        print(f"validation set {a.validation}:")
+        _, s = density_score(D.DensityPredictor((model, rec)), a.validation)
+        info["validation"] = dict(data=os.path.abspath(a.validation), metrics=s)
+        io.save(a.out, centred=model, info=info)
+    print(f"wrote {a.out}")
+
+
+def cmd_density_predict(a):
+    """The predicted density of every structure of --data, one density file each under --out:
+    the coefficients corrected to the electron count, and in the file's info `dN`, the count
+    error before the correction, which is also printed: a large one marks a structure unlike
+    the training set."""
+    import jax
+    jax.config.update("jax_enable_x64", True)
+    from . import density as D
+    p = D.DensityPredictor(a.model)
+    todo = density_structures(a.data)
+    os.makedirs(a.out, exist_ok=True)
+    for name, at, d in todo:
+        t = time.perf_counter()
+        pred = p.predict(at, a.nelectrons if a.nelectrons is not None else None if d is None else d.nelectrons)
+        D.write(os.path.join(a.out, name + ".npz"), pred)
+        dN = pred.info["dN"]
+        print(f"{name}: {len(at)} atoms, electron count error before the correction " + ("-" if dN is None else f"{dN:+.5f}") + f", {time.perf_counter() - t:.2f} s", flush=True)
+    print(f"wrote {len(todo)} structures to {a.out}")
+
+
+def cmd_density_eval(a):
+    """`aj eval` of a density model: `density_score` on the reference densities under --data."""
+    import jax
+    jax.config.update("jax_enable_x64", True)
+    from . import density as D
+    density_score(D.DensityPredictor(a.model), a.data, getattr(a, "metrics_out", None))
+
+
+def density_add_parser(sub):
+    """Mount `density` on the `aj` subparsers."""
+    den = sub.add_parser("density", help="electron-density models: fit to the density's expansion coefficients, predict them")
+    ds = den.add_subparsers(dest="density_cmd", required=True)
+    f = ds.add_parser("fit", help="fit an electron-density model to density files; writes a model file", description=cmd_density_fit.__doc__)
+    f.add_argument("--data", required=True, help="training structures: a directory of density files (*.npz), or of DeepH directories with density.npz")
+    f.add_argument("--out", required=True, help="the model file (.npz)")
+    f.add_argument("--validation", default=None, help="density files to score the fitted model on (as aj eval)")
+    f.add_argument("--metric", choices=["overlap", "plain"], default=None, help="overlap: the L2 norm of the density error (default when every structure "
+                   "has the overlap); plain: least squares on each coefficient")
+    f.add_argument("--prior", default="none", help="smoothness prior: none (default), its scale as a number, or evidence, loo, press")
+    f.add_argument("--scaled", type=float, default=None, metavar="R", help="ridge of R times the diagonal of the Gram matrix on every feature column "
+                   "(default 1e-6 with --prior none; not with another --prior)")
+    f.add_argument("--order", type=int, default=1, help="correlation order of the site features (default 1)")
+    f.add_argument("--site-rcut", type=float, default=7.0, help="cutoff of the site features (default 7.0)")
+    f.add_argument("--site-radials", type=int, nargs="+", default=[12], help="radial functions of the site features, per correlation order (default 12; higher orders 5)")
+    f.add_argument("--lmax", type=int, nargs="+", default=None, metavar="L", help="largest l of the one-particle functions, per correlation order "
+                   "(default: the largest l of the auxiliary basis; higher orders 3)")
+    f.add_argument("--ridge", type=float, default=1e-10, help="ridge on every coefficient (default 1e-10)")
+    f.add_argument("--max-structures", type=int, default=None, help="use the first N structures of --data (name order)")
+    p = ds.add_parser("predict", help="write the predicted density of structures (density files)", description=cmd_density_predict.__doc__)
+    p.add_argument("--model", required=True)
+    p.add_argument("--data", required=True, help="structures: an extxyz file, or a directory of density files")
+    p.add_argument("--out", required=True, help="output directory: one density file per structure")
+    p.add_argument("--nelectrons", type=float, default=None, help="electrons per cell (default: the structure's record, else the model's electrons per atom)")
+    return den
+
+
+def density_run(a):
+    if a.density_cmd == "fit" and a.prior == "none" and a.scaled is None:
+        a.scaled = 1e-6                                  # the default ridge belongs to --prior none; with another prior, --scaled is an error (`cmd_density_fit`)
+    {"fit": cmd_density_fit, "predict": cmd_density_predict}[a.density_cmd](a)
+
+
 def _add_spectrum_args(p, kpts):
     p.add_argument("--kpts", type=int, nargs=3, default=kpts, help=f"Gamma-centred k-point grid (default {' '.join(map(str, kpts))})")
     p.add_argument("--nelectrons", default=None,
@@ -431,6 +656,9 @@ def _add_spectrum_args(p, kpts):
     p.add_argument("--window", type=float, nargs=2, default=[-12.0, 5.0],
                    help="eigenvalues scored: from LO to HI of the reference Fermi level (default -12 5)")
     p.add_argument("--threads", type=int, default=1, help="threads of the off-site evaluation on a CPU (default 1)")
+    p.add_argument("--overlap-threshold", type=float, default=0.0, metavar="X",
+                   help="drop the combinations of orbitals whose overlap eigenvalue at a k-point is below X before diagonalising "
+                        "(default 0: none); 1e-3 for a diffuse basis whose predicted bands are far off although the blocks are close")
 
 
 def add_parser(sub):

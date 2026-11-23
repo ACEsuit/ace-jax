@@ -59,6 +59,7 @@ aj eval --model out_gp/gp_model.npz  --data new.xyz $K --out pred.xyz   # adds a
 aj eval --model model.yace --data new.xyz $K                            # PACE works too; --prefix renames ace_
 aj export --model out_linear/model.npz --out model.yace                # ML-PACE .yace (exact; tabulated radials)
 aj export --model out_linear/model.npz --out bundle.json --structure start.xyz   # lammps-jax bundle
+aj export --model out_linear/model.npz --out m.symmetrix.json --format symmetrix  # Symmetrix `pair_style symmetrix/ace` (needs Symmetrix with its ACE converter; one element, analytic radials, a pair term; fastest on a GPU, esp. small models)
 ```
 
 Per-order caps: `--nmax-by-order 15,6,4,3,2,2 --lmax-by-order 0,4,3,2,1,0` (pacemaker's
@@ -265,9 +266,15 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
   wheels (no compiler needed); elsewhere, or with `ACEJAX_FFI_FLAGS`, compiled on first use (C++17 compiler,
   cached). `ffi="auto"` falls back to the JAX model with `calc.ffi_reason`. Derivatives in positions only:
   for parameter gradients or second derivatives keep `ffi=False` (the default).
+  The kernels choose the product basis' form per model (`calc.ffi["form"]`, bundle `ace_jax.ffi["form"]`):
+  `"coupled"` (order <= 4, where it has fewer operations: from about o4d12) or `"dag"`; same results to
+  roundoff. `ACEJAX_FFI_FORM=dag|coupled` forces one. On a CUDA GPU the kernel evaluates a polynomial radial
+  itself in its force pass (`calc.ffi["radial"] == "analytic"`: forces ~1e-11 eV/A from the JAX model, not
+  the table's ~1e-8) for analytic, unsplined radials with lmax <= 8; learned/splined radials and PACE-shaped
+  bases keep the table (`"table"`). `ACEJAX_FFI_RADIAL=table` forces the table.
   `ffi_precision="mixed"` (off by default; float64 only; CPU and CUDA kernels, the same library): the
-  product basis in float32, everything else float64. Worth it only for large models (o4d20: 1.4x in LAMMPS
-  on 128 cores, 1.4x on an A100; nothing below o4d14). Forces within ~5e-5 eV/A (o4d20), but the energy
+  product basis in float32, everything else float64. Worth it only for large models (from 0.7.2, o4d20:
+  1.1-1.2x in LAMMPS on 128 cores, 1.2x on an A100; o4d16 at most 1.2x; nothing from o4d14 down). Forces within ~5e-5 eV/A (o4d20), but the energy
   carries ~0.1 meV of noise per 200 atoms (1 meV at o4d16), so energy line-search optimisers (L-BFGS/CG with
   Armijo or Wolfe, LAMMPS `min_style cg`) fail near a minimum: use force-only ones (ODE12r, FIRE,
   `min_style fire`). `calc.ffi["precision"]` reports it. Also on `BatchCalculator` and
@@ -400,7 +407,8 @@ structures. User page: `docs/user/howto/hamiltonians.md`; measurements: `docs/de
   (`--site-rcut`, `--site-radials`, `--bond-radials`, `--bond-rcut`, `--coupled N L`, `--env R N L NB LB` or
   `--no-env`, `--bonds N` to subsample off-site blocks). The bond-environment group gives most of the
   accuracy and most of the cost. Default `--env 5 8 4 6 4`; `5 6 4 4 4` (the default to 0.7.2) is ~1.2x faster to predict,
-  ~2x to fit, with 1.5x (gold) to 2.7x (aluminium) the band error. With many elements or nearly dependent overlaps use `--prior evidence`:
+  ~2x to fit, with 1.5x (gold) to 2.7x (aluminium) the band error. An H-only model is scored by `aj eval` with the data's S for
+  both spectra. With many elements or nearly dependent overlaps use `--prior evidence`:
   without a prior one spurious eigenvalue can appear that the block errors do not show (`loo` did not remove
   it on the four-element alloy, and costs hours and tens of GB of scratch there). `--noise-floor SIGMA`
   (data units; the SCF scatter of H, ~1e-7 to 3e-6 eV at `sc_accuracy_rho 1e-5`) bounds the evidence's noise
@@ -409,7 +417,9 @@ structures. User page: `docs/user/howto/hamiltonians.md`; measurements: `docs/de
   electronic-structure errors of `ace_jax.ham.metrics` (band RMSE at a common zero and from own Fermi levels,
   Fermi level, band energy per atom, density-of-states Wasserstein distance, outlier structures).
   `--nelectrons` (per cell, or `Z:n,...` per atom; default the atomic numbers), `--kpts`, `--width`,
-  `--smearing`, `--window LO HI`. Quote the band RMSE from own Fermi levels when comparing with
+  `--smearing`, `--window LO HI`, `--overlap-threshold X` (drop the combinations of orbitals whose S(k)
+  eigenvalue is below X before diagonalising, model and reference alike; try 1e-3 when a diffuse basis gives band
+  errors of eV from block errors of meV; scoring and `aj ham bands` only, not the calculator's energy). Quote the band RMSE from own Fermi levels when comparing with
   publications; a per-structure rigid shift of a few meV sits in the common-zero number.
 - `aj ham predict --model M --data <extxyz | DIR> --out DIR`: `hamiltonians_pred.h5`, `overlaps_pred.h5` per
   structure (DeepH layout). `aj ham bands --model M --structure S [--index i] [--path GXMG] --out bands.npz
@@ -419,6 +429,42 @@ structures. User page: `docs/user/howto/hamiltonians.md`; measurements: `docs/de
   (not a total energy: no repulsive term). `ace_jax.operators.io.save / load` is the model file
   (`meta_json` kind "operator"); `HamiltonianPredictor.from_file`.
 - float64 (`jax.config.update("jax_enable_x64", True)`; the commands set it).
+
+### Electron-density models (`aj density`; new, interface may change)
+
+Linear model of the electron density as coefficients of atom-centred auxiliary functions (the DFT code's
+density-fitting basis): each shell's coefficient vector is linear in the site features of (l, (-1)^l). Closed-form
+fit from a few structures. User page: `docs/user/howto/density.md`; measurements: `docs/dev/ham-results.md`
+(section of 2026-11-22). No extra needed (no h5py).
+
+- Data: a directory of density files (`ace_jax.ham.density.write(path, DensityData(...))`, one `.npz` per
+  structure: structure, `coefficients` (atom, then shell, then m = -l..l in ace-jax's real harmonics),
+  optional `overlap` of the auxiliary functions, `charges_<Z>` (integral of each function), electron count,
+  `info`), or DeepH directories holding `density.npz`. ace-jax reads no DFT code's files: convert outside, and
+  bring the code's m order and signs to ace-jax's first (the fit cannot detect a wrong convention; check by
+  rotating a structure).
+- `aj density fit --data DIR --out model.npz [--validation DIR] [--metric overlap|plain] [--scaled R]
+  [--prior none|NUMBER|evidence|loo|press] [--order 1] [--site-rcut 7] [--site-radials 12] [--lmax L]`.
+  `overlap` (default when every structure has the overlap) minimises the L2 density error dc^T S dc and is the
+  one to use: `plain` (per coefficient) was 6 times worse on aluminium, no better than the mean coefficients.
+  The overlap metric factorises each structure's overlap: O(n^3) time, O(n^2) memory in the number of auxiliary
+  functions of the cell, so train on small cells. Order 1 with the default ridge (`--scaled 1e-6` times the
+  Gram diagonal) is the tested setting; `--prior` replaces `--scaled`.
+- `aj density predict --model M --data <extxyz | DIR> --out DIR`: one density file per structure with the
+  coefficients corrected to the electron count; prints and records `dN`, the count error before the
+  correction: hundredths of an electron in distribution, electrons out of it. Treat a large `dN` as a
+  warning that the structure is unlike the training set.
+- `aj eval --model M --data DIR [--metrics-out F]`: density error sqrt(dc S dc) per structure (needs the
+  reference's overlap), relative error, coefficient RMSE over the labels' spread, `dN`.
+- Python: `ace_jax.ham.density`: `read`, `write`, `names`, `DensityPredictor(model).predict(atoms)` (a
+  `DensityData`; `.info["dN"]`), `conserve(c, numbers, charges, nelectrons)`, `density_metrics`, `projections`.
+  Generic layer: `ace_jax.operators.centred.CentredModel` / `CentredPredictor`,
+  `ace_jax.operators.fit.fit_centred(basis, [CentredData], metric=, overlaps=, sigma_c=, scaled=, jackknife=)`;
+  `jackknife=True` (also on `fit_onsite`, `fit_offsite`) gives the delete-one-structure jackknife in closed
+  form (`DesignStats.jack`, `centred_jackknife`). The model is the `centred` part of an operator model file
+  (`operators.io.save(path, centred=model, info=)`, `load(path).centred`).
+- Not there: forces or density derivatives, conversions between density and Hamiltonian, writing a DFT code's
+  restart files.
 
 ### JAX-MD (MD fully on the device)
 

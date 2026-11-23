@@ -1488,3 +1488,105 @@ The mismatch with H[rho_pred], in distribution: the bulk-only pair of the 32-ato
 It is the only estimate with the right size without a calibration, in distribution (0.67 to 1.27) as out (0.64 to 1.21), and the two worst cells are the two with the largest mismatch. Five cells; the 64-atom set has no density model.
 
 Reading: out of distribution any second fit (jackknife, residual, larger basis) ranks, because the error is far above the floor; in distribution a constant width is the best of the cheap ones. A width max(constant, scaled estimate) keeps both; the scale has to be calibrated on cells unlike the training set, which the 64-atom set does not have.
+
+## The electron-density model in the package (2026-11-22)
+
+`operators/centred.py`, `fit_centred`, `ham/density.py`, `aj density` (spec `docs/dev/specs/2026-11-22-density-model-design.md`). The density is coefficients of the DFT code's atom-centred auxiliary functions; the coefficient vector of each shell of angular momentum l is linear in the site features of (l, (-1)^l). Acceptance on the aluminium data of the prototype (FHI-aims, 32-atom cells, 110 auxiliary functions per atom, l up to 4: 3,520 per cell; training: six bulk cells, s000 to s003, s007, s008; test: bulk s035 to s039; out of distribution: eight "harsh" cells, two each of strong rattle, slab, strain and vacancy). The converter from the code's files and the scripts are outside the repository (`ace-jax-ham-ref/density/`: `convert.py`, `convention.py`, `accept.py`); logs in `ham-ref/work/density/out/`. Density error: sqrt(dc^T S dc) per cell, S the overlap of the auxiliary functions; after the electron-count correction unless said.
+
+### Conventions: agreement with the prototype
+
+Overlap metric, the prototype's prior (1e-6 times the Gram diagonal on the feature columns, 1e-14 of its largest entry on all), the same six cells, order 1 (12 radials, rcut 7, 394 parameters). Predicted coefficients before the count correction against `pred_o1/n6_r1e-06/s03*/ri_restart_coeffs.raw`, |dc|_S / |c|_S:
+
+| | s035 | s036 | s037 | s039 |
+|---|---|---|---|---|
+| the prototype's site basis | 3.9e-13 | 1.1e-12 | 1.3e-12 | 3.0e-13 |
+| the command's basis (l up to 4 only, natural parity, radial table) | 3.9e-13 | 1.1e-12 | 1.3e-12 | 3.0e-13 |
+
+- The acceptance bound was 1e-6: m order, constant columns, whitening and the file layout are the prototype's. The prototype has no prediction for s038.
+- Density errors of the four cells 0.013472, 0.022715, 0.023612, 0.010733: the prototype's `err.txt` to the last digit.
+- The coefficient file of the code is already in the package's layout (atom, l ascending, radial function, m = -l..l in ace-jax's real harmonics): the converter reorders nothing.
+- `aj density fit` with its defaults gives the same model (ridge 1e-10 in place of 1e-14 of the largest Gram entry: no difference at five digits).
+
+### Metric, prior, order (test cells s035 to s039)
+
+Density error per cell: mean of the five (range), largest |dN| before the correction, fit time on 32 threads (moriarty). "scaled r": prior precision r diag(G) on the feature columns.
+
+| order (parameters) | metric | prior | mean (range) | largest \|dN\| / e | fit / s |
+|---|---|---|---|---|---|
+| 1 (394) | plain | none | 0.1050 (0.060 to 0.182) | 2.34 | 1.7 |
+| 1 | plain | scaled 1e-6 | 0.1048 (0.068 to 0.179) | 2.44 | 0.1 |
+| 1 | plain | evidence | 0.1125 (0.070 to 0.185) | 1.99 | 0.9 |
+| 1 | plain | press | 0.1028 (0.068 to 0.173) | 1.69 | 0.5 |
+| 1 | overlap | none | 0.0166 (0.0106 to 0.0236) | 0.110 | 2.3 |
+| 1 | overlap | scaled 1e-8 | 0.0165 (0.0106 to 0.0231) | 0.065 | 1.9 |
+| 1 | overlap | **scaled 1e-6** | 0.0169 (0.0107 to 0.0236) | 0.115 | 1.9 |
+| 1 | overlap | scaled 1e-4 | 0.0201 (0.0123 to 0.0288) | 0.035 | 1.9 |
+| 1 | overlap | evidence | 0.0166 (0.0107 to 0.0233) | 0.095 | 2.0 |
+| 1 | overlap | press | 0.0166 (0.0107 to 0.0233) | 0.096 | 3.0 |
+| 1 | overlap | loo | 0.0166 (0.0107 to 0.0233) | 0.089 | 2.8 |
+| 2 (2,784) | plain | none | 0.157 (0.052 to 0.302) | 3.91 | 2.1 |
+| 2 | plain | scaled 1e-4 | 0.117 (0.062 to 0.204) | 2.94 | 0.1 |
+| 2 | overlap | none | 0.0249 (0.0097 to 0.0542) | 1.72 | 11 |
+| 2 | overlap | scaled 1e-6 | 0.0179 (0.0094 to 0.0298) | 0.61 | 11 |
+| 2 | overlap | evidence | 0.0180 (0.0098 to 0.0288) | 0.14 | 15 |
+| 2 | overlap | press | 0.0190 (0.0105 to 0.0301) | 0.17 | 162 |
+| 2 | overlap | loo | 0.0191 (0.0098 to 0.0345) | 0.15 | 160 |
+
+- Mean-coefficient baseline: 0.091 to 0.169. The plain metric is at the baseline whatever the prior; the overlap metric is 6 times better. The prototype's finding holds.
+- With the overlap metric the coefficients themselves stay at 0.9 to 1.0 of the labels' spread for l <= 2 (`rmse_l`; 0.65 and 0.31 for l = 3 and 4), while the projections w = S c are at 0.004 to 0.03 of theirs: the auxiliary basis is nearly dependent, the density is well determined and the coefficients are not. A per-coefficient error says little about a density model.
+- Order 1, six cells: the prior does not matter between none and 1e-6 (21,120 rows for 394 parameters). Order 2 needs one, and at six cells is no better than order 1.
+- Order 2 site basis: (12, 5) radials and l up to (4, 3). Its features of the other parity are not built (`natural_parity`): 9 symmetries become 5; the evaluation time barely changes (1.43 to 1.38 ms for 32 atoms), because the one-particle basis and its products are shared.
+
+### The default prior: out of distribution decides
+
+The same bulk-trained models on the harsh cells (density error; hot, slab, strain, vacancy: mean of the two cells of a kind):
+
+| order | prior | hot | slab | strain | vacancy |
+|---|---|---|---|---|---|
+| 1 | none | 0.048 | 0.283 | 0.164 | 0.035 |
+| 1 | **scaled 1e-6** | 0.045 | 0.222 | 0.172 | 0.037 |
+| 1 | evidence | 0.045 | 0.268 | 0.273 | 0.049 |
+| 1 | press | 0.045 | 0.252 | 0.256 | 0.047 |
+| 2 | none | 0.167 | 6.41 | 2.93 | 0.234 |
+| 2 | scaled 1e-6 | 0.069 | 0.399 | 0.218 | 0.043 |
+| 2 | evidence | 0.067 | 1.19 | 0.580 | 0.080 |
+| 2 | press | 0.068 | 0.932 | 0.167 | 0.045 |
+
+- In distribution the selected priors and the scaled ridge tie; out of distribution the scaled ridge is the best or near it at order 1 and by far the most even at order 2, and it costs nothing. The command's default is therefore `--scaled 1e-6` with `--prior none`, order 1: the prototype's model. Its test errors are the prototype's (0.0135, 0.0227, 0.0236, 0.0142, 0.0107).
+- |dN| before the correction, default model: 0.004 to 0.115 e on the bulk test cells; hot 0.31 and 0.56, vacancy 1.3 and 1.5, strain 10.4, slab 12.2. It separates the two sets completely.
+
+### Cost against cell size
+
+The overlap metric needs a root of each training cell's overlap. Two synthetic cells of rattled fcc aluminium with random positive definite overlaps, default model, 16 threads of dedicated123 (56 cores, shared with other jobs):
+
+| atoms | auxiliary functions | overlap / GB | root of one overlap / s | fit, per cell / s | peak memory / GB |
+|---|---|---|---|---|---|
+| 32 | 3,520 | 0.09 | 0.4 | 2.1 | 0.69 |
+| 64 | 7,040 | 0.37 | 1.2 | 3.0 | 1.03 |
+| 108 | 11,880 | 1.05 | 4.2 | 6.7 | 1.86 |
+| 256 | 28,160 | 5.91 | 40 | 48 | 7.31 |
+
+- The root is taken in the overlap's own memory when the caller hands the overlap over (a function that returns it): peak memory is one overlap plus 0.6 to 1.4 GB. The rows W P are assembled a shell at a time in chunks of 4,096 rows; P is never formed.
+- Cubic time: 256 atoms cost 48 s a cell; 1,000 atoms would need 97 GB for one overlap and of the order of an hour for its root. Training cells of a few hundred atoms are the limit of this loss.
+- Prediction: 0.14 s per 32-atom cell on a CPU (`aj density predict`, with the neighbour list and the file).
+
+### The jackknife against the true density error
+
+`fit_centred(..., jackknife=True)`: the six models with one training cell left out, in closed form at the prior of the fit (`centred_jackknife`). Estimate for a structure: sqrt((G - 1) / G sum_g dc_g^T S dc_g), dc_g the change of its predicted coefficients; against the true error before the count correction, 5 bulk test cells and 8 harsh cells.
+
+| model | Spearman, all 13 | harsh 8 | bulk 5 | true / jackknife: median (range) | Spearman of \|dN\| with the error, all 13 |
+|---|---|---|---|---|---|
+| overlap, scaled 1e-6 (default) | 0.99 | 0.98 | 0.90 | 3.8 (2.4 to 5.0) | 0.95 |
+| overlap, press | 0.97 | 0.88 | 0.90 | 2.7 (1.0 to 5.2) | 0.95 |
+| plain, scaled 1e-6 | 0.95 | 0.83 | 0.70 | 2.9 (2.0 to 8.5) | 0.92 |
+
+- Default model, per cell (true, jackknife): bulk 0.011 to 0.024 against 0.0024 to 0.0082; hot 0.046, 0.019; vacancy 0.039, 0.015; strain 0.17 to 0.20, 0.04; slab 0.23, 0.06.
+- The jackknife ranks the density error almost perfectly, in and out of distribution, and is too small by a nearly constant factor: 2.4 to 5.0, median 3.8. It is a variance estimate from six structures and has no bias term (394 parameters cannot hold the density); one scale factor would calibrate it.
+- |dN| ranks nearly as well over the two sets together (0.95) and worse inside the harsh set (0.79): it is free, the jackknife costs six more predictions.
+- With the prior chosen by "press" the estimate on slab and strain cells is at scale (ratio 1.0 to 1.2) while the bulk cells stay at 3 to 5: the selected prior is weaker (the errors there are larger), so the spread between the delete-one models is larger out of distribution. Not a calibration to rely on.
+
+### Notes
+
+- Data: 12 converged bulk records and 8 harsh ones with overlaps where the runs wrote them (bulk s024 has none), charges from the measured integrals (`q_exact.npy`), 416 electrons per 32 atoms (all-electron). 29 density-in / H-out pairs (16 `harsh_hrho`, 8 `harsh_hrho_mix`, 5 `bulk_hrho`; the spec counted 26) are written with `self_consistent` false and the path of their H. `fit_metric` is recorded "unknown".
+- The files with overlaps (1.8 GB) are not kept on storage: the storage quota was exhausted during the runs. `convert.py all` remakes them in a minute.
+- Not done here: the one-shot total energies from the predicted files (they need the DFT code); a model trained on bulk and harsh cells together; a GPU timing.

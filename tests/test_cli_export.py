@@ -39,7 +39,7 @@ def test_export_yace_converts_an_ace_model(tmp_path, capsys):
 
 
 @pytest.mark.parametrize("args,msg", [
-    (["--out", "m.txt"], "--format yace|lammps"),
+    (["--out", "m.txt"], "--format yace|lammps|symmetrix"),
     (["--out", "m.json"], "needs --structure"),
     (["--out", "m.yace", "--structure", "s.xyz"], "needs none"),
     (["--out", "m.json", "--structure", "s.xyz", "--procs", "2,2"], "three integers"),
@@ -166,3 +166,54 @@ def test_export_lammps_cpu_default_takes_the_kernel(tmp_path, monkeypatch, capsy
     out = capsys.readouterr().out
     assert "compiled the kernel here" in out and "LAMMPS_JAX_FFI_HANDLERS=" in out
     assert (tmp_path / "cache").exists()
+
+
+def _fake_symmetrix(monkeypatch, fn):
+    """A stand-in for Symmetrix's converter module (the real one needs the compiled Symmetrix package)."""
+    import sys
+    import types
+    pkg, mod = types.ModuleType("symmetrix"), types.ModuleType("symmetrix.extract_ace_data")
+    mod.extract_acejax_data = fn
+    pkg.extract_ace_data = mod
+    monkeypatch.setitem(sys.modules, "symmetrix", pkg)
+    monkeypatch.setitem(sys.modules, "symmetrix.extract_ace_data", mod)
+
+
+def test_export_symmetrix_calls_symmetrixs_converter(tmp_path, capsys, monkeypatch):
+    """`--format symmetrix` writes what Symmetrix's own converter returns for the model file, and prints the
+    LAMMPS lines; ace-jax holds no copy of the format."""
+    import json
+    seen = {}
+
+    def convert(npz, **kw):
+        seen.update(npz=npz, **kw)
+        return {"model_type": "ACE", "elements": ["Si"], "lmax": 3,
+                "species": [{"monomials": [[0], [0, 1]], "coupled": {"num_x": 1}}], "spline_error": None}
+
+    _fake_symmetrix(monkeypatch, convert)
+    out = tmp_path / "sub" / "m.json"
+    main(["export", "--model", str(MODEL), "--out", str(out), "--format", "symmetrix"])
+    assert seen == {"npz": str(MODEL), "coupled": True, "coupled_options": None}
+    assert json.loads(out.read_text())["model_type"] == "ACE"
+    text = capsys.readouterr().out
+    assert "2 products" in text and "pair_style symmetrix/ace" in text and f"pair_coeff * * {out} Si" in text
+
+
+def test_export_symmetrix_errors(tmp_path, capsys, monkeypatch):
+    import sys
+    args = ["export", "--model", str(MODEL), "--out", str(tmp_path / "m.json"), "--format", "symmetrix"]
+    monkeypatch.setitem(sys.modules, "symmetrix", None)                # not installed
+    with pytest.raises(SystemExit) as e:
+        main(args)
+    assert e.value.code == 2 and "needs Symmetrix with its ACE converter" in capsys.readouterr().err
+
+    def refuse(npz, **kw):
+        raise ValueError("only single-element ace-jax models are supported")
+
+    _fake_symmetrix(monkeypatch, refuse)
+    with pytest.raises(SystemExit) as e:
+        main(args)
+    assert e.value.code == 2 and "single-element" in capsys.readouterr().err and not (tmp_path / "m.json").exists()
+    with pytest.raises(SystemExit) as e:
+        main([*args, "--structure", str(tmp_path / "s.xyz")])
+    assert e.value.code == 2 and "needs none" in capsys.readouterr().err

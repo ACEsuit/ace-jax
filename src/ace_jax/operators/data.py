@@ -27,6 +27,22 @@ class OperatorData(NamedTuple):
         return self.positions[j] + np.array([Rx, Ry, Rz]) @ self.cell - self.positions[i]
 
 
+class CentredData(NamedTuple):
+    """One structure with atom-centred coefficients (`operators.centred`): what `fit_centred` reads.
+
+    cell, positions, numbers as `OperatorData`; basis: the `OrbitalBasis` of the auxiliary
+    functions; coefficients: {channel: (n_total,)}, the atoms in order, within an atom its shells
+    in the basis' order, within a shell m = -l..l (`centred.offsets`): the layout of one atom's
+    rows in an `OperatorData` block.  pbc: as ASE's."""
+
+    cell: np.ndarray
+    positions: np.ndarray
+    numbers: np.ndarray
+    basis: OrbitalBasis
+    coefficients: dict
+    pbc: object = True
+
+
 class LazyData:
     """`n` structures read when asked for: `read(i)` gives the `OperatorData` of structure i.
 

@@ -346,6 +346,11 @@ def _is_operator(path):
     return "meta_json" in z.files and json.loads(bytes(z["meta_json"]).decode()).get("kind") == "operator"
 
 
+def _is_density(path):
+    """An operator model file with a centred part (`operators.centred`: an electron-density model)."""
+    return json.loads(bytes(np.load(path)["meta_json"]).decode()).get("centred") is not None
+
+
 def _eval_operator(a):
     """`aj eval` of a Hamiltonian model file, through `HamiltonianCalculator`.
 
@@ -409,8 +414,13 @@ def cmd_eval(a):
     bucket); with one, config by config through its calculator.  A linear model is evaluated
     exactly (lean, never splined: spline_tol=None).
 
-    An operator model (`operators.io`, a Hamiltonian): `_eval_operator`."""
+    An operator model (`operators.io`, a Hamiltonian): `_eval_operator`; one with a centred part
+    (an electron-density model): the density errors against --data's density files
+    (`ham.cli.density_score`; --metrics-out writes the per-structure records as JSON)."""
     if _is_operator(a.model):
+        if _is_density(a.model):                          # a density model: `ham.cli.density_score` on --data's density files
+            from .ham import cli as hc
+            return hc.cmd_density_eval(a)
         return _eval_operator(a)
     from ase import Atoms
     from ase.stress import voigt_6_to_full_3x3_stress
@@ -661,8 +671,28 @@ def _int_list(s):
 _EXPORT_FORMATS = {".yace": "yace", ".json": "lammps"}
 
 
+def _export_symmetrix(a, out):
+    """`aj export --format symmetrix`: the model file through Symmetrix's own converter."""
+    if a.structure or a.delta is not None or a.aa_dag != "auto":
+        raise UsageError("--structure, --delta and --aa-dag are for the other formats; a Symmetrix model needs none")
+    from .export.symmetrix import SymmetrixUnavailable, export_symmetrix
+    if out.parent and str(out.parent) != ".":
+        out.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        info = export_symmetrix(a.model, out)
+    except SymmetrixUnavailable as e:
+        raise UsageError(str(e)) from None
+    except (ValueError, KeyError) as e:           # the converter's refusals; a KeyError is an array it needs
+        raise UsageError(f"Symmetrix cannot convert {a.model}: {e}") from None
+    print(f"symmetrix: elements {' '.join(info['elements'])}, lmax {info['lmax']}, "
+          f"{sum(info['monomials'])} products{'' if all(info['coupled']) else ', no coupled form'} -> {out}")
+    print(f"LAMMPS: pair_style symmetrix/ace; pair_coeff * * {out} {' '.join(info['elements'])}")
+    return info
+
+
 def cmd_export(a):
-    """`aj export`: a model as an ML-PACE .yace (`write_yace`) or a lammps-jax bundle (`export_lammps`)."""
+    """`aj export`: a model as an ML-PACE .yace (`write_yace`), a lammps-jax bundle (`export_lammps`) or a
+    Symmetrix JSON model (`export_symmetrix`, the conversion by the installed Symmetrix)."""
     if a.print_env is not None:
         return _export_print_env(a)
     if not a.model or not a.out:
@@ -672,9 +702,11 @@ def cmd_export(a):
     out = pathlib.Path(a.out).expanduser()
     fmt = a.format or _EXPORT_FORMATS.get(out.suffix)
     if fmt is None:
-        raise UsageError(f"{a.out}: give --format yace|lammps, or an --out ending in .yace or .json")
+        raise UsageError(f"{a.out}: give --format yace|lammps|symmetrix, or an --out ending in .yace or .json")
     if fmt == "yace" and a.aa_dag != "auto":
         raise UsageError("--aa-dag sets a lammps-jax bundle's product basis; a .yace needs none")
+    if fmt == "symmetrix":
+        return _export_symmetrix(a, out)
     model, meta, extra = load(a.model)
     aa_dag = None if a.aa_dag == "chain" else a.aa_dag
     if out.parent and str(out.parent) != ".":
@@ -973,6 +1005,9 @@ def _parser():
     hm.add_argument("--smearing", choices=["fermi-dirac", "gaussian"], default="fermi-dirac")
     hm.add_argument("--window", type=float, nargs=2, default=[-12.0, 5.0],
                     help="eigenvalues scored: from LO to HI of the reference Fermi level (default -12 5)")
+    hm.add_argument("--overlap-threshold", type=float, default=0.0, metavar="X",
+                    help="drop the combinations of orbitals whose overlap eigenvalue at a k-point is below X before diagonalising "
+                         "(default 0: none); 1e-3 for a diffuse basis whose predicted bands are far off although the blocks are close")
     hm.add_argument("--metrics-out", default=None, help="JSON file for the electronic-structure metrics of every reference structure")
     hm.add_argument("--blocks-out", default=None, help="directory for the predicted H and S blocks of each structure (DeepH layout)")
     hm.add_argument("--threads", type=int, default=1, help="threads of the off-site evaluation on a CPU (default 1)")
@@ -989,13 +1024,15 @@ def _parser():
     mode.add_argument("--append", action="store_true", help="pool U with the stored T_val scores in every group")
     mode.add_argument("--replace", action="store_true", help="use U only in every group")
     cal.add_argument("--out", required=True)
-    exp = sub.add_parser("export", help="write a model for LAMMPS: an ML-PACE .yace (pair_style pace) or a "
-                                        "lammps-jax bundle (.json, pair_style jax)")
+    exp = sub.add_parser("export", help="write a model for LAMMPS: an ML-PACE .yace (pair_style pace), a "
+                                        "lammps-jax bundle (.json, pair_style jax) or a Symmetrix model "
+                                        "(--format symmetrix, pair_style symmetrix/ace)")
     exp.add_argument("--model", default=None, help="a model .npz (linear ACE) or .yace (required)")
     exp.add_argument("--out", default=None, help="the file to write: .yace or .json (else give --format; required)")
-    exp.add_argument("--format", choices=["yace", "lammps"], default=None,
-                     help="yace: ML-PACE C-tilde (exact, tabulated radials); lammps: a lammps-jax bundle "
-                          "(default: from the --out extension)")
+    exp.add_argument("--format", choices=["yace", "lammps", "symmetrix"], default=None,
+                     help="yace: ML-PACE C-tilde (exact, tabulated radials); lammps: a lammps-jax bundle; "
+                          "symmetrix: a Symmetrix JSON model, converted by the installed Symmetrix "
+                          "(default: from the --out extension, .json being a lammps-jax bundle)")
     exp.add_argument("--delta", type=float, default=None,
                      help="yace: radial table spacing and ML-PACE deltaSplineBins in Å (default 0.001; "
                           "the cutoff must be a whole number of it)")
@@ -1051,6 +1088,7 @@ def _parser():
                           "ACEJAX_FFI_GPU_FLAGS)")
     from .ham import cli as ham_cli
     ham_cli.add_parser(sub)
+    ham_cli.density_add_parser(sub)
     con = sub.add_parser("basis", help="author a new ACE basis: a frozen model (seeded radial init) saved as .npz")
     add_basis_args(con, fit=False)
     con.add_argument("--out", required=True)
@@ -1146,7 +1184,7 @@ def main(argv=None):
     a = _parse(argv)
     try:
         {"eval": cmd_eval, "basis": cmd_basis, "calibrate": cmd_calibrate, "export": cmd_export,
-         "native": cmd_native, "ham": ham_cli.run}.get(a.cmd, run)(a)
+         "native": cmd_native, "ham": ham_cli.run, "density": ham_cli.density_run}.get(a.cmd, run)(a)
     except (BasisUnavailable, UsageError, ham_cli.UsageError) as e:       # a user-facing condition, not a crash
         print(f"aj {a.cmd}: error: {e}", file=sys.stderr)
         raise SystemExit(2) from None

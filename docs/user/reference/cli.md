@@ -110,3 +110,18 @@ a Hamiltonian model on reference structures.
 ### aj ham bands
 
 <!-- aj-help ham bands -->
+
+## aj density
+
+Fits an electron-density model to the density coefficients of DFT structures,
+and predicts the coefficients of new structures. See
+[Electron-density models](../howto/density.md). `aj eval` gives the errors of
+an electron-density model on reference structures.
+
+### aj density fit
+
+<!-- aj-help density fit -->
+
+### aj density predict
+
+<!-- aj-help density predict -->

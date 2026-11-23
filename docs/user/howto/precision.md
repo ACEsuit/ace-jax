@@ -127,10 +127,14 @@ uses most of the time:
 
 | model (silicon, linear ACE) | CPU, LAMMPS, 128 cores | A100, ASE calculator |
 |---|---|---|
-| o4d20 (5,476 basis functions) | 1.4 times | 1.4 times |
-| o4d16 | 1.1 times | 1.1 to 1.2 times |
-| o4d14 | 1.1 times | no gain |
-| o4d12 and order 3 | no gain | no gain |
+| o4d20 (5,476 basis functions) | 1.1 to 1.2 times | 1.2 times |
+| o4d16 | 1.0 to 1.2 times | 1.1 times |
+| o4d14 and smaller models | no gain | no gain |
+
+The gain is smaller than in versions before 0.7.2 (1.4 times for o4d20).
+From version 0.7.2, the kernels calculate the product basis of these models
+much faster in float64, so it uses a smaller part of the time. For o4d16 on
+the CPU, the gain is at 32,768 atoms; at 4,096 atoms there is no gain.
 
 The errors are those of float32 for the product basis. For the silicon model
 o4d20, the maximum force error is approximately 0.05 meV/Å, and the energy has

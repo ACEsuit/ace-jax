@@ -5,16 +5,51 @@ from typing import NamedTuple
 import numpy as np
 
 
+class Radials(dict):
+    """`OrbitalBasis.radials`: a dictionary {z: (grid, values)}.  A type of its own so that the
+    tables are one opaque leaf wherever a basis is a static field of a model, not arrays of it."""
+
+
 class OrbitalBasis(NamedTuple):
     """shells: ((z, (l, l, ...)), ...) sorted by atomic number z; a shell of
     angular momentum l holds 2l+1 orbitals in the order m = -l..l of
-    `eval/harmonics.py`."""
+    `eval/harmonics.py`.
+
+    radials (optional): {z: (grid (n_r,), values (n_shells, n_r))}, the radial function of every
+    shell of species z tabulated on a radial grid: function (s, m) of an atom at the origin is
+    values[s](|r|) Y_{l m}(r / |r|), Y the real spherical harmonic of `eval/harmonics.py` (unit
+    L2 norm on the sphere).  values is the radial function itself, u(r) / r, not u(r); the grid is
+    increasing, in the length unit of the positions, and values are in the normalisation the
+    data's coefficients or matrix elements refer to (an orbital has int values^2 r^2 dr = 1; an
+    auxiliary function is whatever the code that made the data uses, and its charge is
+    sqrt(4 pi) int values r^2 dr for l = 0).  Nothing here evaluates them: they are carried
+    with the basis for integrals between the functions.
+
+    Two bases are equal, and hash equal, when their shells are: models and data compare bases by
+    their shells, with or without tables."""
 
     shells: tuple
+    radials: dict = None
 
     @classmethod
-    def of(cls, shells):
-        return cls(tuple((int(z), tuple(int(l) for l in ls)) for z, ls in sorted(dict(shells).items())))
+    def of(cls, shells, radials=None):
+        sh = tuple((int(z), tuple(int(l) for l in ls)) for z, ls in sorted(dict(shells).items()))
+        if radials is None:
+            return cls(sh)
+        rad = {int(z): (np.asarray(g, np.float64), np.atleast_2d(np.asarray(v, np.float64))) for z, (g, v) in sorted(dict(radials).items())}
+        for z, ls in sh:
+            if z not in rad or rad[z][1].shape != (len(ls), len(rad[z][0])):
+                raise ValueError(f"radials of Z = {z}: need a grid (n_r,) and values ({len(ls)}, n_r), one row per shell")
+        return cls(sh, Radials((z, rad[z]) for z, _ in sh))
+
+    def __eq__(self, other):
+        return isinstance(other, OrbitalBasis) and self.shells == other.shells
+
+    def __ne__(self, other):
+        return not self == other
+
+    def __hash__(self):
+        return hash(self.shells)
 
     def ls(self, z):
         for zz, ls in self.shells:

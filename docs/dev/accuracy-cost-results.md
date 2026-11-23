@@ -956,3 +956,157 @@ GRACE-2L does not fit at 128 ranks (each rank holds the model). The float32 MACE
 PyTorch reference is its CPU copy (`timing.cases`; the first run, job 2290209, failed that gate at loading).
 
 Not done: a float64 GRACE timing (the native `grace/2l/kk` style on the foundation `kokkos.npz`).
+
+## Coupled product basis and analytic radial: the kernel lines retimed (2026-11-20)
+
+Branch `perf/symmetrix-ace` at dcd094f (spec `specs/2026-11-19-coupled-product-basis.md`): the kernels take the
+coupled form where `ffi.choose_form` picks it (o4d12 to o4d20 on this ladder) and, on the GPU, the analytic radial.
+The GPU bundles are exported with unsplined analytic radials, so the kernel has an `ffi.analytic_plan`; the gate then
+compares it with the exact JAX model (`parity._tol_kw`), forces within 2e-11 eV/Å. Rows carry `ffi_form`/`ffi_radial`.
+
+A100-PCIE-40GB (gpu002, jobs 2295567 order 4, 2295568 order 3; `runs/symmetrix-ace/sulis/ladder-gpu.sbatch`), LAMMPS,
+32,768 Si, µs/atom-step, float64 / float32, this kernel then main 7ad4803 in the same job:
+
+| size | new | main | ratio |
+|---|---|---|---|
+| o4d20 | 0.245 / 0.149 | 0.746 / 0.448 | 3.05 / 3.00 |
+| o4d16 | 0.106 / 0.075 | 0.191 / 0.133 | 1.81 / 1.77 |
+| o4d14 | 0.078 / 0.058 | 0.115 / 0.085 | 1.48 / 1.47 |
+| o4d12 | 0.056 / 0.042 | 0.068 / 0.054 | 1.21 / 1.29 |
+| o3d12 | 0.053 / 0.043 | 0.059 / 0.045 | 1.12 / 1.03 |
+| o3d10 | 0.045 / 0.033 | 0.045 / 0.039 | 1.00 / 1.18 |
+| o3d8 | 0.039 / 0.032 | 0.043 / 0.043 | 1.12 / 1.33 |
+
+Rows: `sulis-gpu-cudak.jsonl` (replaced: the plotted kernel lines), main's same-job rows
+`sulis-gpu-cudak-main-2295567.jsonl` (not plotted; they repeat the earlier gpu020 rows within 0.5%).
+
+Retime at 81536af with main 0.7.1 merged (the analytic A pass whose lanes share a row's A values, and no batch sort
+for one species): job 2296065 on gpu005, the whole ladder, no control in the job. These rows are now
+`sulis-gpu-cudak.jsonl` and the plotted lines; the table above stays as the same-job comparison with main.
+
+| size | dcd094f (gpu002) | 81536af (gpu005) |
+|---|---|---|
+| o4d20 | 0.245 / 0.149 | 0.245 / 0.145 |
+| o4d16 | 0.106 / 0.075 | 0.109 / 0.070 |
+| o4d14 | 0.078 / 0.058 | 0.080 / 0.053 |
+| o4d12 | 0.056 / 0.042 | 0.055 / 0.043 |
+| o3d12 | 0.053 / 0.043 | 0.052 / 0.041 |
+| o3d10 | 0.045 / 0.033 | 0.043 / 0.034 |
+| o3d8 | 0.039 / 0.032 | 0.036 / 0.028 |
+
+Only o3d8 moves clearly (8% in float64, 15% in float32) and float32 o4d14 to o4d20 by 3 to 8%. Float64 o4d14 and
+o4d16 are 3% slower than the gpu002 rows, so the two A passes were timed against each other on one GPU (gpu028, job
+2296138, `pair-gpu.sbatch`: the default, then `ACEJAX_FFI_GPU_FLAGS="-O3 -arch=sm_80 -DACEJAX_AN_DENSITY=0"`, the
+table A pass; float64, alternating, two repeats; µs/atom-step):
+
+| size | analytic A pass | table A pass | gain |
+|---|---|---|---|
+| o4d16 | 0.1094, 0.1094 | 0.1113, 0.1117 | 1.9% |
+| o4d14 | 0.0799, 0.0791 | 0.0826, 0.0836 | 4.3% |
+| o4d12 | 0.0540, 0.0516 | 0.0538, 0.0551 | 3.0% |
+| o3d8 | 0.0361, 0.0378 | 0.0380, 0.0385 | 3.4% |
+
+The analytic pass is faster at each size, so `kAnDensity` stays at 200. gpu028 repeats gpu005 (o4d16 0.109): the 3% is
+the difference between gpu002 and those nodes, not the pass. The gain in the step is 2 to 4%, less than the pass's own
+22% on a Modal A100 (774 to 607 µs at o4d16) gives by its share of the step (5%).
+
+CPU, 128 x 1, 4,096 Si (node008, job 2295569, `ladder-cpu.sbatch`: new float64, new mixed, main float64, main mixed,
+then the two new ones again). The timed loops are 0.1 to 0.3 s, and repeats on this node differ by up to 45%
+(o4d16 float64 0.262 then 0.181; o4d14 mixed 0.149 then 0.231; o3d10 float64 0.181 then 0.178 against main's 0.148),
+so only o4d20 (0.396 and 0.495 against main's 1.531; mixed 0.296 and 0.354 against 1.092) is resolved well. The row
+files hold the second repeat. They are added beside the earlier rows (`sulis-cpu-128x1-ffi-coupled{,-mixed}.jsonl`;
+`make_cost` takes the fastest gated row for each size, so o3d10 and mixed o4d14 keep the earlier rows); main's
+same-node rows are `sulis-cpu-128x1-ffi-main-2295569{,-mixed}.jsonl` (excluded by the `ffi-main` pattern). The order-3
+CPU path did not change. Mixed o3d8 fails the gate on both kernels (max dF 1.3e-4 eV/Å), as before.
+
+At the target (o4d20): A100 0.24 (float32 0.15), CPU 0.49 (mixed 0.35); MACE c16L0 in Symmetrix 0.3.0 is 0.65 and
+0.59. Against patched ML-PACE on the A100 4.6-9.9x (o4d12 to o4d20), against the XLA program 7.0-12.8x; CPU against
+XLA 18-102x.
+
+## Cantor and mixed precision after 0.7.2 (2026-11-21)
+
+The two tables of the user pages that the retime above left: ace-jax 0.7.2's kernels (tree 81536af with main merged,
+the released kernels), Sulis, job scripts `runs/symmetrix-ace/sulis/tables-{gpu,cpu}.sbatch`.
+
+**Cantor kernel row** (`accuracy_cost.multicomponent --codes acejax-ace`, LAMMPS, float64; the other codes' rows are
+not rerun): A100 (gpu013, job 2296551, 32,768 atoms) 0.149 µs/atom-step, was 0.150; CPU 128 x 1 (node094, job
+2296552, 8,192 atoms) 0.382 and 0.390, was 0.376. No change. Both kernels take the coupled form for this model; the
+CUDA kernel keeps the radial table (the model file is an ACEpotentials export with splined radials, so it has no `ffi.analytic_plan`). Rows:
+`sulis-gpu-cantor-kernel.jsonl`, `sulis-cpu-128x1-cantor-kernel.jsonl` (the first CPU repeat).
+
+**Mixed precision, A100** (`ACECalculator`, 32,768 Si atoms, the three precisions in one process in turn, 5 x 8
+calls, the fastest; `tp.py`; job 2296551), µs/atom, and max |dF| against float64 (eV/Å):
+
+| model | float64 | mixed | float32 | float64 / mixed | max dF mixed, float32 |
+|---|---|---|---|---|---|
+| o4d20 | 0.312 | 0.262 | 0.205 | 1.19 | 4.0e-5, 5.9e-5 |
+| o4d16 | 0.183 | 0.173 | 0.136 | 1.06 | 1.6e-4, 2.0e-4 |
+| o4d14 | 0.157 | 0.152 | 0.120 | 1.03 | 5.9e-4, 5.9e-4 |
+| o4d12 | 0.136 | 0.135 | 0.106 | 1.01 | 2.9e-4, 1.0e-3 |
+| o3d12 | 0.139 | 0.137 | 0.108 | 1.01 | 2.9e-4, 1.7e-3 |
+
+(0.98 / 0.71 / 0.65 at o4d20 with the DAG, on a Modal A100: 1.38.)
+
+**Mixed precision, CPU** (LAMMPS, 128 x 1, node094, job 2296552; float64 then mixed, three times at 4,096 atoms,
+then once at 32,768; µs/atom-step, float64 / mixed):
+
+| model | 4,096 atoms, three repeats | ratios | 32,768 atoms | ratio |
+|---|---|---|---|---|
+| o4d20 | 0.446 / 0.318, 0.360 / 0.326, 0.342 / 0.297 | 1.40, 1.11, 1.15 | 0.297 / 0.255 | 1.16 |
+| o4d16 | 0.267 / 0.272, 0.186 / 0.178, 0.187 / 0.183 | 0.98, 1.04, 1.02 | 0.148 / 0.127 | 1.16 |
+| o4d14 | 0.149 / 0.152, 0.150 / 0.150, 0.230 / 0.155 | 0.98, 1.00, 1.48 | 0.108 / 0.117 | 0.92 |
+| o4d12 | 0.135 / 0.125, 0.201 / 0.223, 0.119 / 0.125 | 1.08, 0.90, 0.96 | 0.083 / 0.082 | 1.00 |
+| o3d12 | 0.123 / 0.123, 0.123 / 0.126, 0.123 / 0.127 | 1.00, 0.97, 0.97 | 0.087 / 0.087 | 1.00 |
+
+Single runs on this node still differ by up to 50% (o4d14's third float64, o4d12's second pair), and the 32,768-atom
+column is one run each, so the o4d16 and o4d14 entries there are within the scatter of each other. The user table
+says: o4d20 1.1 to 1.2 times (CPU) and 1.2 (A100); o4d16 1.0 to 1.2 and 1.1; o4d14 and smaller no gain. With the
+DAG it was 1.39 at o4d20 and 1.10 at o4d16 and o4d14 (job 2283977). The rows are not added to the plotted files.
+
+## The Cantor linear ACE rows on a model with polynomial radials (2026-11-22)
+
+`ace_Cantor_medium.npz` is an ACEpotentials export: its radials are splines, so the CUDA kernel has no
+`ffi.analytic_plan` and keeps the radial table. `bench/scaling/models.py ace-poly` builds the model of the same
+(order 2, degree 7, rcut 5 Å) with `basis.build_basis`: 447 functions per element as before, polynomial radials,
+random weights N(0, 0.02), seed 0 (`ace_Cantor_medium_poly.npz`, sha256 914aae4a868d1e2e).
+`accuracy_cost.multicomponent` now times that file for `acejax-ace`; the scaling suite keeps the export, which its
+ACEpotentials lines rebuild in Julia. LAMMPS, float64, µs/atom-step, the kernels of 0.7.2 (tree 81536af + main):
+
+| run | job, node | splined export | polynomial model |
+|---|---|---|---|
+| CUDA kernel, 32,768 atoms | 2296663, gpu013 | 0.148, 0.148 (table) | 0.062, 0.064 (analytic); 0.152, 0.150 (`ACEJAX_FFI_RADIAL=table`) |
+| CUDA kernel | 2297096, gpu005 | | 0.069, 0.071 |
+| CUDA kernel | 2297255, gpu023 | | 0.0638 (the committed row) |
+| C++ kernel, 128 x 1, 8,192 atoms | 2297097, node132 | 0.382 (2296552) | 0.378, 0.391 |
+| compiled JAX, A100, unsplined | 2297096, gpu005 | 0.591 | 5.50, 5.50 |
+| compiled JAX, 128 x 1, unsplined | 2297097, node132 | 3.85 | 75.8 |
+| compiled JAX, A100, `spline_tol=1e-10` | 2297255, gpu023 | | 0.596 (the committed row) |
+| compiled JAX, 128 x 1, `spline_tol=1e-10` | 2297256, node101 | | 3.77 (the committed row) |
+
+The job 2296663 model had other random weights (the same basis). The table radial costs the same on both models,
+so the kernel's gain on the A100 (2.3 times) is the analytic radial; it is much more than on silicon (2 to 4% of a
+step), not profiled. The CPU kernel reads its table and does not change. The compiled JAX program on the
+polynomial model unsplined is 9 times (A100) and 20 times (CPU) slower: the radial is 53 polynomials for 58 columns
+per edge (`rnl_Wnlq` (5, 5, 58, 53)), and `spline_tol="auto"` does not spline a model that is not learned. Splined
+at 1e-10 (1,024 intervals) it costs what the export did, so `multicomponent.XLA_SPLINE_TOL` sets that for the
+compiled JAX rows and the kernel rows take the file as it is. The gate holds: max dF 7.5e-15 eV/Å (kernel,
+analytic), 1.5e-13 (compiled JAX against the reference splined the same way). The slow default of the compiled
+JAX program on a five-element model of `aj basis` is not addressed here.
+
+### grace-runtime on the Cantor PACE model (2026-11-23)
+
+`pace-rt` (grace-runtime 0.1.4, `pace/runtime[/kk]`) on `pace_Cantor_medium.yaml`, the B-basis of the table's
+`pace_Cantor_medium.yace` (`models.py pace-yaml`; envs `sulis-{gpu,cpu}-cantor-gracert.json`). µs/atom-step:
+
+| run | job, node | repeats |
+|---|---|---|
+| A100, 32,768 atoms | 2297491, gpu019 | 0.2697 (the committed row), 0.2697 |
+| 128 x 1, 8,192 atoms | 2297492, node053 | 0.2524 (the committed row), 0.2521 |
+
+Gate against ace-jax on the `.yace`: max dE 2.6e-12 eV/atom, max dF 7.8e-8 eV/Å (grace-runtime's radial splines).
+The CPU row is `not_plateau`: 0.379 µs/atom-step at 1,024 atoms, so 8 atoms a rank is far from the plateau and 64
+a rank may not be on it. The `.yaml` must come from python-ace's git master (0.4.0), which wrote the `.yace`:
+pyace 0.2.8 (Sulis's pacemaker environment) ignores `number_of_functions_per_element` in
+`create_multispecies_basis_config`, gave 957,935 functions with other coefficients, and the gate failed at
+0.29 eV/atom (jobs 2297260, 2297261). The 0.4.0 `.yaml` (sha256 d7af9f029012b05e) converts back to the `.yace`
+byte for byte.

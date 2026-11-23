@@ -476,3 +476,18 @@ def pytest_collection_modifyitems(config, items):
     selected = [it for it in items if it.nodeid.split("::")[0] in keep]
     config.hook.pytest_deselected(items=[it for it in items if it.nodeid.split("::")[0] not in keep])
     items[:] = selected
+
+
+def wigner(L, Q):
+    """(2L+1, 2L+1): how the real harmonics of degree L (`eval.harmonics`, index m + L) transform
+    under the orthogonal Q (a rotation, or one with an inversion): Y_L(Q x) = wigner(L, Q) Y_L(x),
+    by least squares on random points.  jax is imported here: conftest must not import it at the
+    top (the flags above)."""
+    import numpy as np
+
+    from ace_jax.eval.harmonics import real_spherical_harmonics
+    pts = np.random.default_rng(1).normal(size=(80, 3))
+    sl = slice(L * L, (L + 1) ** 2)
+    Y0 = np.asarray(real_spherical_harmonics(pts, max(L, 1)))[:, sl]
+    Y1 = np.asarray(real_spherical_harmonics(pts @ Q.T, max(L, 1)))[:, sl]
+    return np.linalg.lstsq(Y0, Y1, rcond=None)[0].T

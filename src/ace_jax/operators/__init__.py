@@ -1,6 +1,6 @@
 """Equivariant one- and two-centre block models of atomic-orbital operators: everything that
 does not know which operator it is.  Site features, bond features, the on-site and off-site
-models with their compiled predictors, the orbital bases and the block fit; operator channels
+models with their compiled predictors, the centred model (coefficients on atoms: `centred`), the orbital bases and the block fit; operator channels
 are a leading coefficient axis.
 
 `ace_jax.ham` is the Hamiltonian and overlap on top (file formats, Bloch sums, bands); another

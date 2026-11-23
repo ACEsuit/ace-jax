@@ -19,6 +19,21 @@
   the fit time. `--env 5 6 4 4 4` gives the basis of 0.7.2. `BondBasis` in Python has no bond environment
   unless given one, and does not change.
 
+- **`--prior evidence`, `loo` and `press`: the limit on the prior is part of the selection.** In 0.7.1
+  the fit added the ridge to the prior after the selection, so the coefficients were not those of the
+  model that the evidence was calculated for. The selection now has a lower limit on the ratio of the
+  noise to the prior scale, such that the prior is at least the ridge on each coefficient. The results
+  of such fits change slightly from 0.7.1.
+
+- **Hamiltonian models: block prediction on a GPU is approximately 2.8 times faster.** The features of
+  the atoms near a bond are now calculated for 16 atoms at a time on a GPU, not for one atom at a time.
+  `HamiltonianPredictor.prepare_device` now builds one neighbour list, at the largest cutoff, and gets the
+  other lists from it on the device. For bulk gold (64 atoms, default basis, RTX 4000 Ada, float32) the
+  time from the positions to all blocks decreases from 26.5 ms to 9.5 ms. `aj ham predict`, `aj ham bands`
+  and the `hamiltonian` property of `HamiltonianCalculator` use this path when JAX runs on a GPU and
+  matscipy-neighbours is built with CUDA. The new methods are `HamiltonianPredictor.blocks`,
+  `prepare_auto` and `device_lists`. Predictions on a CPU do not change.
+
 - **Hamiltonian eigenvalues on a CPU come from LAPACK on the host.** `HamiltonianPredictor.bands`,
   `block_bands` and the band energy (`band_energy`, `band_energy_fn`, `HamiltonianCalculator`) now
   solve H(k) c = e S(k) c with `potrf`, `hegst` and `heevr` (blocked workspace) through a host
@@ -26,13 +41,48 @@
   2,304 functions on one core. `spectrum_fn` and `bands_fn`, which differentiate the eigenvalues,
   and every GPU path are unchanged.
 
-- **`--prior evidence`, `loo` and `press`: the limit on the prior is part of the selection.** In 0.7.1
-  the fit added the ridge to the prior after the selection, so the coefficients were not those of the
-  model that the evidence was calculated for. The selection now has a lower limit on the ratio of the
-  noise to the prior scale, such that the prior is at least the ridge on each coefficient. The results
-  of such fits change slightly from 0.7.1.
+- The documentation gives the gain of mixed precision with the kernels of 0.7.2: 1.1 to 1.2 times for the
+  silicon model o4d20 (1.4 times before 0.7.2, when the product basis used more of the time), and no gain
+  from o4d14 down. The kernel row of the five-element alloy table is timed again and did not change.
+
+- **The alloy speed table uses a linear ACE model that ace-jax builds.** The model has polynomial radial
+  functions, and the CUDA kernel calculates them with no table. The kernel then costs 0.064 µs/atom-step on an
+  A100 for the five-element alloy (0.15 with the model of splined radials that the table used before). The
+  CPU row did not change. `bench/scaling/models.py ace-poly` builds the model.
+- The alloy speed table has a row for grace-runtime (`pace/runtime`) on the PACE model: 0.27 µs/atom-step on
+  an A100 and 0.25 on 128 CPU cores.
+
+### Fixed
+
+- **Hamiltonian models on a GPU: some off-site blocks were wrong for some sizes of structure.** The block
+  prediction on a GPU gave some blocks a wrong bond environment when the number of atoms of an element and
+  their number of bonds had particular values. The affected blocks were wrong by electron-volts. Predictions on a CPU were correct. The cause was the batched loop over atoms in the compiled
+  program. The loop now makes its batches in a different way.
+
+- `HamiltonianCalculator` and `aj eval` now refuse an electron count that does not fit in the orbitals of
+  the model. For a model with valence orbitals only, give the valence electrons (`--nelectrons 79:11`).
+  Before, the Fermi level was above the last band and the band metrics were wrong, with no message.
 
 ### Added
+
+- **Electron-density models (`aj density`).** A model that predicts the electron density of a structure
+  as the coefficients of auxiliary functions on the atoms. Each coefficient vector is a linear function of
+  the site features of the atom, as the on-site blocks of a Hamiltonian model. `aj density fit` fits the
+  model to density files, `aj density predict` writes the predicted coefficients, and `aj eval` gives
+  the errors of a density model. The default fit minimises the L2 norm of the density error and uses
+  the overlap matrix of the auxiliary functions of each training structure. Each prediction is corrected
+  to the electron count and gives the count error before the correction. See
+  `docs/user/howto/density.md`. In Python: `ace_jax.ham.density`,
+  `ace_jax.operators.centred` and `ace_jax.operators.fit.fit_centred`. The interface can change.
+
+- `fit_onsite`, `fit_offsite` and `fit_centred` have `jackknife=True`. The statistics of the fit then contain
+  the change of the coefficients when one training structure is left out (`DesignStats.jack`), calculated in
+  closed form for the prior of the fit. Before, only `sigma_c="loo"` and `"press"` kept the data for it.
+
+- `OrbitalBasis` can contain the radial functions of its shells (`radials`), and the model file stores
+  them. No calculation uses them at this time. Two bases with the same shells are equal.
+
+- `build_site_basis(..., natural_parity=True)` builds only the features of parity $(-1)^L$.
 
 - **`aj ham calibrate` gives calibrated intervals for the eigenvalues of a Hamiltonian model.** The command
   uses structures with reference blocks that the fit did not use. It stores a half-width for each energy
@@ -45,10 +95,58 @@
   pair of shells, and a half-width for the largest element error of a block. `aj eval` prints their
   coverage. `HamiltonianCalculator.block_half_widths` returns them for the blocks of a structure.
 
+- **`--overlap-threshold X` for `aj eval`, `aj ham fit --validation` and `aj ham bands`.** The option removes
+  the combinations of orbitals with an overlap eigenvalue below X at a k-point, then calculates the bands.
+  It applies to the model and to the reference. A large diffuse basis has such combinations, and an error
+  of a few meV in H then moves states by electron-volts into the bands. In Python: `block_bands`,
+  `eigvals` and `HamiltonianPredictor.bands` take `overlap_threshold`. The band energy, the forces and
+  the stress do not use the option.
+
 - `aj ham fit --noise-floor SIGMA` (`noise=` of `fit_onsite` and `fit_offsite`) sets the smallest noise
   of H that `--prior evidence` can select, in the unit of the data. The difference of H between SCF
   calculations of the same structure is a measured value for it: approximately 1e-7 eV for off-site blocks
   and 3e-6 eV for on-site blocks (FHI-aims, `sc_accuracy_rho 1e-5`, aluminium).
+
+## 0.7.2 (2026-11-21)
+
+**Highlights.** The C++ and CUDA kernels for linear ACE are faster for models of correlation order 4. For
+the silicon model o4d20, LAMMPS is 3 times faster on an A100 (0.75 to 0.25 µs/atom-step in float64) and on
+128 CPU cores (1.53 to 0.49). On the A100, this model is now the lowest-cost model that reaches the accuracy
+target of the silicon benchmark. `aj export --format symmetrix` writes a model for the Symmetrix pair style.
+
+**Upgrading from 0.7.1.** Saved models and the output files are unchanged. No setting is necessary to get
+the speed-up in `ACECalculator`, `BatchCalculator` and JAX-MD. Export a LAMMPS bundle again to get the
+speed-up in LAMMPS. Energies and forces of the kernels agree with 0.7.1 to roundoff, with one exception:
+on a GPU, a model with analytic radials now uses those radials and not a table, so its forces change by
+the error of the table (approximately 1e-8 of the largest force). Set `ACEJAX_FFI_RADIAL=table` to get the
+table, and `ACEJAX_FFI_FORM=dag` to get the product basis of 0.7.1. The CUDA kernel compiles again on first
+use.
+
+### Changed
+
+- **Faster product basis in the C++ and CUDA kernels** (#182). For correlation order 4, the kernels now
+  calculate the product basis from coupled pairs of one-particle functions, and no longer from one node for
+  each product. The silicon model o4d20 has 68,335 nodes in the old form and 1,879 pair values in the new
+  form. The kernels select the form by operation count: the new form from o4d12 on the silicon ladder,
+  and the old form for order 3 and for orders above 4. LAMMPS on 128 cores of an EPYC 7742 (4,096 Si
+  atoms): o4d20 goes from 1.53 to 0.49 µs/atom-step in float64, and from 1.09 to 0.35 in mixed precision.
+  `calc.ffi` and the bundle's `ace_jax.ffi` record the form (`form`) and the radial (`radial`).
+- **The CUDA kernel uses analytic radials** (#182). For a model with a polynomial radial basis that is not
+  splined (maximum l of 8), the CUDA kernel calculates the radial functions and the harmonics in registers,
+  with no radial table. On an A100 with 32,768 Si atoms in LAMMPS, in µs/atom-step, float64 then float32:
+  o4d20 goes from 0.75 to 0.25 and from 0.45 to 0.15; o4d16 from 0.19 to 0.11 and from 0.13 to 0.07; o3d8
+  from 0.043 to 0.036 and from 0.043 to 0.028. Models with learned (splined) radials keep the table. The
+  kernel also does not sort the atoms by species when the model has one species.
+- The benchmark page and its cost-accuracy figure show the new timings (`docs/user/benchmarks.md`).
+
+### Added
+
+- **Export to Symmetrix** (#182). `aj export --format symmetrix` and
+  `ace_jax.export.symmetrix.export_symmetrix` write a linear ACE model as the JSON file that the
+  `symmetrix/ace` pair style of [Symmetrix](https://github.com/wcwitt/symmetrix) reads. ace-jax calls the
+  converter of the installed Symmetrix package and has no copy of the format. The command stops with a
+  message if the installed Symmetrix has no converter for ace-jax models. See
+  `docs/user/howto/lammps.md`.
 
 ## 0.7.1 (2026-11-20)
 
