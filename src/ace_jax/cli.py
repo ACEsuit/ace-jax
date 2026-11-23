@@ -995,6 +995,9 @@ def _parser():
     hm.add_argument("--smearing", choices=["fermi-dirac", "gaussian"], default="fermi-dirac")
     hm.add_argument("--window", type=float, nargs=2, default=[-12.0, 5.0],
                     help="eigenvalues scored: from LO to HI of the reference Fermi level (default -12 5)")
+    hm.add_argument("--overlap-threshold", type=float, default=0.0, metavar="X",
+                    help="drop the combinations of orbitals whose overlap eigenvalue at a k-point is below X before diagonalising "
+                         "(default 0: none); 1e-3 for a diffuse basis whose predicted bands are far off although the blocks are close")
     hm.add_argument("--metrics-out", default=None, help="JSON file for the electronic-structure metrics of every reference structure")
     hm.add_argument("--blocks-out", default=None, help="directory for the predicted H and S blocks of each structure (DeepH layout)")
     hm.add_argument("--threads", type=int, default=1, help="threads of the off-site evaluation on a CPU (default 1)")

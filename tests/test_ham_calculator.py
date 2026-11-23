@@ -185,18 +185,22 @@ def test_aj_ham_fit_predict_bands(models, tmp_path, capsys):  # noqa: F811
         cache.save(str(tmp_path / "b" / f"{i}.npz"), OperatorData(np.asarray(at.cell), at.positions, at.numbers, orb,
                                                                  {"H": own.get_hamiltonian(at), "S": own.get_overlap(at)}))
     second = str(tmp_path / "second.npz")
-    main(["ham", "fit", "--data", str(tmp_path / "b"), "--out", second, "--validation", str(tmp_path / "b"), *basis, *spec])
+    main(["ham", "fit", "--data", str(tmp_path / "b"), "--out", second, "--validation", str(tmp_path / "b"), *basis, *spec,
+          "--overlap-threshold", "1e-8"])                           # below the spectrum of S: nothing is left out, and the option reaches the score
     out = capsys.readouterr().out
     info = io.load(second).meta["info"]
+    assert "below 1e-08 left out" in out and info["validation"]["metrics"]["overlap_threshold"] == 1e-8
     assert "bands at a common zero" in out and max(v["max"] for v in info["validation"]["blocks"].values()) < 1e-4       # the ridge on designs with more columns than rows
     assert info["validation"]["metrics"]["band_rmse"] < 1e-3 and info["prior"] == "none"
     with pytest.raises(SystemExit):                                # a channel the data does not have
         main(["ham", "fit", "--data", str(tmp_path / "b"), "--out", second, "--channels", "H_up"])
     honly = str(tmp_path / "honly.npz")                           # a model of H alone, scored on data with S: both spectra with the reference S
     main(["ham", "fit", "--data", str(tmp_path / "b"), "--out", honly, "--channels", "H", *basis])
-    main(["eval", "--model", honly, "--data", str(tmp_path / "b"), *spec, "--metrics-out", str(tmp_path / "h.json")])
+    main(["eval", "--model", honly, "--data", str(tmp_path / "b"), *spec, "--metrics-out", str(tmp_path / "h.json"),
+          "--overlap-threshold", "1e-8"])
     import json
     mh = json.load(open(tmp_path / "h.json"))
+    assert mh["summary"]["overlap_threshold"] == 1e-8
     assert "with the reference S" in capsys.readouterr().out and mh["summary"]["overlap"] == "reference" and mh["summary"]["band_rmse"] < 1e-3
     capsys.readouterr()
     write_cextxyz(str(tmp_path / "s.xyz"), frames)

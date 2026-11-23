@@ -84,6 +84,7 @@ def _calc(a, kpts):
     if calc.channel not in ch:
         raise UsageError(f"--channel {calc.channel}: the model has {', '.join(ch)}")
     calc.degeneracy = 2.0 if calc.channel == "H" else 1.0      # a spin channel holds one electron per state
+    calc.overlap_threshold = float(getattr(a, "overlap_threshold", 0.0) or 0.0)   # of the scored and plotted bands (`operator.block_bands`), not of the energy
     return calc
 
 
@@ -96,6 +97,7 @@ def score(calc, data, window, metrics_out=None, blocks_out=None):
     """Print the block errors of `calc`'s model on the reference structures under `data`, and the
     electronic-structure errors of its eigenvalues against the reference's on the calculator's
     k-points (`ham.metrics`).  Returns (block error table, metrics summary or None).
+    calc.overlap_threshold > 0 (--overlap-threshold): both spectra in the subspace of S(k) above it (`operator.block_bands`).
     A model without an overlap is scored with the data's S where it has one (its H and the reference
     H in the same generalised problem; summary["overlap"] "reference"), else with S = 1 ("identity")."""
     from . import metrics as M
@@ -103,7 +105,9 @@ def score(calc, data, window, metrics_out=None, blocks_out=None):
     ch, orb = calc.predictor.channels, calc.predictor.orbitals
     names = block_names(data)
     err, per, bad, overlap = {}, [], [], None
-    print(f"{len(names)} reference structures; eigenvalues on {len(calc.kpts)} k-points, {window[0]:g} to {window[1]:g} from the Fermi level")
+    cut = getattr(calc, "overlap_threshold", 0.0)
+    print(f"{len(names)} reference structures; eigenvalues on {len(calc.kpts)} k-points, {window[0]:g} to {window[1]:g} from the Fermi level"
+          + (f"; overlap eigenvalues below {cut:g} left out" if cut > 0 else ""))
     for i, (name, at, d) in enumerate(s for n in names for s in structures(n)):
         if d.basis != orb:
             raise UsageError(f"{name}: its orbital basis is not the model's")
@@ -120,17 +124,21 @@ def score(calc, data, window, metrics_out=None, blocks_out=None):
                 given = "reference"; Sb, P = d.blocks["S"], pred[calc.channel]
                 keys = sorted(set(Hb) | set(Sb) | set(P))
                 bs = BlockSum(keys, d.numbers, orb); full = lambda B, keys=keys, z=d.numbers: _filled(B, keys, z, orb); Sf = full(Sb)
-                e1, e0 = block_bands(bs, full(P), Sf, calc.kpts), block_bands(bs, full(Hb), Sf, calc.kpts)
+                e1, e0 = block_bands(bs, full(P), Sf, calc.kpts, overlap_threshold=cut), block_bands(bs, full(Hb), Sf, calc.kpts, overlap_threshold=cut)
             else:
                 given = "model" if calc.overlap else "identity"
-                e1 = np.asarray(calc.get_property("eigenvalues", at))
                 Sb = d.blocks[calc.overlap] if calc.overlap else {k: np.eye(*v.shape) * float(onsite(k)) for k, v in Hb.items()}
-                e0 = block_bands(BlockSum(sorted(Hb), d.numbers, orb), Hb, Sb, calc.kpts) if np.isfinite(e1).all() else None
+                if cut > 0 and calc.overlap:             # the model's H and S, as the reference's: each in the subspace of its own S(k)
+                    P = pred[calc.channel]
+                    e1 = block_bands(BlockSum(sorted(P), d.numbers, orb), P, pred[calc.overlap], calc.kpts, overlap_threshold=cut)
+                else:
+                    e1 = np.asarray(calc.get_property("eigenvalues", at))
+                e0 = block_bands(BlockSum(sorted(Hb), d.numbers, orb), Hb, Sb, calc.kpts, overlap_threshold=cut if calc.overlap else 0.0) if not np.isnan(e1).any() else None
             if overlap is None:
                 overlap = given
                 print({"reference": "the model has no overlap: eigenvalues of its H and of the reference H with the reference S",
                        "identity": "the model and the data have no overlap: eigenvalues with S = 1", "model": f"overlap: the model's {calc.overlap}"}[given], flush=True)
-            if not np.isfinite(e1).all():                # the eigensolver's answer to an overlap that is not positive definite
+            if np.isnan(e1).any():                       # the eigensolver's answer to an overlap that is not positive definite
                 print(f"  {name}: no eigenvalues: the predicted {calc.overlap or 'H'} gives a generalised eigenproblem that is not "
                       f"positive definite; no band metrics for this structure", flush=True)
                 bad.append(name)
@@ -147,6 +155,8 @@ def score(calc, data, window, metrics_out=None, blocks_out=None):
     summary = M.summary(per) if per else None
     if summary is not None:
         summary["overlap"] = overlap
+        if cut > 0:
+            summary["overlap_threshold"] = cut
         if bad:
             summary["no_eigenvalues"] = bad
     if per:
@@ -233,6 +243,7 @@ def cmd_fit(a):
         calc.overlap = "S" if "S" in ch else None
         calc.channel = "H" if "H" in ch else next(c for c in ch if c != "S")
         calc.degeneracy = 2.0 if calc.channel == "H" else 1.0
+        calc.overlap_threshold = float(a.overlap_threshold or 0.0)
         print(f"validation set {a.validation}:")
         table, summary = score(calc, a.validation, a.window)
         info["validation"] = dict(data=os.path.abspath(a.validation), blocks={f"{c} {p}": v for (c, p), v in table.items()}, metrics=summary)
@@ -268,18 +279,19 @@ def band_structure(calc, atoms, path=None, npoints=200, reference=None):
     p = calc.predictor
     prep = p.prepare_auto(atoms.positions, np.asarray(atoms.cell), atoms.numbers, atoms.pbc)
     nel = calc.electrons(atoms.numbers)
+    cut = getattr(calc, "overlap_threshold", 0.0)
     mu = lambda e: float(smeared_occupations(jnp.asarray(e), jnp.asarray(calc.weights), nel, calc.width, calc.smearing, calc.degeneracy)[1])
     out = dict(x=x, ticks=ticks, labels=np.asarray(labels), kpts=bp.kpts, grid_kpts=calc.kpts, grid_weights=calc.weights,
                nelectrons=nel, degeneracy=calc.degeneracy, formula=atoms.get_chemical_formula())
     for tag, ks in (("bands", bp.kpts), ("grid_bands", calc.kpts)):
-        out[tag] = np.asarray(p.bands(prep, ks, overlap=calc.overlap, channel=calc.channel), float)
+        out[tag] = np.asarray(p.bands(prep, ks, overlap=calc.overlap, channel=calc.channel, overlap_threshold=cut), float)
     out["fermi_level"] = mu(out["grid_bands"])
     if reference is not None:
         Hb = reference.blocks[calc.channel]
         Sb = reference.blocks[calc.overlap] if calc.overlap else {k: np.eye(*v.shape) * float(onsite(k)) for k, v in Hb.items()}
         bs = BlockSum(sorted(Hb), reference.numbers, p.orbitals)
         for tag, ks in (("bands_ref", bp.kpts), ("grid_bands_ref", calc.kpts)):
-            out[tag] = np.asarray(block_bands(bs, Hb, Sb, ks), float)
+            out[tag] = np.asarray(block_bands(bs, Hb, Sb, ks, overlap_threshold=cut if calc.overlap else 0.0), float)
         out["fermi_level_ref"] = mu(out["grid_bands_ref"])
     return out
 
@@ -383,6 +395,9 @@ def _add_spectrum_args(p, kpts):
     p.add_argument("--window", type=float, nargs=2, default=[-12.0, 5.0],
                    help="eigenvalues scored: from LO to HI of the reference Fermi level (default -12 5)")
     p.add_argument("--threads", type=int, default=1, help="threads of the off-site evaluation on a CPU (default 1)")
+    p.add_argument("--overlap-threshold", type=float, default=0.0, metavar="X",
+                   help="drop the combinations of orbitals whose overlap eigenvalue at a k-point is below X before diagonalising "
+                        "(default 0: none); 1e-3 for a diffuse basis whose predicted bands are far off although the blocks are close")
 
 
 def add_parser(sub):

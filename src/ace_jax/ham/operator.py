@@ -46,6 +46,22 @@ _bloch = jax.jit(_bloch_impl, static_argnums=(4, 5))
 
 
 @highest
+def _eigvals_cut_impl(H, S, cut):
+    """`_eigvals_impl` in the subspace of the eigenvectors of S with eigenvalue above `cut` (canonical
+    orthogonalisation): the dropped directions give +inf, after the kept eigenvalues.  The shapes are
+    fixed: a dropped direction is a zero column of X and a diagonal entry above the kept spectrum."""
+    H, S = 0.5 * (H + H.conj().T), 0.5 * (S + S.conj().T)
+    s, U = jnp.linalg.eigh(S)
+    keep = s > cut
+    X = U * jnp.where(keep, 1.0 / jnp.sqrt(jnp.where(keep, s, 1.0)), 0.0)
+    A = X.conj().T @ H @ X
+    A = 0.5 * (A + A.conj().T)
+    top = 2.0 * jnp.abs(A).sum(-1).max() + 1.0               # above every kept eigenvalue (Gershgorin), and of their size
+    e = jnp.linalg.eigvalsh(A + jnp.diag(jnp.where(keep, 0.0, top)).astype(A.dtype))
+    return jnp.where(jnp.arange(e.shape[-1]) < keep.sum(), e, jnp.inf)
+
+
+@highest
 def _eigvals_impl(H, S):
     """Eigenvalues of H c = e S c, both Hermitian and S positive definite."""
     H, S = 0.5 * (H + H.conj().T), 0.5 * (S + S.conj().T)
@@ -55,14 +71,25 @@ def _eigvals_impl(H, S):
     return jnp.linalg.eigvalsh(0.5 * (Ht + Ht.conj().T))
 
 
-def _host_eig(H, S, vectors=False):
-    """`_eigvals_impl` (or, with vectors, `_geig`) of NumPy matrices (..., n, n) by LAPACK on the host:
+def _host_eig(H, S, vectors=False, cut=0.0):
+    """`_eigvals_impl` (or, with vectors, `_geig`; with cut > 0, `_eigvals_cut_impl`: eigenvalues only) of NumPy
+    matrices (..., n, n) by LAPACK on the host:
     potrf, hegst and heevr with the workspace of its query.  On a CPU this is what the solvers
     below call: XLA's CPU eigh took 4 times as long for eigenvalues (29.5 s against 7.8 s at
     n = 2,304 on one core), and SciPy's own `eigh` passes the minimum workspace to its "gvd" and "evr"
     drivers, with which LAPACK's tridiagonalisation is unblocked (1.6 times at n = 4,608)."""
     H, S = np.asarray(H), np.asarray(S)
     cplx, n = np.iscomplexobj(H), H.shape[-1]
+    if cut > 0:
+        if vectors:
+            raise ValueError("eigenvectors are not returned with an overlap threshold")
+        E = np.full(H.shape[:-1], np.inf, S.real.dtype)
+        for i in np.ndindex(H.shape[:-2]):
+            s, U = sla.eigh(0.5 * (S[i] + S[i].conj().T), driver="evr", check_finite=False)
+            X = U[:, s > cut] / np.sqrt(s[s > cut])
+            A = X.conj().T @ H[i] @ X
+            E[i][:X.shape[1]] = sla.eigh(0.5 * (A + A.conj().T), eigvals_only=True, driver="evr", check_finite=False)
+        return E
     potrf, gst, evr, lw = sla.get_lapack_funcs(("potrf", "hegst", "heevr", "heevr_lwork") if cplx else ("potrf", "sygst", "syevr", "syevr_lwork"), (H, S))
     work = dict(zip(("lwork", "lrwork", "liwork") if cplx else ("lwork", "liwork"), sla.lapack._compute_lwork(lw, n, lower=1)))
     E, C = np.empty(H.shape[:-1], S.real.dtype), np.empty(H.shape, H.dtype) if vectors else None
@@ -85,13 +112,16 @@ def _on_host():
 
 
 _eigvals_dev, _eigvals_k_dev = jax.jit(_eigvals_impl), jax.jit(jax.vmap(_eigvals_impl))
+_eigvals_cut_k_dev = jax.jit(jax.vmap(_eigvals_cut_impl, in_axes=(0, 0, None)))
 
 
 def _eigvals(H, S):
     return jnp.asarray(_host_eig(H, S)) if _on_host() else _eigvals_dev(H, S)
 
 
-def _eigvals_k(H, S):                                     # a batch of k-points in one call
+def _eigvals_k(H, S, cut=0.0):                            # a batch of k-points in one call
+    if cut > 0:
+        return jnp.asarray(_host_eig(H, S, cut=cut)) if _on_host() else _eigvals_cut_k_dev(H, S, cut)
     return jnp.asarray(_host_eig(H, S)) if _on_host() else _eigvals_k_dev(H, S)
 
 
@@ -154,23 +184,33 @@ class BlockSum:
         return out[0] if len(out) == 1 else jnp.concatenate(out)
 
 
-def block_bands(bs, H, S, kpts, chunk=48):
+def block_bands(bs, H, S, kpts, chunk=48, overlap_threshold=0.0):
     """(n_k, n_orb) eigenvalues, as a host array, of the generalised problem of two dictionaries of
     blocks at the fractional k-points: Bloch sums and eigensolves of `chunk` k-points at a time on
-    the device, so that only that many matrices exist at once."""
+    the device, so that only that many matrices exist at once.
+
+    overlap_threshold > 0: the problem is solved in the subspace of the eigenvectors of S(k) whose
+    eigenvalue is above it (canonical orthogonalisation), and the directions left out are +inf at the
+    end of each k-point's eigenvalues.  A diffuse basis has combinations of orbitals of almost no norm
+    (eigenvalues of S(k) near zero); their energies are far above the bands, but an error in H of a few
+    meV there is divided by that norm and puts them among the bands.  Without them a model's bands are
+    those of its H where the basis can carry them.  The threshold moves the bands themselves a little:
+    compare a model with the reference under the same one."""
     kpts = np.atleast_2d(np.asarray(kpts, float))
     Hb = [jnp.asarray(np.stack([H[k] for k in ks])) for _, ks in bs.groups]
     Sb = [jnp.asarray(np.stack([S[k] for k in ks])) for _, ks in bs.groups]
     out = []
     for i in range(0, len(kpts), chunk):
         k = jnp.asarray(kpts[i:i + chunk], Hb[0].dtype)
-        out.append(np.asarray(_eigvals_k(_bloch_blocks(Hb, bs.idx, bs.R, bs.seg, k, bs.n_orb), _bloch_blocks(Sb, bs.idx, bs.R, bs.seg, k, bs.n_orb))))
+        out.append(np.asarray(_eigvals_k(_bloch_blocks(Hb, bs.idx, bs.R, bs.seg, k, bs.n_orb), _bloch_blocks(Sb, bs.idx, bs.R, bs.seg, k, bs.n_orb),
+                                         overlap_threshold)))
     return np.concatenate(out)
 
 
-def eigvals(H, S, chunk=64):
-    """(n_k, n_orb) eigenvalues of H(k) c = e S(k) c for batches of matrices, on the device."""
-    return jnp.concatenate([_eigvals_k(H[i:i + chunk], S[i:i + chunk]) for i in range(0, len(H), chunk)])
+def eigvals(H, S, chunk=64, overlap_threshold=0.0):
+    """(n_k, n_orb) eigenvalues of H(k) c = e S(k) c for batches of matrices, on the device.
+    overlap_threshold: as `block_bands`."""
+    return jnp.concatenate([_eigvals_k(H[i:i + chunk], S[i:i + chunk], overlap_threshold) for i in range(0, len(H), chunk)])
 
 
 @highest
@@ -269,7 +309,8 @@ def smeared_occupations(e, wk, nelec, width, kind="fermi-dirac", degeneracy=2.0)
         low = jnp.sum(wk[:, None] * occ(mid)) < nelec
         return jnp.where(low, mid, lo), jnp.where(low, hi, mid)
 
-    lo, hi = jax.lax.fori_loop(0, 100, step, (jnp.min(e) - 20.0 * width, jnp.max(e) + 20.0 * width))
+    top = jnp.max(jnp.where(jnp.isfinite(e), e, -jnp.inf))   # +inf: a direction an overlap threshold left out (`block_bands`), never occupied
+    lo, hi = jax.lax.fori_loop(0, 100, step, (jnp.min(e) - 20.0 * width, top + 20.0 * width))
     mu = 0.5 * (lo + hi)
     f = occ(mu)
     if kind == "fermi-dirac":
@@ -866,11 +907,12 @@ class HamiltonianPredictor:
         k = jnp.asarray(k, prep.on[0].dtype)
         return _bloch(prep.on, prep.off, prep.lists, k, self.channels.index(channel), prep.n_orb)
 
-    def bands(self, prep, kpts, overlap="S", channel="H", chunk=64):
+    def bands(self, prep, kpts, overlap="S", channel="H", chunk=64, overlap_threshold=0.0):
         """(n_k, n_orb) eigenvalues of H(k) c = e S(k) c at the fractional k-points `kpts`.
         `overlap=None`: an orthonormal basis (S = 1).  `channel`: the Hamiltonian channel
         ("H_up" or "H_dn" of a collinear-spin model).  The k-points are evaluated in batches of
-        `chunk`: Bloch sums and eigensolves vmapped, nothing on the host."""
+        `chunk`: Bloch sums and eigensolves vmapped, nothing on the host.  overlap_threshold: as
+        `block_bands` (with a model overlap).  The band energy, forces and stress (`band_energy`) do not take it."""
         kpts = jnp.asarray(np.atleast_2d(np.asarray(kpts, float)), prep.on[0].dtype)
         ch = self.channels.index(channel)
         Hk = jax.vmap(lambda k: _bloch_impl(prep.on, prep.off, prep.lists, k, ch, prep.n_orb))
@@ -879,4 +921,5 @@ class HamiltonianPredictor:
             Sk = jax.vmap(lambda k: _bloch_impl(prep.on, prep.off, prep.lists, k, cs, prep.n_orb))
         else:
             Sk = lambda ks: jnp.broadcast_to(jnp.eye(prep.n_orb, dtype=jnp.result_type(kpts.dtype, jnp.complex64)), (len(ks), prep.n_orb, prep.n_orb))
-        return jnp.concatenate([_eigvals_k(Hk(kpts[i:i + chunk]), Sk(kpts[i:i + chunk])) for i in range(0, len(kpts), chunk)])
+        cut = overlap_threshold if overlap else 0.0
+        return jnp.concatenate([_eigvals_k(Hk(kpts[i:i + chunk]), Sk(kpts[i:i + chunk]), cut) for i in range(0, len(kpts), chunk)])
