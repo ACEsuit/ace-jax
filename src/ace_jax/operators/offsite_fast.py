@@ -205,8 +205,8 @@ def _rows(f, xs):
     scans the whole batches and vmaps the remaining rows apart, and XLA's GPU compiler (jax 0.11.2,
     RTX 4000 Ada) then read one input of the second batch from the first.  For 42 rows of 96 bond
     slots, 32 environment atoms, 8 radials and l <= 4, `_env_side` multiplied the rows 16 to 31 by
-    the bond mask of the rows 0 to 15: blocks wrong by up to 108 eV in one N-doped graphene cell,
-    and right for 92, 100 or 104 slots or batches of 8 or 32 (docs/dev/ham-results.md)."""
+    the bond mask of the rows 0 to 15, so that live bond slots had no environment; it was right for
+    92, 100 or 104 slots and for batches of 8 or 32."""
     if jax.default_backend() == "cpu":
         return jax.lax.map(f, xs)
     n = xs[0].shape[0]

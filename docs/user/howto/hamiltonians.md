@@ -141,6 +141,27 @@ larger than 5 times the median.
 Energies are in the unit of the data. For FHI-aims data the unit is eV, and the
 tables show meV.
 
+### Diffuse basis sets
+
+A large basis of diffuse orbitals has combinations of orbitals with almost no
+norm. The overlap matrix at a k-point then has eigenvalues near zero. A small
+error in H along such a combination moves its energy by electron-volts. The
+predicted bands can then be wrong by electron-volts although the block errors
+are a few meV.
+
+1. Give `--overlap-threshold 1e-3` to `aj eval`, `aj ham fit --validation` or
+   `aj ham bands`.
+2. Compare the band errors with those without the option.
+
+The option removes the combinations with an overlap eigenvalue below the value
+before the diagonalisation. It applies to the model and to the reference. The
+states that it removes are far above the bands.
+
+!!! warning
+    The option changes the reference bands by a small amount. Compare the
+    reference bands with the option and without it. The band energy, the forces and the stress of `HamiltonianCalculator` do
+    not use the option.
+
 ## Predict H and S
 
 1. Give the model file and the structures: an extxyz file, or a directory of

@@ -409,7 +409,9 @@ structures. User page: `docs/user/howto/hamiltonians.md`; measurements: `docs/de
   electronic-structure errors of `ace_jax.ham.metrics` (band RMSE at a common zero and from own Fermi levels,
   Fermi level, band energy per atom, density-of-states Wasserstein distance, outlier structures).
   `--nelectrons` (per cell, or `Z:n,...` per atom; default the atomic numbers), `--kpts`, `--width`,
-  `--smearing`, `--window LO HI`. Quote the band RMSE from own Fermi levels when comparing with
+  `--smearing`, `--window LO HI`, `--overlap-threshold X` (drop the combinations of orbitals whose S(k)
+  eigenvalue is below X before diagonalising, model and reference alike; try 1e-3 when a diffuse basis gives band
+  errors of eV from block errors of meV; scoring and `aj ham bands` only, not the calculator's energy). Quote the band RMSE from own Fermi levels when comparing with
   publications; a per-structure rigid shift of a few meV sits in the common-zero number.
 - `aj ham predict --model M --data <extxyz | DIR> --out DIR`: `hamiltonians_pred.h5`, `overlaps_pred.h5` per
   structure (DeepH layout). `aj ham bands --model M --structure S [--index i] [--path GXMG] --out bands.npz

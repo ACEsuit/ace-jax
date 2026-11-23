@@ -52,11 +52,23 @@
 
 ### Fixed
 
+- **Hamiltonian models on a GPU: some off-site blocks were wrong for some sizes of structure.** The block
+  prediction on a GPU gave some blocks a wrong bond environment when the number of atoms of an element and
+  their number of bonds had particular values. The affected blocks were wrong by electron-volts. Predictions on a CPU were correct. The cause was the batched loop over atoms in the compiled
+  program. The loop now makes its batches in a different way.
+
 - `HamiltonianCalculator` and `aj eval` now refuse an electron count that does not fit in the orbitals of
   the model. For a model with valence orbitals only, give the valence electrons (`--nelectrons 79:11`).
   Before, the Fermi level was above the last band and the band metrics were wrong, with no message.
 
 ### Added
+
+- **`--overlap-threshold X` for `aj eval`, `aj ham fit --validation` and `aj ham bands`.** The option removes
+  the combinations of orbitals with an overlap eigenvalue below X at a k-point, then calculates the bands.
+  It applies to the model and to the reference. A large diffuse basis has such combinations, and an error
+  of a few meV in H then moves states by electron-volts into the bands. In Python: `block_bands`,
+  `eigvals` and `HamiltonianPredictor.bands` take `overlap_threshold`. The band energy, the forces and
+  the stress do not use the option.
 
 - `aj ham fit --noise-floor SIGMA` (`noise=` of `fit_onsite` and `fit_offsite`) sets the smallest noise
   of H that `--prior evidence` can select, in the unit of the data. The difference of H between SCF

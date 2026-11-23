@@ -300,7 +300,7 @@ def test_fit_reads_structures_on_demand(basis):
 def test_bond_environment_rows_in_batches_match_one_row_at_a_time(monkeypatch):
     """`offsite_fast._env_side`, whose rows a GPU takes in batches (`_rows`), against one row at a time, at
     the shape where `jax.lax.map(batch_size=16)` on a GPU gave the second batch the first batch's bond mask
-    (42 atoms, 96 bond slots, 32 environment atoms, 8 radials, l <= 4; N-doped graphene, 108 eV in 40 blocks)
+    (42 atoms, 96 bond slots, 32 environment atoms, 8 radials, l <= 4)
     and at shapes with fewer rows than a batch and an exact multiple.  On a CPU the two are one code path."""
     import jax.numpy as jnp
     from ace_jax.operators import offsite_fast as OF
