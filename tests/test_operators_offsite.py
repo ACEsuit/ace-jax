@@ -270,3 +270,26 @@ def test_fit_leaving_structures_out(basis):
         G = np.asarray(s0[key].factor.G)
         assert np.allclose(sa[key].factor.G, G, atol=1e-8 * np.abs(G).max())
     assert all(np.allclose(a.coef[k], b.coef[k], rtol=1e-3, atol=1e-3) for k in a.coef)                  # the few C-C bonds leave directions of 1e-5 relative; coefficients ~100
+
+
+def test_bond_environment_rows_in_batches_match_one_row_at_a_time(monkeypatch):
+    """`offsite_fast._env_side`, whose rows a GPU takes in batches (`_rows`), against one row at a time, at
+    the shape where `jax.lax.map(batch_size=16)` on a GPU gave the second batch the first batch's bond mask
+    (42 atoms, 96 bond slots, 32 environment atoms, 8 radials, l <= 4; N-doped graphene, 108 eV in 40 blocks)
+    and at shapes with fewer rows than a batch and an exact multiple.  On a CPU the two are one code path."""
+    import jax.numpy as jnp
+    from ace_jax.operators import offsite_fast as OF
+    g = np.random.default_rng(0)
+    for n, K, Ke in ((42, 96, 32), (6, 96, 32), (32, 40, 12)):
+        e_rij = g.uniform(-5, 5, (n, Ke, 3)); e_live = np.arange(Ke)[None] < g.integers(Ke - 4, Ke + 1, (n, 1))
+        e_ch = np.eye(2)[g.integers(0, 2, (n, Ke))]; rvec = g.uniform(-6, 6, (n, K, 3))
+        mask = (np.arange(K)[None] < g.integers(K - 9, K - 3, (n, 1))).astype(float)         # a different number of live slots in each row
+        args = tuple(jnp.asarray(x) for x in (e_rij, e_live, e_ch, rvec, mask))
+        fn = lambda *a: OF._env_side(*a, 5.0, 9.45, 8, 4, 1.0)
+        got = np.asarray(jax.jit(fn)(*args))
+        monkeypatch.setattr(OF, "_rows", lambda f, xs: jax.lax.map(f, xs))
+        want = np.asarray(jax.jit(lambda *a: fn(*a))(*args))
+        monkeypatch.undo()
+        assert got.shape == (n, K, 16, 25) and np.abs(want).max() > 0.1
+        assert np.allclose(got, want, rtol=0, atol=1e-12)
+        assert not np.abs(got[mask == 0]).max()                                              # a slot without a bond has no environment
