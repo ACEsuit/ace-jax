@@ -270,3 +270,28 @@ def test_fit_leaving_structures_out(basis):
         G = np.asarray(s0[key].factor.G)
         assert np.allclose(sa[key].factor.G, G, atol=1e-8 * np.abs(G).max())
     assert all(np.allclose(a.coef[k], b.coef[k], rtol=1e-3, atol=1e-3) for k in a.coef)                  # the few C-C bonds leave directions of 1e-5 relative; coefficients ~100
+
+
+def test_fit_reads_structures_on_demand(basis):
+    """`LazyData` in place of a list: the same model, with one structure in memory at a time (no
+    budget: three reads of each, one pass on-site and two off-site), or each read once (a
+    budget that holds them all); a structure of another orbital basis is refused as it is read."""
+    require_optional("h5py")
+    from ace_jax.operators.data import LazyData, OperatorData
+    from ace_jax.operators.fit import fit_onsite
+    d = deeph.read(FIX)
+    rng = np.random.default_rng(0)
+    ds = [d, d._replace(blocks={c: {k: v + 1e-3 * rng.normal(size=v.shape) for k, v in b.items()} for c, b in d.blocks.items()})]
+    two = bond.BondBasis(site=basis.site, rcut_bond=3.3, n_bond=4)
+    on, _ = fit_onsite(basis.site, ds)
+    off, _ = fit_offsite(two, ds)
+    for budget, reads in ((0.0, 6), (1e12, 2)):
+        lazy = LazyData(2, lambda i: ds[i], budget)
+        on2, _ = fit_onsite(basis.site, lazy)
+        off2, _ = fit_offsite(two, lazy)
+        assert lazy.reads == reads and len(lazy._kept) == (1 if budget == 0 else 2)
+        for a, b in ((on, on2), (off, off2)):
+            assert a.coef.keys() == b.coef.keys() and all(np.array_equal(a.coef[k], b.coef[k]) for k in a.coef)
+    other = OperatorData(d.cell, d.positions, d.numbers, OrbitalBasis.of({14: (0, 1), 6: (0, 1)}), d.blocks)
+    with pytest.raises(ValueError, match="different orbital bases"):
+        fit_onsite(basis.site, LazyData(2, lambda i: (d, other)[i]))

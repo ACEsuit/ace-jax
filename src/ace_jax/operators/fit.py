@@ -25,6 +25,7 @@ from ..fit.linear import loo
 from ..fit.linear import multistart
 from ..fit.linear import objective as lo
 from ..fit.linear import stats as ls
+from .data import LazyData
 from .maps import make_room
 from .onsite import OnsiteModel, _features, design, parts_of, shell_pairs, site_graph
 
@@ -220,6 +221,24 @@ def _live_rows(R, c):
     return R[keep], c[keep]
 
 
+def _datasets(datasets, orbitals, who):
+    """The structures of a fit, their orbital basis, and the check that a structure has it.  A
+    `LazyData` is kept as it is and checked as each structure is read; anything else is a list
+    in memory, checked now."""
+    lazy = isinstance(datasets, LazyData)
+    datasets = datasets if lazy else list(datasets)
+    orbitals = datasets[0].basis if orbitals is None else orbitals
+
+    def same_basis(d):
+        if d.basis != orbitals:
+            raise ValueError(f"{who}: the datasets have different orbital bases")
+        return d
+    if not lazy:
+        for d in datasets:
+            same_basis(d)
+    return datasets, orbitals, same_basis
+
+
 def _need_x64():
     if not jax.config.jax_enable_x64:
         raise ValueError("the block fit needs float64: jax.config.update('jax_enable_x64', True)")
@@ -343,10 +362,7 @@ def fit_onsite(basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10,
     the structures left out one at a time (`_loo`; `aj fit --objective loo` for these rows);
     "press": it minimises their squared prediction error."""
     _need_x64()
-    datasets = list(datasets)
-    orbitals = datasets[0].basis if orbitals is None else orbitals
-    if any(d.basis != orbitals for d in datasets):
-        raise ValueError("fit_onsite: the datasets have different orbital bases")
+    datasets, orbitals, same_basis = _datasets(datasets, orbitals, "fit_onsite")
     nc = len(channels)
     designs, members = {}, {}                           # (z, L, p) -> (columns, keys); -> [(s1, s2, l1, l2)]
     for z in orbitals.species:
@@ -356,7 +372,7 @@ def fit_onsite(basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10,
                 members.setdefault((z, L, p), []).append((s1, s2, l1, l2))
 
     def rows(k):
-        d = datasets[k]
+        d = same_basis(datasets[k])
         rij, zi, zj, seg, n = site_graph(basis, d.positions, d.cell, d.numbers)
         F = {key: np.asarray(v) for key, v in _features(basis, rij, zi, zj, seg, n).items()}
         out = {}
@@ -409,10 +425,7 @@ def fit_offsite(bond_basis, datasets, orbitals=None, channels=("H", "S"), ridge=
     from .offsite import OffsiteModel, block_lps, canonical_pairs, site_features
 
     _need_x64()
-    datasets = list(datasets)
-    orbitals = datasets[0].basis if orbitals is None else orbitals
-    if any(d.basis != orbitals for d in datasets):
-        raise ValueError("fit_offsite: the datasets have different orbital bases")
+    datasets, orbitals, same_basis = _datasets(datasets, orbitals, "fit_offsite")
     lps = block_lps(orbitals)
     nc = len(channels)
     designs, members = {}, {}                           # (za, zb, L, p, same) -> ...; -> [(s1, s2, l1, l2)]
@@ -428,6 +441,7 @@ def fit_offsite(bond_basis, datasets, orbitals=None, channels=("H", "S"), ridge=
     # the chunks: (dataset, species pair, bonds); the graph of each dataset is cheap, its features are not
     graphs, chunks = [], []
     for k, d in enumerate(datasets):
+        same_basis(d)
         g = B.bond_graph(bond_basis, d.positions, d.cell, d.numbers)
         keys = [(int(r[0]), int(r[1]), int(r[2]), int(a), int(b)) for r, a, b in zip(g.R, g.i, g.j)]
         have = np.asarray([all(key in d.blocks[c] for c in channels) for key in keys], bool)
