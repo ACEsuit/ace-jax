@@ -1062,3 +1062,51 @@ Single runs on this node still differ by up to 50% (o4d14's third float64, o4d12
 column is one run each, so the o4d16 and o4d14 entries there are within the scatter of each other. The user table
 says: o4d20 1.1 to 1.2 times (CPU) and 1.2 (A100); o4d16 1.0 to 1.2 and 1.1; o4d14 and smaller no gain. With the
 DAG it was 1.39 at o4d20 and 1.10 at o4d16 and o4d14 (job 2283977). The rows are not added to the plotted files.
+
+## The Cantor linear ACE rows on a model with polynomial radials (2026-11-22)
+
+`ace_Cantor_medium.npz` is an ACEpotentials export: its radials are splines, so the CUDA kernel has no
+`ffi.analytic_plan` and keeps the radial table. `bench/scaling/models.py ace-poly` builds the model of the same
+(order 2, degree 7, rcut 5 Å) with `basis.build_basis`: 447 functions per element as before, polynomial radials,
+random weights N(0, 0.02), seed 0 (`ace_Cantor_medium_poly.npz`, sha256 914aae4a868d1e2e).
+`accuracy_cost.multicomponent` now times that file for `acejax-ace`; the scaling suite keeps the export, which its
+ACEpotentials lines rebuild in Julia. LAMMPS, float64, µs/atom-step, the kernels of 0.7.2 (tree 81536af + main):
+
+| run | job, node | splined export | polynomial model |
+|---|---|---|---|
+| CUDA kernel, 32,768 atoms | 2296663, gpu013 | 0.148, 0.148 (table) | 0.062, 0.064 (analytic); 0.152, 0.150 (`ACEJAX_FFI_RADIAL=table`) |
+| CUDA kernel | 2297096, gpu005 | | 0.069, 0.071 |
+| CUDA kernel | 2297255, gpu023 | | 0.0638 (the committed row) |
+| C++ kernel, 128 x 1, 8,192 atoms | 2297097, node132 | 0.382 (2296552) | 0.378, 0.391 |
+| compiled JAX, A100, unsplined | 2297096, gpu005 | 0.591 | 5.50, 5.50 |
+| compiled JAX, 128 x 1, unsplined | 2297097, node132 | 3.85 | 75.8 |
+| compiled JAX, A100, `spline_tol=1e-10` | 2297255, gpu023 | | 0.596 (the committed row) |
+| compiled JAX, 128 x 1, `spline_tol=1e-10` | 2297256, node101 | | 3.77 (the committed row) |
+
+The job 2296663 model had other random weights (the same basis). The table radial costs the same on both models,
+so the kernel's gain on the A100 (2.3 times) is the analytic radial; it is much more than on silicon (2 to 4% of a
+step), not profiled. The CPU kernel reads its table and does not change. The compiled JAX program on the
+polynomial model unsplined is 9 times (A100) and 20 times (CPU) slower: the radial is 53 polynomials for 58 columns
+per edge (`rnl_Wnlq` (5, 5, 58, 53)), and `spline_tol="auto"` does not spline a model that is not learned. Splined
+at 1e-10 (1,024 intervals) it costs what the export did, so `multicomponent.XLA_SPLINE_TOL` sets that for the
+compiled JAX rows and the kernel rows take the file as it is. The gate holds: max dF 7.5e-15 eV/Å (kernel,
+analytic), 1.5e-13 (compiled JAX against the reference splined the same way). The slow default of the compiled
+JAX program on a five-element model of `aj basis` is not addressed here.
+
+### grace-runtime on the Cantor PACE model (2026-11-23)
+
+`pace-rt` (grace-runtime 0.1.4, `pace/runtime[/kk]`) on `pace_Cantor_medium.yaml`, the B-basis of the table's
+`pace_Cantor_medium.yace` (`models.py pace-yaml`; envs `sulis-{gpu,cpu}-cantor-gracert.json`). µs/atom-step:
+
+| run | job, node | repeats |
+|---|---|---|
+| A100, 32,768 atoms | 2297491, gpu019 | 0.2697 (the committed row), 0.2697 |
+| 128 x 1, 8,192 atoms | 2297492, node053 | 0.2524 (the committed row), 0.2521 |
+
+Gate against ace-jax on the `.yace`: max dE 2.6e-12 eV/atom, max dF 7.8e-8 eV/Å (grace-runtime's radial splines).
+The CPU row is `not_plateau`: 0.379 µs/atom-step at 1,024 atoms, so 8 atoms a rank is far from the plateau and 64
+a rank may not be on it. The `.yaml` must come from python-ace's git master (0.4.0), which wrote the `.yace`:
+pyace 0.2.8 (Sulis's pacemaker environment) ignores `number_of_functions_per_element` in
+`create_multispecies_basis_config`, gave 957,935 functions with other coefficients, and the gate failed at
+0.29 eV/atom (jobs 2297260, 2297261). The 0.4.0 `.yaml` (sha256 d7af9f029012b05e) converts back to the `.yace`
+byte for byte.

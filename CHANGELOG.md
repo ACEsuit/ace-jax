@@ -43,6 +43,13 @@
   silicon model o4d20 (1.4 times before 0.7.2, when the product basis used more of the time), and no gain
   from o4d14 down. The kernel row of the five-element alloy table is timed again and did not change.
 
+- **The alloy speed table uses a linear ACE model that ace-jax builds.** The model has polynomial radial
+  functions, and the CUDA kernel calculates them with no table. The kernel then costs 0.064 µs/atom-step on an
+  A100 for the five-element alloy (0.15 with the model of splined radials that the table used before). The
+  CPU row did not change. `bench/scaling/models.py ace-poly` builds the model.
+- The alloy speed table has a row for grace-runtime (`pace/runtime`) on the PACE model: 0.27 µs/atom-step on
+  an A100 and 0.25 on 128 CPU cores.
+
 ### Fixed
 
 - `HamiltonianCalculator` and `aj eval` now refuse an electron count that does not fit in the orbitals of
