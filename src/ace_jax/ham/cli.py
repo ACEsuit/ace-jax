@@ -575,8 +575,8 @@ def density_add_parser(sub):
     f.add_argument("--metric", choices=["overlap", "plain"], default=None, help="overlap: the L2 norm of the density error (default when every structure "
                    "has the overlap); plain: least squares on each coefficient")
     f.add_argument("--prior", default="none", help="smoothness prior: none (default), its scale as a number, or evidence, loo, press")
-    f.add_argument("--scaled", type=float, default=1e-6, metavar="R", help="ridge of R times the diagonal of the Gram matrix on every feature column "
-                   "(default 1e-6; used with --prior none)")
+    f.add_argument("--scaled", type=float, default=None, metavar="R", help="ridge of R times the diagonal of the Gram matrix on every feature column "
+                   "(default 1e-6 with --prior none; not with another --prior)")
     f.add_argument("--order", type=int, default=1, help="correlation order of the site features (default 1)")
     f.add_argument("--site-rcut", type=float, default=7.0, help="cutoff of the site features (default 7.0)")
     f.add_argument("--site-radials", type=int, nargs="+", default=[12], help="radial functions of the site features, per correlation order (default 12; higher orders 5)")
@@ -593,8 +593,8 @@ def density_add_parser(sub):
 
 
 def density_run(a):
-    if a.density_cmd == "fit" and a.prior != "none":
-        a.scaled = None                                  # the default ridge belongs to --prior none
+    if a.density_cmd == "fit" and a.prior == "none" and a.scaled is None:
+        a.scaled = 1e-6                                  # the default ridge belongs to --prior none; with another prior, --scaled is an error (`cmd_density_fit`)
     {"fit": cmd_density_fit, "predict": cmd_density_predict}[a.density_cmd](a)
 
 

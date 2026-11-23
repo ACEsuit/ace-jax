@@ -255,3 +255,6 @@ def test_command_line(synthetic, tmp_path, capsys):
     with pytest.raises(SystemExit):
         main(["density", "fit", "--data", str(tmp_path / "bare"), "--out", plain, "--metric", "overlap", *basis])
     assert "--metric overlap" in capsys.readouterr().err
+    with pytest.raises(SystemExit):                          # --scaled is the ridge of --prior none: with another prior it is refused, not dropped
+        main(["density", "fit", "--data", str(tmp_path / "bare"), "--out", plain, "--prior", "1e3", "--scaled", "1e-4", *basis])
+    assert "--prior and --scaled" in capsys.readouterr().err
