@@ -193,7 +193,10 @@ def build_pace_yaml(names=None):
     """The B-basis .yaml of pace_<system>_<size>.yace (`names`: "System/size" ...; default Cantor/medium), for
     grace-runtime's `pace/runtime`, which reads pacemaker's B-basis file and no .yace.  The same pyace call and
     seed as `build_pace`, so the same model; the .yace is not written again (the benchmark's gate compares
-    LAMMPS on the .yaml with ace-jax on the .yace).  Run inside pace_ref/.venv (pyace)."""
+    LAMMPS on the .yaml with ace-jax on the .yace).  Run inside pace_ref/.venv (pyace), built from python-ace's
+    git master (0.4.0), as the .yace was: pyace 0.2.8 ignores `number_of_functions_per_element` here and gives
+    958,000 functions with other coefficients.  The check: the .yaml's `to_ACECTildeBasisSet().save_yaml` is
+    the .yace byte for byte (Cantor/medium: sha256 73c2c327833f91bf)."""
     DIR.mkdir(parents=True, exist_ok=True)
     for name in names or ["Cantor/medium"]:
         system, size = name.split("/")
