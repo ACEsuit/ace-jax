@@ -55,7 +55,7 @@ agree to 2.7e-14 eV/atom and 8.1e-13 eV/Å or better at every size.
 
 ## Results (2026-11-24): unweighted regression
 
-These are the benchmark's rows. pypolymlp 0.23.0, `use_auto_weight=False`; everything else as in the protocol
+These are the benchmark's main polymlp rows (family `polymlp`). pypolymlp 0.23.0, `use_auto_weight=False`; everything else as in the protocol
 table. E = energy RMSE (meV/atom), F = force RMSE and MAE (eV/Å) on the 248 test configurations; QoI = the
 benchmark's QoI error; times in µs per atom-step on a 128-core EPYC 7742 node, 4,096 atoms (the timings of the
 first pass: the model forms are unchanged, and LAMMPS was not rerun on the new coefficients).
@@ -83,7 +83,9 @@ RMSE is lower by a quarter to a third on the model type 2 sizes, and the QoI err
 target of 0.0825 eV/Å. Full before / after table: `docs/dev/accuracy-cost-results.md`, "Polynomial MLPs refitted
 without automatic weights".
 
-## Results of the first pass (2026-11-12): pypolymlp 0.22.1, automatic weights on (superseded)
+## Results of the first pass (2026-11-12): pypolymlp 0.22.1, automatic weights on
+
+Plotted as the second series, family `polymlp_auto` (open diamonds, dotted).
 
 
 Full discussion: `docs/dev/accuracy-cost-results.md`, section "Polynomial MLPs". E = energy RMSE

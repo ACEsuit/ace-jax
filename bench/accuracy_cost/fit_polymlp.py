@@ -20,7 +20,7 @@
   mlp_dev/core/utils_weights.py) are off, `use_auto_weight=False` (pypolymlp >= 0.23.0; A. Seko added the option
   for this benchmark, 2026-11-24), so every family is fitted under the same per-type weights (weights.py).  Stress
   rows keep pypolymlp's flat factor 0.1.  A sweep entry with `auto_weight: true` turns the automatic weights back
-  on (the 0.22.1 protocol: the `-a28` checks, and the first ladder, kept in runs/.../polymlp_auto_v0221).
+  on (the 0.22.1 protocol: the `-a28` checks, and the first ladder, kept in runs/.../polymlp_auto).
 - Virials: fitted for the configurations that have one (include_stress per dataset).  pypolymlp's "stress" is
   sum r (x) f in eV per cell, the libAtoms virial, so info["virial"] goes in unchanged.
 - Effective size: `design_rank` is the numerical rank (singular values above RANK_TOL x the largest) of the

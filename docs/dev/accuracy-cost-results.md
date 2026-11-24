@@ -746,8 +746,9 @@ on Symmetrix 0.59 µs/atom-step.
 
 ## Polynomial MLPs (2026-11-12, first pass)
 
-**Superseded rows (2026-11-24).** The accuracy and QoI numbers of this section are the pypolymlp 0.22.1 fits, with
-pypolymlp's automatic value weights on. The benchmark's polymlp rows are now the refits without them: see
+**Now the second series (2026-11-24).** The accuracy and QoI numbers of this section are the pypolymlp 0.22.1 fits, with
+pypolymlp's automatic value weights on. They are kept as the family `polymlp_auto` (open diamonds, dotted). The
+benchmark's polymlp rows are now the refits without those weights: see
 "Polynomial MLPs refitted without automatic weights (2026-11-24)" below. The timings, gates and the discussion of
 MPI are unchanged.
 
@@ -844,8 +845,9 @@ changes the force errors by at most 3.5 % and no row here.
 
 ## Polynomial MLPs refitted without automatic weights (2026-11-24)
 
-The polymlp line is replaced by refits with pypolymlp 0.23.0 and `use_auto_weight=False`, an option A. Seko added
-for this benchmark. Every other choice is as before: the training split, the 90 / 10 validation split
+The polymlp line is now refits with pypolymlp 0.23.0 and `use_auto_weight=False`, an option A. Seko added
+for this benchmark. The first-pass fits stay in the figures as a second series, `polymlp_auto` ("polynomial MLP,
+pypolymlp's automatic weights": open diamonds, dotted, at the same cost), so the effect of the weighting is visible. Every other choice is as before: the training split, the 90 / 10 validation split
 (`val_split.json`), cutoff 5.0 Å, the 10-value penalty grid, virials, and the GAP-18 per-type dataset weights.
 
 **Why.** Every fitted family takes its per-configuration-type weights from GAP-18's sigmas (`weights.py`; only
@@ -897,10 +899,10 @@ What was not redone:
 
 Provenance: fitted on mnf148 by `runs/accuracy_cost_pilot/polymlp_v023/pilot.py` (the functions of
 `fit_polymlp.py`) and installed in `runs/accuracy_cost/polymlp/<size>`; `fit_polymlp.py` now makes the same call (its m3g6-l44 `polymlp.yaml` is identical byte for byte).
-The 0.22.1 fits are kept in `runs/accuracy_cost/polymlp_auto_v0221/`, and their QoI results under the model names
+The 0.22.1 fits are kept in `runs/accuracy_cost/polymlp_auto/`, and their QoI results under the model names
 `POLYMLPauto_<size>`. A monkey-patched 0.22.1 with the energy and force value weights off gave the same force
 RMSE within 2 % on three sizes (`runs/accuracy_cost_pilot/polymlp_unw`). Figures and the page JSON are
-regenerated; only the polymlp points move.
+regenerated; the polymlp points move and the `polymlp_auto` series is added, nothing else changes.
 
 ## Foundation models: zero-shot and fine-tuned (2026-11-16)
 
