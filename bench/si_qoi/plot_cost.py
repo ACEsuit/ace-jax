@@ -310,12 +310,31 @@ def style(ax, xlabel, ylabel):
     ax.tick_params(colors=MUTED)
 
 
+# Families that are a grid search over model forms, not a nested ladder (polymlp: three model types, whose cost and
+# accuracy do not follow the coefficient count).  The line joins the non-dominated models of the panel, in x order;
+# the dominated ones stay as faint markers.  A. Seko's repository shows its models the same way (the convex hull).
+FRONT_ONLY = ("polymlp", "polymlp_auto")
+DOMINATED_ALPHA = 0.35
+
+
+def front(p, key):
+    """(front, rest) of points with x and `key`: `front` are those no other point beats (x and `key` both no larger,
+    one smaller), sorted by x; `rest` the dominated ones, in the given order."""
+    beat = lambda o, q: o["x"] <= q["x"] and o[key] <= q[key] and (o["x"] < q["x"] or o[key] < q[key])
+    f = [q for q in p if not any(beat(o, q) for o in p)]
+    return sorted(f, key=lambda q: q["x"]), [q for q in p if not any(q is g for g in f)]
+
+
 def series(ax, data, key):
     for fam, pts in data.items():
         lab, col, mk, ls, filled, _ = FAM[fam]
         p = [q for q in pts if q[key] is not None and q["x"] is not None]
         if not p:
             continue
+        if fam in FRONT_ONLY:
+            p, rest = front(p, key)
+            ax.plot([q["x"] for q in rest], [q[key] for q in rest], ls="none", color=col, marker=mk, ms=8,
+                    mfc=col if filled else "white", mec=col, mew=1.5, alpha=DOMINATED_ALPHA, zorder=2)
         x, y = [q["x"] for q in p], [q[key] for q in p]
         ax.plot(x, y, ls="none" if fam in POINTS_ONLY else ls, lw=2, color=col, marker=mk, ms=8, mfc=col if filled else "white", mec=col,
                 mew=1.5, label=lab, zorder=3)
@@ -518,7 +537,8 @@ def main():
                 "ace-jax kernel: the same bundles with the XLA program replaced by one XLA FFI call "
                 "(ace_jax.eval.ffi; radials tabulated in r): C++ on the CPU (128x1), CUDA on the A100.\n"
                 "NEP: trained by GPUMD; on the CPU LAMMPS pair_style nep (NEP_CPU, float64); on the GPU GPUMD's own MD code, mixed precision (labelled).\n"
-                "Polynomial MLP: pair_style polymlp has no MPI and no GPU code: one rank with 128 OpenMP threads.\n"
+                "Polynomial MLP: pair_style polymlp has no MPI and no GPU code: one rank with 128 OpenMP threads. Its models are a grid search, "
+                "not a nested ladder: each panel's line joins the models no other is both cheaper (or smaller) and more accurate than; faint markers are the others.\n"
                 if any("CPU" in r[0] for r in rows) else "")
     bottom = 0
     if not a.no_note:

@@ -54,6 +54,9 @@ def traces(data, key, xa, ya, xlabel, shown, codes):
         p = [q for q in pts if q[key] is not None and q["x"] is not None]
         if not p:
             continue
+        rest = []
+        if fam in P.FRONT_ONLY:                        # as plot_cost.series: the line through the panel's non-dominated models
+            p, rest = P.front(p, key)
         t = {"type": "scatter", "mode": "markers" if fam in P.POINTS_ONLY else "lines+markers", "name": lab, "legendgroup": fam, "showlegend": False,
              "xaxis": xa, "yaxis": ya, "x": [q["x"] for q in p], "y": [q[key] for q in p],
              "line": {"color": col, "width": 2, "dash": DASH[ls]},
@@ -71,6 +74,10 @@ def traces(data, key, xa, ya, xlabel, shown, codes):
                             "array": [q[key + "_hi"] - q[key] for q in p],
                             "arrayminus": [q[key] - q[key + "_lo"] for q in p]}
         out.append(t)
+        if rest:                                       # the dominated models: faint markers in the family's group
+            out.append(t | {"mode": "markers", "x": [q["x"] for q in rest], "y": [q[key] for q in rest], "opacity": P.DOMINATED_ALPHA,
+                            "customdata": [[q["size"], q["n"], q["rmse_F"], _num(q["qoi"]), timed_with(codes, fam, q["size"])] for q in rest],
+                            "hovertemplate": t["hovertemplate"].replace("<extra>", "<br>another model of this family is cheaper (or smaller) and more accurate<extra>")})
     for fam in {f for f, _, _ in P.arrow_pairs(data, key)}:   # plot_cost's arrows: a thin line per pair, in the
         seg = [(a, b) for f, a, b in P.arrow_pairs(data, key) if f == fam]   # derived family's group (shown with it)
         out.append({"type": "scatter", "mode": "lines", "name": P.FAM[fam][0], "legendgroup": fam, "showlegend": False,

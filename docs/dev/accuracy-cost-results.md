@@ -897,6 +897,14 @@ What was not redone:
 - **The 28-value penalty-grid checks** (`-a28`) are 0.22.1 fits with automatic weights (`auto_weight: true` in
   `sweep.yaml`). They are a check of that protocol and are not plotted.
 
+**How the two polymlp series are drawn.** The 14 models are a grid search over three model types, not a nested
+ladder: cost follows the angular settings and not the coefficient count (m3g9-l882: 747 coefficients, 14.3 µs;
+m4g6-l442: 864, 4.5 µs), so a line through the sizes in order doubled back. In each panel the line now joins the
+non-dominated models only (no other model of the series is both cheaper, or smaller in the parameter row, and
+more accurate), in x order; the dominated models stay as faint markers (`plot_cost.FRONT_ONLY`, `front`; the
+interactive figure's hover says so). On the CPU cost row that is 6 of 14 models for the force error and 8 of 14
+for the QoI error. The set differs between panels. The bars (cost and size to reach the target) are unaffected.
+
 Provenance: fitted on mnf148 by `runs/accuracy_cost_pilot/polymlp_v023/pilot.py` (the functions of
 `fit_polymlp.py`) and installed in `runs/accuracy_cost/polymlp/<size>`; `fit_polymlp.py` now makes the same call (its m3g6-l44 `polymlp.yaml` is identical byte for byte).
 The 0.22.1 fits are kept in `runs/accuracy_cost/polymlp_auto/`, and their QoI results under the model names

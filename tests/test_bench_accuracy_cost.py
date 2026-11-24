@@ -1271,3 +1271,15 @@ def test_multicomponent_cases(monkeypatch):
     cells = timing.gate_cells("Cantor", 256)
     assert len(cells) == timing.GATE_CELLS and all(len(a) == 256 and set(a.get_chemical_symbols()) == set(models.ELEMENTS["Cantor"]) for a in cells)
     assert set(timing.gate_cells()[0].get_chemical_symbols()) == {"Si"} and len(timing.gate_cells()[0]) == timing.GATE_N
+
+
+def test_plot_cost_front():
+    """plot_cost.front: the non-dominated points in x order, the dominated ones apart; a tie in both is kept."""
+    import importlib, sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent / "bench" / "si_qoi"))
+    P = importlib.import_module("plot_cost")
+    pts = [{"s": "a", "x": 4.0, "y": 0.14}, {"s": "b", "x": 14.0, "y": 0.105}, {"s": "c", "x": 4.5, "y": 0.107},
+           {"s": "d", "x": 8.0, "y": 0.094}, {"s": "e", "x": 60.0, "y": 0.098}, {"s": "f", "x": 8.0, "y": 0.094}]
+    f, rest = P.front(pts, "y")
+    assert [q["s"] for q in f] == ["a", "c", "d", "f"] and [q["s"] for q in rest] == ["b", "e"]
+    assert {"polymlp", "polymlp_auto"} == set(P.FRONT_ONLY) <= set(P.FAM)
