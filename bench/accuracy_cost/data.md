@@ -189,7 +189,7 @@ on every frame, test included, so it is a reference line, not a held-out score. 
 pypolymlp and lammps-polymlp-package are BSD-3-Clause (A. Seko). Nothing from either is in this repository.
 
 - Env `/storage/eng/essswb/venvs/ac-polymlp`: micromamba, conda-forge (`envs/polymlp/environment.yml`):
-  Python 3.12, pypolymlp 0.22.1, numpy 2.5.4, ASE 3.29.0, phonopy 4.10.0, symfc. pypolymlp has no wheels, and a
+  Python 3.12, pypolymlp 0.23.0 (env `ac-polymlp-023`, the fits of 2026-11-24; 0.22.1 in `ac-polymlp`, the first pass), numpy 2.5.4, ASE 3.29.0, phonopy 4.10.0, symfc. pypolymlp has no wheels, and a
   pip build of its sdist fails: its build requirement `eigen` resolves on PyPI to an unrelated package (an
   eigenproblem solver with a licence manager), not the Eigen headers.
 - Sources (read, not vendored): `$ACEJAX_AC_ROOT/ext/pypolymlp` b5e61e9 (v0.22.1-9, 2026-11-05),

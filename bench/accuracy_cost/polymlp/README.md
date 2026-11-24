@@ -14,14 +14,14 @@ No family gets per-system hyperparameter optimisation in this pass.
 
 | Item | Choice |
 |---|---|
-| Code | pypolymlp 0.22.1 (conda-forge), `lammps-polymlp-package` 046eaa4 (VERSION 0.3.4) |
+| Code | pypolymlp 0.23.0 (conda-forge; 0.22.1 for the first pass), `lammps-polymlp-package` 046eaa4 (VERSION 0.3.4) |
 | Data | `$ACEJAX_AC_ROOT/data/si_accuracy_cost/train.xyz` (2,227 configurations), `test.xyz`; split hash in `split.json` |
 | Cutoff | 5.0 Å (every family) |
 | Energies | `atomic_energy` = the isolated-atom DFT energy, -158.54496821 eV; the calculator adds it back |
 | Model ladder | fourteen points at 5 Å: eight of the grid search of `pypolymlp/utils/grid_search`, six of model type 2 (`sweep.yaml`, family `polymlp`) |
 | Ridge alpha | pypolymlp's own selection over 10^linspace(-8, 1, 10), on a validation split of *train* |
 | Validation split | 10 % of each configuration type, seed 0 (`fit_polymlp.val_split`; indices in each run's `val_split.json`) |
-| Weights | one dataset per configuration type, weight sigma_F,default / sigma_F from the GAP-18 force sigmas |
+| Weights | one dataset per configuration type, weight sigma_F,default / sigma_F from the GAP-18 force sigmas; `use_auto_weight=False` |
 | Virials | fitted for the configurations that have one (`include_stress` per dataset) |
 | Scoring | `evaluate.py` (test set) and `bench/si_qoi/score.py`, through `fit_polymlp.calculator` (float64) |
 
@@ -33,11 +33,13 @@ Notes on the choices:
 - **Alpha grid.** The grid search in pypolymlp uses 10^linspace(-4, 1, 6). Validation selected its smallest
   value in a first fit, so the grid continues to 1e-8. `status.json` records `alpha_at_edge` for every size.
 - **Weights.** pypolymlp has one scalar weight per dataset. It multiplies the energy, force and stress
-  residuals of that dataset. pypolymlp's own row weights stay on (`mlp_dev/core/utils_weights.py`): energy rows
-  by energy tier, force components above 1 eV/Å as 1/|F|, stress rows 0.1 with large values damped.
+  residuals of that dataset. These GAP-18 per-type weights are the only weights: pypolymlp's automatic value
+  weights are off (`use_auto_weight=False`, pypolymlp 0.23.0 and later), as no other family in the benchmark has
+  a second weighting. Stress rows keep the flat factor 0.1. The first pass (2026-11-12) used pypolymlp 0.22.1,
+  where the automatic weights could not be disabled.
 - **Stress convention.** pypolymlp's stress is the virial sum r ⊗ f in eV per cell (xx yy zz xy yz zx). The
   benchmark's calculator converts it to ASE's stress. `PolymlpASECalculator` returns it unconverted.
-- **Effective size.** Each `status.json` has `design_rank`: the numerical rank of the weighted training design
+- **Effective size.** Each first-pass `status.json` has `design_rank`: the numerical rank of the weighted training design
   matrix with unit-norm columns (singular values above 1e-10 of the largest), next to the coefficient count.
 
 ## Timing: no 128-rank row
@@ -51,7 +53,38 @@ The rows recorded instead are one rank with 128 OpenMP threads (`sulis-cpu-128x1
 The LAMMPS gate compares `pair_style polymlp` with pypolymlp's evaluator on three rattled 64-atom cells. They
 agree to 2.7e-14 eV/atom and 8.1e-13 eV/Å or better at every size.
 
-## Results (2026-11-12)
+## Results (2026-11-24): unweighted regression
+
+These are the benchmark's rows. pypolymlp 0.23.0, `use_auto_weight=False`; everything else as in the protocol
+table. E = energy RMSE (meV/atom), F = force RMSE and MAE (eV/Å) on the 248 test configurations; QoI = the
+benchmark's QoI error; times in µs per atom-step on a 128-core EPYC 7742 node, 4,096 atoms (the timings of the
+first pass: the model forms are unchanged, and LAMMPS was not rerun on the new coefficients).
+
+| Size | Coefficients | Alpha | E | F | F MAE | QoI | 1 rank × 128 threads | 1 × 1 |
+|---|---|---|---|---|---|---|---|---|
+| m3g6-l44 | 141 | 1e-6 | 75.7 | 0.1364 | 0.0907 | 1.80 | 4.45 | 71.2 |
+| m3g8-l442 | 300 | 1e-8 | 30.5 | 0.1167 | 0.0768 | 1.30 | 5.04 | 99.8 |
+| m3g9-l882 | 747 | 1e-8 | 27.3 | 0.1052 | 0.0665 | 0.79 | 14.27 | 461.7 |
+| m4g6-l442 | 864 | 1e-7 | 23.3 | 0.1069 | 0.0695 | 0.90 | 4.55 | 80.8 |
+| m4g9-l442 | 1782 | 1e-4 | 15.6 | 0.1005 | 0.0644 | 0.78 | 5.53 | 122.6 |
+| m4g8-l842 | 3536 | 1e-3 | 14.4 | 0.0960 | 0.0593 | 0.80 | 11.36 | 276.0 |
+| m4g9-l882 | 4797 | 1e-2 | 13.8 | 0.0944 | 0.0579 | 0.68 | 14.96 | 532.2 |
+| m4g8-l1282 | 6984 | 1e-2 | 12.0 | 0.0923 | 0.0566 | 0.61 | 21.51 | 750.6 |
+| m2g6-l44 | 7380 | 1e-2 | 8.3 | 0.0944 | 0.0589 | 0.70 | 7.94 | 360.9 |
+| m2g6-l84 | 10584 | 1e-2 | 7.0 | 0.0905 | 0.0545 | 0.61 | 13.02 | 554.9 |
+| m2g8-l84 | 18720 | 1e-2 | 6.3 | 0.0916 | 0.0516 | 0.47 | 19.46 | 921.9 |
+| m2g9-l84 | 23652 | 1e-1 | 5.8 | 0.0895 | 0.0538 | 0.48 | 45.51 | 1261.9 |
+| m2g8-l124 | 25424 | 1e-2 | 8.5 | 0.0976 | 0.0508 | 0.45 | 61.21 | 1503.4 |
+| m2g9-l124 | 32130 | 1e-1 | 6.0 | 0.0912 | 0.0524 | 0.41 | 122.40 | 2320.6 |
+
+Against the first pass: force RMSE is lower on 12 of 14 sizes (2-8 % for most; m4g8-l842 0.125 → 0.096), energy
+RMSE is lower by a quarter to a third on the model type 2 sizes, and the QoI error is lower on every size by
+15-35 %. MAE changes by at most 5 %. Four type 2 sizes are below the QoI target of 0.5. No size reaches the force
+target of 0.0825 eV/Å. Full before / after table: `docs/dev/accuracy-cost-results.md`, "Polynomial MLPs refitted
+without automatic weights".
+
+## Results of the first pass (2026-11-12): pypolymlp 0.22.1, automatic weights on (superseded)
+
 
 Full discussion: `docs/dev/accuracy-cost-results.md`, section "Polynomial MLPs". E = energy RMSE
 (meV/atom), F = force RMSE (eV/Å) on the 248 test configurations; QoI = the benchmark's QoI error; times in µs
@@ -82,7 +115,7 @@ Two things to know when reading it:
 - **hcp.** The two models with `gtinv_maxl` [8, 8, 2] put hcp 37–42 meV/atom too low. Their neighbours are within
   10 meV/atom. This is most of the reason the QoI error does not fall between 1,782 and 4,797 coefficients.
 
-## Author's comments and two checks (2026-11-17)
+## Author's comments and two checks (2026-11-17, on the first-pass fits)
 
 A. Seko replied to the first pass. He confirmed the 5.0 Å cutoff (a longer one "is not essential to the method")
 and that there is no MPI version. He raised two points, both checked here; neither changes a row above.

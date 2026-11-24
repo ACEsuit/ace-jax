@@ -6,7 +6,7 @@ name: ac-polymlp
 channels: [conda-forge]
 dependencies:
   - python=3.12
-  - pypolymlp=0.22.1
+  - pypolymlp=0.23.0       # >= 0.23.0: use_auto_weight (fit_polymlp.py)
   - ase=3.29.0
   - phonopy          # pypolymlp.api.pypolymlp_calc (the evaluator) imports symfc and phonopy
   - symfc
