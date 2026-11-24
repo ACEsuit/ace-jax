@@ -1,0 +1,2935 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head><meta name="robots" content="noindex">
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Fit and evaluate ACE and PACE interatomic potentials in Python/JAX">
+      
+      
+      
+        <link rel="canonical" href="https://acesuit.github.io/ace-jax/concepts/force-uncertainty-maths/">
+      
+      
+        <link rel="prev" href="../">
+      
+      
+        <link rel="next" href="../../howto/basis/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/acesuit-logo.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Force uncertainty: the mathematics - ace-jax</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#force-uncertainty-the-mathematics" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="ace-jax" class="md-header__button md-logo" aria-label="ace-jax" data-md-component="logo">
+      
+  <img src="../../assets/acesuit-logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ace-jax
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Force uncertainty: the mathematics
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/ACEsuit/ace-jax" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ACEsuit/ace-jax
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="ace-jax" class="md-nav__button md-logo" aria-label="ace-jax" data-md-component="logo">
+      
+  <img src="../../assets/acesuit-logo.png" alt="logo">
+
+    </a>
+    ace-jax
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/ACEsuit/ace-jax" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ACEsuit/ace-jax
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../tutorials/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/first-fit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    1. First fit: silicon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/learned-radials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2. Learned radials: silicon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/multi-element/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    3. Multi-element fits: categorical and embedded species
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/dataset-and-properties/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    4. Your data, your property
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/basis-and-evidence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    5. Basis size and the evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/surfaces/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    6. Surfaces: coverage and repair
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/curation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    7. Automating curation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/truth-about-the-truth/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    8. The truth about the truth
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/bring-your-own-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    9. Bring your own data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Force uncertainty: the mathematics
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Force uncertainty: the mathematics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-model-and-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Model and data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-prior-and-posterior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Prior and posterior
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-hyperparameters-the-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Hyperparameters: the evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-the-validation-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. The validation protocol
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-sandwich-clusters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Sandwich clusters
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-the-shape-exact-centred-jackknife-covariance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. The shape: exact centred jackknife covariance
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. The shape: exact centred jackknife covariance">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#leverage-corrected-cluster-scores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Leverage-corrected cluster scores
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#centred-meat-and-the-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Centred meat and the shape
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Storage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rotation-equivariance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rotation equivariance
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-calibration-scores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Calibration scores
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Calibration scores">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-transfer-assumption" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The transfer assumption
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-transfer-exponent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The transfer exponent
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-the-scales" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. The scales
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. The scales">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#units-and-weights" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Units and weights
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#forces_std-the-per-group-rms-scale" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        forces_std: the per-group rms scale
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#forces_q-the-per-group-conformal-quantile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        forces_q: the per-group conformal quantile
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-the-groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. The groups
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-calibration-sets-aj-calibrate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Calibration sets: aj calibrate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-the-support-diagnostic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. The support diagnostic
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-end-to-end" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. End to end
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-the-gp-arm-uq-ard-gp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. The GP arm: --uq ard-gp
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#14-assumptions-and-limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14. Assumptions and limitations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#references" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        References
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-to guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-to guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/basis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build a basis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/fit-yaml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run files (fit.yaml)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/multi-element/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Multi-element fits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/ase/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASE calculators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/batch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluate many structures
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/lammps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LAMMPS export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/jax-md/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MD with JAX-MD
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/precision/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Choose float64 or float32
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/pace/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PACE .yace models
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/learned-radials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Learn the radial basis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/force-uncertainty/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Per-atom force uncertainty
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/foundation-labels/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Labels from a foundation model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/large-fits/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Large linear fits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/reproducibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reproducibility
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ and troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../licence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Licence and citation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-model-and-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Model and data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-prior-and-posterior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Prior and posterior
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-hyperparameters-the-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Hyperparameters: the evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-the-validation-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. The validation protocol
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-sandwich-clusters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Sandwich clusters
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-the-shape-exact-centred-jackknife-covariance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. The shape: exact centred jackknife covariance
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. The shape: exact centred jackknife covariance">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#leverage-corrected-cluster-scores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Leverage-corrected cluster scores
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#centred-meat-and-the-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Centred meat and the shape
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Storage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rotation-equivariance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rotation equivariance
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-calibration-scores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Calibration scores
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Calibration scores">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-transfer-assumption" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The transfer assumption
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-transfer-exponent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The transfer exponent
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-the-scales" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. The scales
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. The scales">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#units-and-weights" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Units and weights
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#forces_std-the-per-group-rms-scale" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        forces_std: the per-group rms scale
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#forces_q-the-per-group-conformal-quantile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        forces_q: the per-group conformal quantile
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-the-groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. The groups
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-calibration-sets-aj-calibrate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Calibration sets: aj calibrate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-the-support-diagnostic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. The support diagnostic
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-end-to-end" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. End to end
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-the-gp-arm-uq-ard-gp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. The GP arm: --uq ard-gp
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#14-assumptions-and-limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14. Assumptions and limitations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#references" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        References
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="force-uncertainty-the-mathematics">Force uncertainty: the mathematics<a class="headerlink" href="#force-uncertainty-the-mathematics" title="Permanent link">&para;</a></h1>
+<p>This page gives the method of <code>aj fit --uq ard</code> (revision 2): how ace-jax
+builds, calibrates and evaluates the per-atom force uncertainty. For how to
+use it, see <a href="../../howto/force-uncertainty/">Per-atom force uncertainty</a>.</p>
+<p><strong>Summary.</strong></p>
+<ul>
+<li>The force uncertainty is an uncertainty <strong>shape</strong> multiplied by a group
+  <strong>scale</strong>.</li>
+<li>The shape is the per-atom <span class="arithmatex">\(3\times3\)</span> block <span class="arithmatex">\(V(x)\)</span> of a jackknife
+  covariance of the fitted coefficients. The jackknife is exact, centred and
+  delete-one-cluster. The clusters are spatial blocks in large cells.</li>
+<li>The trace <span class="arithmatex">\(v(x)=\operatorname{tr}V(x)\)</span> is the isotropic shape.</li>
+<li>The scale has two forms. <code>forces_std</code> uses a group rms factor
+  <span class="arithmatex">\(\lambda_g^{\mathrm{rms}}\)</span>. <code>forces_q</code> uses a group conformal quantile
+  <span class="arithmatex">\(q_g\)</span>, with equal weight for each configuration.</li>
+<li>The fit calculates both scales from scores. The numerator of a score (the
+  error) and its denominator (the shape) come from the same validation
+  posterior.</li>
+<li>A fitted power of the training-set size then applies the scales to the
+  final posterior.</li>
+<li>In a group, the order of atoms by <span class="arithmatex">\(\sigma\)</span> is the order by the shape.
+  Between groups, the order changes only through the ratios of the group
+  scales.</li>
+</ul>
+<p><strong>Notation.</strong></p>
+<table>
+<thead>
+<tr>
+<th>Symbol</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><span class="arithmatex">\(i\)</span>, <span class="arithmatex">\(\alpha\in\{x,y,z\}\)</span></td>
+<td>atoms; Cartesian components</td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(C\in T\)</span></td>
+<td>training configurations (<span class="arithmatex">\(T\)</span> the training set)</td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(c\)</span>, <span class="arithmatex">\(\bar c\)</span></td>
+<td>model coefficients; their posterior mean</td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(L\)</span></td>
+<td>number of columns of the design (basis functions, plus the E0 columns of <a href="#1-model-and-data">section 1</a> when <span class="arithmatex">\(E^0\)</span> is fitted jointly)</td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(B\)</span></td>
+<td>Cholesky factor of the prior-scaled precision, <span class="arithmatex">\(S=BB^\mathsf{T}\)</span></td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(k\in\mathcal{K}\)</span></td>
+<td>jackknife (sandwich) clusters</td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(g\)</span></td>
+<td>Mondrian groups</td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(\mathsf{T}\)</span></td>
+<td>transpose</td>
+</tr>
+</tbody>
+</table>
+<h2 id="1-model-and-data">1. Model and data<a class="headerlink" href="#1-model-and-data" title="Permanent link">&para;</a></h2>
+<p>Each atom <span class="arithmatex">\(i\)</span> with environment <span class="arithmatex">\(x_i\)</span> has a site descriptor
+<span class="arithmatex">\(\phi(x_i)\in\mathbb{R}^L\)</span>: the ACE product basis in species-major blocks,
+plus pair blocks. The model is linear in the coefficients <span class="arithmatex">\(c\)</span>:</p>
+<div class="arithmatex">\[
+E(R) = \sum_i \phi(x_i)\cdot c + \sum_i E^0_{Z_i}.
+\]</div>
+<p><strong>Joint <span class="arithmatex">\(E^0\)</span>.</strong> With <code>--e0 lsq</code> (<code>e0='lsq'</code>, the <code>FitConfig</code> default),
+<span class="arithmatex">\(E^0\)</span> is fitted jointly with <span class="arithmatex">\(c\)</span>, as in BLR. The pre-fit least-squares
+<span class="arithmatex">\(E^0\)</span> is the baseline subtracted from the labels, and its per-species shifts
+are <span class="arithmatex">\(N_Z\)</span> extra columns of the design after the basis, one per species. On
+an energy row the column of species <span class="arithmatex">\(Z\)</span> is the number of atoms of that
+species; on force and virial rows it is zero. Below, <span class="arithmatex">\(\phi\)</span>, <span class="arithmatex">\(c\)</span> and <span class="arithmatex">\(L\)</span>
+include these columns. With <code>--e0 prefit</code> (and <code>--e0 model</code>) there are no
+E0 columns and <span class="arithmatex">\(E^0\)</span> stays fixed.</p>
+<p>A training configuration contributes energy, force and virial observations,
+each linear in <span class="arithmatex">\(c\)</span>:</p>
+<div class="arithmatex">\[
+\phi_E = \sum_i \phi(x_i),\qquad
+\phi_{F,i\alpha} = -\frac{\partial \phi_E}{\partial r_{i\alpha}},\qquad
+\phi_{V,\alpha\beta} = -\sum_i r_{i\alpha}\frac{\partial\phi_E}{\partial r_{i\beta}}.
+\]</div>
+<p>Each row has a structural weight <span class="arithmatex">\(w\)</span> (per-atom energy normalisation and
+per-type weights) and a noise scale <span class="arithmatex">\(\sigma_q\)</span> for its quantity
+<span class="arithmatex">\(q\in\{E,F,V\}\)</span>. The whitened rows and targets are
+<span class="arithmatex">\(\psi=\phi\,w/\sigma_q\)</span> and <span class="arithmatex">\(\tilde y = y\,w/\sigma_q\)</span>, where <span class="arithmatex">\(y\)</span> is the label
+minus the <span class="arithmatex">\(E^0\)</span> baseline.</p>
+<h2 id="2-prior-and-posterior">2. Prior and posterior<a class="headerlink" href="#2-prior-and-posterior" title="Permanent link">&para;</a></h2>
+<p>The prior is <span class="arithmatex">\(c\sim\mathcal{N}(0,\Lambda^{-1})\)</span> with
+<span class="arithmatex">\(\Lambda=\operatorname{diag}\big(\Gamma_j^2 e^{a_{k(j)}}\big)\)</span>. Here
+<span class="arithmatex">\(\Gamma_j\)</span> is the smoothness prior of column <span class="arithmatex">\(j\)</span>, and <span class="arithmatex">\(a_k\)</span> is the
+<strong>automatic relevance determination (ARD)</strong> log-precision of body order
+<span class="arithmatex">\(k(j)\in\{2,3,4\}\)</span>; pair columns and correlation-order-1 columns both count as
+2-body. The E0 columns are outside the ARD groups: they have no <span class="arithmatex">\(a_k\)</span> and
+keep the fixed broad prior of the BLR fit (<code>e0_prec</code>, standard deviation
+1 eV): there <span class="arithmatex">\(\Gamma_j^2\)</span> is that precision and <span class="arithmatex">\(\Lambda_{jj}=\Gamma_j^2\)</span>. A species with an isolated atom in
+the training set has its <span class="arithmatex">\(E^0\)</span> fixed instead (prior standard deviation
+<span class="arithmatex">\(10^{-8}\)</span> eV), because that atom's energy is <span class="arithmatex">\(E^0\)</span> alone. The posterior is
+Gaussian:</p>
+<div class="arithmatex">\[
+A=\sum_{\text{rows}}\psi\psi^\mathsf{T}+\Lambda,\qquad
+\bar c = A^{-1}\sum_{\text{rows}}\psi\tilde y,\qquad
+\operatorname{Cov}(c)=A^{-1}.
+\]</div>
+<p>The computation works in the prior-scaled system
+<span class="arithmatex">\(S=D^{-1}AD^{-1}=BB^\mathsf{T}\)</span> with <span class="arithmatex">\(D=\operatorname{diag}\Gamma\)</span> and <span class="arithmatex">\(B\)</span>
+the Cholesky factor, and floors <span class="arithmatex">\(a_k\ge a_{\mathrm{floor}}\)</span> so that
+<span class="arithmatex">\(\operatorname{cond}(S)\le10^{14}\)</span>. The final <code>model.npz</code> holds <span class="arithmatex">\(\bar c\)</span>:
+the basis coefficients, with the fitted E0 shift of <span class="arithmatex">\(\bar c\)</span> folded into
+its <span class="arithmatex">\(E^0\)</span>. The E0 columns are zero on every force row, so they leave the
+force shape and every force uncertainty below unchanged.</p>
+<h2 id="3-hyperparameters-the-evidence">3. Hyperparameters: the evidence<a class="headerlink" href="#3-hyperparameters-the-evidence" title="Permanent link">&para;</a></h2>
+<p>The hyperparameters are
+<span class="arithmatex">\(h=(\log\sigma_E,\log\sigma_F,\log\sigma_V,a_2,a_3,a_4)\)</span>. The evidence uses
+the per-quantity statistics <span class="arithmatex">\(G_q=\sum\psi\psi^\mathsf{T}\)</span>, <span class="arithmatex">\(b_q\)</span>,
+<span class="arithmatex">\(y^\mathsf{T}y_q\)</span> and <span class="arithmatex">\(n_q\)</span>, and up to constants is</p>
+<div class="arithmatex">\[
+\log p(\mathcal D\mid h) = -\tfrac12\sum_q\frac{y^\mathsf{T} y_q}{\sigma_q^2}
++\tfrac12 b^\mathsf{T} A^{-1}b-\tfrac12\log|A|+\tfrac12\log|\Lambda|-\sum_q n_q\log\sigma_q .
+\]</div>
+<p>The <strong>joint</strong> mode (<code>--ard-mode joint</code>, the default) maximises it over all six
+components of <span class="arithmatex">\(h\)</span>, with L-BFGS-B on the gradient-normalised objective. The
+<strong>sequential</strong> mode fixes <span class="arithmatex">\(\sigma_q\)</span> at the linear MAP and fits only the
+<span class="arithmatex">\(a_k\)</span>, which needs a single Gram matrix and less memory.</p>
+<p>The evidence is calculated in the prior-scaled system
+<span class="arithmatex">\(S=D^{-1}AD^{-1}\)</span>, <span class="arithmatex">\(D=\operatorname{diag}\Gamma\)</span>. The <code>qr</code> solver (the
+default for <code>--uq ard</code>) does not make <span class="arithmatex">\(S\)</span>. It calculates the QR factorisation
+of the stacked rows <span class="arithmatex">\([\operatorname{diag}\sqrt{\lambda};\,R_qD^{-1}/\sigma_q]\)</span>,
+where <span class="arithmatex">\(R_q\)</span> is the triangular factor of the weighted design rows of quantity
+<span class="arithmatex">\(q\)</span>. The condition number of that factor is <span class="arithmatex">\(\sqrt{\kappa(S)}\)</span>. Each <span class="arithmatex">\(a_k\)</span> has
+the lower limit <span class="arithmatex">\(a_\text{floor}=\log(\lambda_\max(D^{-1}MD^{-1})/\kappa_\max)\)</span>,
+with <span class="arithmatex">\(\kappa_\max=10^{22}\)</span> for <code>qr</code> and <span class="arithmatex">\(10^{14}\)</span> for <code>cholesky</code>
+(<code>--ard-cond-max</code>). A fit where every <span class="arithmatex">\(a_k\)</span> is at <span class="arithmatex">\(a_\text{floor}\)</span>, with the
+gradient in the direction below it, is degenerate (<code>ard_degenerate</code>).</p>
+<h2 id="4-the-validation-protocol">4. The validation protocol<a class="headerlink" href="#4-the-validation-protocol" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Stratified split by configuration.</strong> Compute the Mondrian group of every
+   training atom (<a href="#9-the-groups">section 9</a>), with the band edges computed
+   from all of <span class="arithmatex">\(T\)</span>. Give each configuration <span class="arithmatex">\(C\)</span> the stratum <span class="arithmatex">\(\varsigma(C)\)</span>,
+   the <em>most extreme</em> group it populates: the highest distortion band, with
+   ties broken in favour of <span class="arithmatex">\(z\ne z^\star\)</span>. Within each stratum, randomly
+   assign a fraction <span class="arithmatex">\(f\)</span> (<code>--ard-val-frac</code>, default 0.2) of configurations to
+   <span class="arithmatex">\(T_{\mathrm{val}}\)</span> and the rest to <span class="arithmatex">\(T_{\mathrm{fit}}\)</span>, rounding so that
+   every stratum with at least two configurations has at least one on each
+   side. Strata with fewer than two configurations are merged into the next
+   less extreme stratum. A crack cell is therefore split as a crack cell, even
+   though most of its atoms are bulk-like.</li>
+<li><strong>Hold-out posterior.</strong> Fit <span class="arithmatex">\(h\)</span> on <span class="arithmatex">\(T_{\mathrm{fit}}\)</span>, giving
+   <span class="arithmatex">\(P_{\mathrm{fit}}\)</span> with mean <span class="arithmatex">\(\bar c_{\mathrm{fit}}\)</span>, factor
+   <span class="arithmatex">\(B_{\mathrm{fit}}\)</span> and shape factor <span class="arithmatex">\(\tilde Q_{\mathrm{fit}}\)</span>
+   (<a href="#6-the-shape-exact-centred-jackknife-covariance">section 6</a>, built over
+   the clusters of <span class="arithmatex">\(T_{\mathrm{fit}}\)</span> only). For each validation atom
+   <span class="arithmatex">\(i\in T_{\mathrm{val}}\)</span>, record the error
+   <span class="arithmatex">\(e_i=F_i-\hat F_i(\bar c_{\mathrm{fit}})\)</span> and the validation shape
+   <span class="arithmatex">\(V_{\mathrm{fit}}(x_i)\)</span>. Both are out of sample, because no row of the
+   atom's configuration is in <span class="arithmatex">\(T_{\mathrm{fit}}\)</span>.</li>
+<li><strong>Final posterior.</strong> Refit on all of <span class="arithmatex">\(T\)</span>, starting from
+   <span class="arithmatex">\(h_{\mathrm{fit}}\)</span>. This gives <span class="arithmatex">\(P\)</span> with mean <span class="arithmatex">\(\bar c\)</span>, factor <span class="arithmatex">\(B\)</span> and shape
+   factor <span class="arithmatex">\(\tilde Q\)</span>.</li>
+</ol>
+<p><span class="arithmatex">\(P_{\mathrm{fit}}\)</span> is needed only to produce the scores; <span class="arithmatex">\(\tilde
+Q_{\mathrm{fit}}\)</span> is not stored.</p>
+<h2 id="5-sandwich-clusters">5. Sandwich clusters<a class="headerlink" href="#5-sandwich-clusters" title="Permanent link">&para;</a></h2>
+<p>The jackknife treats clusters of rows as independent units. The clusters
+<span class="arithmatex">\(\mathcal{K}\)</span> partition the rows of <span class="arithmatex">\(T\)</span>:</p>
+<ul>
+<li><strong>Small configurations</strong> are a single cluster containing all their energy,
+  force and virial rows. A configuration counts as small unless it can hold at
+  least two blocks of side <span class="arithmatex">\(\ell\)</span> along some lattice direction.</li>
+<li><strong>Large configurations</strong> are split into one cluster per spatial block,
+  containing the force rows of the atoms in that block, and one cluster
+  containing the energy row and the six virial rows, since these couple every
+  atom in the cell.</li>
+</ul>
+<p>Blocks are the cells of a grid with
+<span class="arithmatex">\(n_a=\max\big(1,\lfloor w_a/\ell\rfloor\big)\)</span> divisions along lattice direction
+<span class="arithmatex">\(a\)</span>. Here <span class="arithmatex">\(w_a\)</span> is the cell width perpendicular to the other two lattice
+vectors, or the extent of the atomic bounding box along a non-periodic
+direction. Atoms are assigned by their fractional coordinates, respecting
+periodicity.</p>
+<p><strong>Block size.</strong> A force depends on environments within <span class="arithmatex">\(r_{\mathrm{cut}}\)</span> of
+neighbours within <span class="arithmatex">\(r_{\mathrm{cut}}\)</span>, so the smallest sensible size is
+<span class="arithmatex">\(\ell=2r_{\mathrm{cut}}\)</span>. The default is <span class="arithmatex">\(\ell=3r_{\mathrm{cut}}\)</span>
+(<code>--ard-cluster-size 3</code>; <code>inf</code> keeps whole configurations). The size is
+checked by a plateau test: increase <span class="arithmatex">\(\ell\)</span> until <span class="arithmatex">\(v(x)\)</span> and the
+<span class="arithmatex">\(\lambda_g\)</span> stop changing, standard practice for cluster-robust variances
+(Cameron and Miller 2015). On the validation with crack cells in training,
+<span class="arithmatex">\(\ell/r_{\mathrm{cut}}\in\{2,3,4,6,\infty\}\)</span> changed tip coverage by at most
+0.005. Sub-clustering acts only on the jackknife, which is built from <span class="arithmatex">\(T\)</span>:
+large cells that appear only in a calibration set never enter it.</p>
+<p><strong>Two kinds of unit.</strong> Jackknife clusters are an ingredient of the shape
+only. The validation split, the conformal quantiles and the weights all
+operate on whole configurations.</p>
+<h2 id="6-the-shape-exact-centred-jackknife-covariance">6. The shape: exact centred jackknife covariance<a class="headerlink" href="#6-the-shape-exact-centred-jackknife-covariance" title="Permanent link">&para;</a></h2>
+<h3 id="leverage-corrected-cluster-scores">Leverage-corrected cluster scores<a class="headerlink" href="#leverage-corrected-cluster-scores" title="Permanent link">&para;</a></h3>
+<p>For cluster <span class="arithmatex">\(k\)</span> with stacked whitened rows
+<span class="arithmatex">\(\Psi_k\in\mathbb{R}^{n_k\times L}\)</span> and residuals at the final mean
+<span class="arithmatex">\(\rho_k=\tilde y_k-\Psi_k\bar c\)</span>, define the cluster hat block and the
+leverage-corrected (PRESS) score</p>
+<div class="arithmatex">\[
+H_{kk}=\Psi_kA^{-1}\Psi_k^\mathsf{T} = W_k^\mathsf{T} W_k,\quad
+W_k=B^{-1}D^{-1}\Psi_k^\mathsf{T},\qquad
+\tilde g_k=\Psi_k^\mathsf{T}(I-H_{kk})^{-1}\rho_k .
+\]</div>
+<p>With <span class="arithmatex">\(h\)</span> held fixed, deleting the rows of cluster <span class="arithmatex">\(k\)</span> changes the posterior
+mean by exactly</p>
+<div class="arithmatex">\[
+\bar c-\bar c_{(-k)} = A^{-1}\tilde g_k ,
+\]</div>
+<p>the cluster DFBETA (Cook and Weisberg 1982). Here <span class="arithmatex">\((I-H_{kk})^{-1}\rho_k\)</span> are
+the residuals that cluster <span class="arithmatex">\(k\)</span> would have if it were left out of the fit.
+The identity is checked to machine precision in the test suite, for a
+whole-configuration cluster, a spatial block and an energy/virial cluster,
+against an explicit refit.</p>
+<p><strong>Well-posedness.</strong> Since <span class="arithmatex">\(\Lambda\succ0\)</span>, <span class="arithmatex">\(A\succ\Psi_k^\mathsf{T}\Psi_k\)</span>, so
+every eigenvalue of <span class="arithmatex">\(H_{kk}\)</span> lies in <span class="arithmatex">\([0,1)\)</span> and <span class="arithmatex">\(I-H_{kk}\)</span> is always
+invertible. Unlike unregularised least squares, no single cluster can
+saturate the fit.</p>
+<p><strong>Computation.</strong> Only the stored factor <span class="arithmatex">\(B\)</span> is used; <span class="arithmatex">\(S\)</span> is never formed.
+If <span class="arithmatex">\(n_k\le L\)</span>, form <span class="arithmatex">\(W_k\)</span> and solve the <span class="arithmatex">\(n_k\times n_k\)</span> system above. If
+<span class="arithmatex">\(n_k&gt;L\)</span>, use the push-through identity</p>
+<div class="arithmatex">\[
+A^{-1}\tilde g_k = A_{(-k)}^{-1}\Psi_k^\mathsf{T}\rho_k,\qquad
+A_{(-k)}=A-\Psi_k^\mathsf{T}\Psi_k .
+\]</div>
+<p>In the prior-scaled coordinates
+<span class="arithmatex">\(S_{(-k)}=D^{-1}A_{(-k)}D^{-1}=B\,(I-W_kW_k^\mathsf{T})\,B^\mathsf{T}\)</span>, so the
+score follows from one <span class="arithmatex">\(L\times L\)</span> system,</p>
+<div class="arithmatex">\[
+(I-W_kW_k^\mathsf{T})\,z_k=W_k\rho_k,\qquad \tilde g_k=D\,B\,z_k .
+\]</div>
+<p>Both systems are solved by a symmetric eigendecomposition, with the
+eigenvalues of <span class="arithmatex">\(I-H_{kk}\)</span> (equivalently <span class="arithmatex">\(1-\lambda\)</span> for the eigenvalues
+<span class="arithmatex">\(\lambda\)</span> of <span class="arithmatex">\(W_kW_k^\mathsf{T}\)</span>) floored at <span class="arithmatex">\(10^{-12}\)</span>; clusters at that
+floor are counted and reported. Clusters are processed batch by batch, so
+memory scales with one batch's rows. Sub-clustering keeps most <span class="arithmatex">\(n_k\)</span> to
+<span class="arithmatex">\(3N_k\lesssim10^3\)</span>.</p>
+<p><strong>Block approximation</strong> (<code>--ard-press block</code>). Apply the correction per row
+block instead: <span class="arithmatex">\((1-h)^{-1}\)</span> for the energy row, the <span class="arithmatex">\(3\times3\)</span> force block of
+each atom and the <span class="arithmatex">\(6\times6\)</span> virial block. This is HC3-like rather than an
+exact deletion, and it ignores the coupling between atoms within a cluster.
+It is never the default.</p>
+<h3 id="centred-meat-and-the-shape">Centred meat and the shape<a class="headerlink" href="#centred-meat-and-the-shape" title="Permanent link">&para;</a></h3>
+<p>Let <span class="arithmatex">\(\bar g=|\mathcal{K}|^{-1}\sum_k\tilde g_k\)</span>. The centred "meat" of the
+sandwich is</p>
+<div class="arithmatex">\[
+\tilde M=\sum_{k\in\mathcal{K}}(\tilde g_k-\bar g)(\tilde g_k-\bar g)^\mathsf{T} .
+\]</div>
+<p>Centring removes the mean deletion effect. Without it, the meat contains a
+term from the prior's gradient: for the uncorrected scores,
+<span class="arithmatex">\(\sum_k\Psi_k^\mathsf{T}\rho_k=\Lambda\bar c\)</span> at the MAP. With centring,
+<span class="arithmatex">\(A^{-1}\tilde M A^{-1}\)</span> is the delete-one-cluster jackknife covariance of
+<span class="arithmatex">\(\bar c\)</span>, up to the factor <span class="arithmatex">\((|\mathcal{K}|-1)/|\mathcal{K}|\)</span>, which the scale
+absorbs. It is the CR3 cluster-robust estimator (MacKinnon, Nielsen and Webb
+2023), the exact counterpart of the infinitesimal jackknife. It is a
+Huber–White sandwich (Huber 1967; White 1982; Müller 2013): the posterior
+covariance <span class="arithmatex">\(\kappa^2A^{-1}\)</span> is its homoscedastic special case
+<span class="arithmatex">\(\tilde M\propto A\)</span>. It is robust to misspecification, which dominates the
+error of an ACE fit to noise-free labels.</p>
+<p>Define</p>
+<div class="arithmatex">\[
+\tilde Q=S^{-1}D^{-1}\big[\tilde g_1-\bar g\;\cdots\;\tilde g_{|\mathcal{K}|}-\bar g\big]\in\mathbb{R}^{L\times|\mathcal{K}|},
+\qquad u_\alpha(x)=D^{-1}\phi_\alpha(x)^\mathsf{T} ,
+\]</div>
+<p>where <span class="arithmatex">\(\phi_\alpha(x)\)</span> are the raw, unweighted force rows of a target atom.
+The final shape is</p>
+<div class="arithmatex">\[
+V(x)_{\alpha\beta}=u_\alpha^\mathsf{T}\tilde Q\tilde Q^\mathsf{T} u_\beta,\qquad
+v(x)=\operatorname{tr}V(x)=\sum_\alpha\big\|\tilde Q^\mathsf{T} u_\alpha\big\|^2 .
+\]</div>
+<p><span class="arithmatex">\(V(x)\)</span> is the full anisotropic block, and costs nothing extra because the
+projections <span class="arithmatex">\(\tilde Q^\mathsf{T} u_\alpha\)</span> are already needed for <span class="arithmatex">\(v\)</span>. Since
+<span class="arithmatex">\(\phi_\alpha(\bar c-\bar c_{(-k)})=\phi_\alpha A^{-1}\tilde g_k\)</span> is the
+change in the prediction at <span class="arithmatex">\(x\)</span> when cluster <span class="arithmatex">\(k\)</span> is deleted, <span class="arithmatex">\(v(x)\)</span> is the spread of the prediction over
+cluster deletions. It is large where the prediction leans on clusters the
+model fits badly.</p>
+<p><strong>Epistemic variant</strong> (<code>--ard-variance kappa</code>):
+<span class="arithmatex">\(V_\kappa(x)_{\alpha\beta}=\phi_\alpha A^{-1}\phi_\beta^\mathsf{T}\)</span>, with
+<span class="arithmatex">\(v_\kappa=\operatorname{tr}V_\kappa\)</span>. Everything below applies to either
+variant.</p>
+<h3 id="storage">Storage<a class="headerlink" href="#storage" title="Permanent link">&para;</a></h3>
+<p>The cluster count <span class="arithmatex">\(|\mathcal{K}|\)</span> can exceed <span class="arithmatex">\(L\)</span> once large cells are
+sub-clustered. Since only <span class="arithmatex">\(\tilde Q\tilde Q^\mathsf{T}\)</span> enters <span class="arithmatex">\(V\)</span>, the
+posterior stores a factor <span class="arithmatex">\(R\)</span> with <span class="arithmatex">\(RR^\mathsf{T}=\tilde Q\tilde Q^\mathsf{T}\)</span>:</p>
+<ul>
+<li><span class="arithmatex">\(R=\tilde Q\)</span> if <span class="arithmatex">\(|\mathcal{K}|\le L\)</span>;</li>
+<li>otherwise <span class="arithmatex">\(R=U_r\Sigma_r\)</span>, from the thin SVD
+  <span class="arithmatex">\(\tilde Q=U\Sigma V^\mathsf{T}\)</span> (so that
+  <span class="arithmatex">\(\tilde Q\tilde Q^\mathsf{T}=U\Sigma^2U^\mathsf{T}\)</span>), keeping the leading
+  <span class="arithmatex">\(r\)</span> singular triplets.</li>
+</ul>
+<p>An optional truncation keeps the smallest <span class="arithmatex">\(r\)</span> with
+<span class="arithmatex">\(\sum_{j\le r}\sigma_j^2\ge\tau\sum_j\sigma_j^2\)</span> (default <span class="arithmatex">\(\tau=1\)</span>, exact).
+Storage is <span class="arithmatex">\(L\times\min(|\mathcal{K}|,L)\)</span>.</p>
+<h3 id="rotation-equivariance">Rotation equivariance<a class="headerlink" href="#rotation-equivariance" title="Permanent link">&para;</a></h3>
+<p>The ACE site descriptor is invariant under a global orthogonal transformation
+<span class="arithmatex">\(O\in O(3)\)</span> (rotation or reflection) of positions and cell, so its position
+derivatives, the force rows, transform as vectors:
+<span class="arithmatex">\(\phi_\alpha(Ox)=\sum_\beta O_{\alpha\beta}\,\phi_\beta(x)\)</span>. <span class="arithmatex">\(R\)</span> and <span class="arithmatex">\(D\)</span> act in
+coefficient space and do not see <span class="arithmatex">\(O\)</span>. Hence <span class="arithmatex">\(u(Ox)=O\,u(x)\)</span> and</p>
+<div class="arithmatex">\[
+V(Ox)=O\,V(x)\,O^\mathsf{T},\qquad \mathtt{forces\_cov}(Ox)=O\,\mathtt{forces\_cov}(x)\,O^\mathsf{T},
+\]</div>
+<p>while <span class="arithmatex">\(v=\operatorname{tr}V\)</span>, the eigenvalues of <span class="arithmatex">\(V\)</span>, and the scores of
+<a href="#7-calibration-scores">section 7</a> are invariant: for an error that rotates
+with the structure, <span class="arithmatex">\(e\mapsto Oe\)</span>,</p>
+<div class="arithmatex">\[
+(Oe)^\mathsf{T}\big(OVO^\mathsf{T}+\epsilon I\big)^{-1}(Oe)
+=e^\mathsf{T}\big(V+\epsilon I\big)^{-1}e ,
+\]</div>
+<p>since <span class="arithmatex">\(\epsilon\)</span> depends on <span class="arithmatex">\(\operatorname{tr}V\)</span> only. The groups and the
+support features are built from distances and invariant descriptors, so
+<code>forces_std</code>, <code>forces_q</code>, <code>forces_q_mahal</code>, <code>forces_group</code> and the support
+flag are invariant, and every output quantity is permutation-equivariant.
+The test suite checks all of this for random rotations and reflections.</p>
+<h2 id="7-calibration-scores">7. Calibration scores<a class="headerlink" href="#7-calibration-scores" title="Permanent link">&para;</a></h2>
+<p>For <span class="arithmatex">\(i\in T_{\mathrm{val}}\)</span>, both the error and the shape come from
+<span class="arithmatex">\(P_{\mathrm{fit}}\)</span>:</p>
+<div class="arithmatex">\[
+\text{isotropic:}\quad s_i=\frac{|e_i|}{\sqrt{v_{\mathrm{fit}}(x_i)/3}},
+\qquad
+\text{anisotropic:}\quad s_i=\sqrt{e_i^\mathsf{T}\big(V_{\mathrm{fit}}(x_i)+\epsilon_i I\big)^{-1}e_i},
+\quad \epsilon_i=\epsilon\,\tfrac13\operatorname{tr}V_{\mathrm{fit}}(x_i).
+\]</div>
+<p>The default regulariser is <span class="arithmatex">\(\epsilon=10^{-3}\)</span>; it matters only where
+<span class="arithmatex">\(V_{\mathrm{fit}}\)</span> is close to rank-deficient. Under the working model
+<span class="arithmatex">\(e\sim\mathcal{N}(0,\lambda^2\,\tfrac{v}{3}I_3)\)</span> (isotropic) or
+<span class="arithmatex">\(e\sim\mathcal{N}(0,\lambda^2V)\)</span> (anisotropic), <span class="arithmatex">\(s/\lambda\sim\chi_3\)</span>. The
+conformal step does not rely on this model; only the reading of <code>forces_std</code>
+as a Gaussian does. The mode is chosen at fit time
+(<code>--force-shape iso|aniso</code>, default <code>aniso</code>: on the validation, at the
+default validation fraction, it is the only variant without target-regime
+calibration that meets the coverage targets),
+and every scale below is computed in that mode.</p>
+<h3 id="the-transfer-assumption">The transfer assumption<a class="headerlink" href="#the-transfer-assumption" title="Permanent link">&para;</a></h3>
+<p>The scores come from a model trained on about <span class="arithmatex">\((1-f)|T|\)</span> configurations, but
+the scale is applied to the shape of the model trained on <span class="arithmatex">\(T\)</span>. The shape is a
+parameter variance, scaling roughly as <span class="arithmatex">\(1/N\)</span>, whereas the error is dominated
+by approximation error (with the shape of the previous revision, the squared
+rms scale was about 39 on the validation benchmark). The ratio of squared error to shape is therefore unchanged only
+if the error is variance-dominated. If it is bias-dominated, <span class="arithmatex">\(\lambda^2\)</span>
+grows roughly in proportion to <span class="arithmatex">\(N\)</span>, and the validation scale underestimates the
+final one by up to <span class="arithmatex">\((1-f)^{-1/2}\)</span>. Writing <span class="arithmatex">\(\lambda\propto N^{\beta}\)</span>, the
+variance-dominated limit is <span class="arithmatex">\(\beta=0\)</span> and the bias-dominated one
+<span class="arithmatex">\(\beta=\tfrac12\)</span>.</p>
+<h3 id="the-transfer-exponent">The transfer exponent<a class="headerlink" href="#the-transfer-exponent" title="Permanent link">&para;</a></h3>
+<p>The final scale replaces the uncorrected validation scale by an extrapolation
+in <span class="arithmatex">\(N\)</span> estimated in every fit (<code>--ard-transfer exponent</code>, the default).
+<span class="arithmatex">\(T_{\mathrm{fit}}\)</span> is split again by the same stratified rule into
+<span class="arithmatex">\(T_{\mathrm{fit2}}\)</span>, with <span class="arithmatex">\(N_{\mathrm{fit2}}\approx(1-f)N_{\mathrm{fit}}\)</span>
+configurations. A second validation posterior <span class="arithmatex">\(P_{\mathrm{fit2}}\)</span> is fitted on
+it, with its own jackknife shape, and scores the same <span class="arithmatex">\(T_{\mathrm{val}}\)</span>
+atoms. Let <span class="arithmatex">\(\lambda_1\)</span> and <span class="arithmatex">\(\lambda_2\)</span> be the configuration-weighted rms
+scales of the <span class="arithmatex">\(P_{\mathrm{fit}}\)</span> and <span class="arithmatex">\(P_{\mathrm{fit2}}\)</span> scores, pooled over
+all groups with the weights of <a href="#8-the-scales">section 8</a>, over the
+<span class="arithmatex">\(T_{\mathrm{val}}\)</span> atoms at which both shapes are positive. Then</p>
+<div class="arithmatex">\[
+\hat\beta=\frac{\log(\lambda_1/\lambda_2)}{\log(N_{\mathrm{fit}}/N_{\mathrm{fit2}})},\qquad
+\beta=\min\bigl(\max(\hat\beta,0),\tfrac12\bigr),\qquad
+t=(N/N_{\mathrm{fit}})^{\beta},
+\]</div>
+<p>and every calibration score is multiplied by <span class="arithmatex">\(t\)</span> before the per-group scales
+are formed.</p>
+<ul>
+<li>The clip keeps <span class="arithmatex">\(\beta\)</span> between the two limits above, and a clip is logged
+  as a warning. If <span class="arithmatex">\(\hat\beta\)</span> is undefined (<span class="arithmatex">\(N_{\mathrm{fit2}}=N_{\mathrm{fit}}\)</span>,
+  or a non-finite scale), <span class="arithmatex">\(\beta=\tfrac12\)</span>, the conservative limit.</li>
+<li>One pooled <span class="arithmatex">\(\beta\)</span> applies to all groups. <code>--ard-transfer sqrt</code> fixes
+  <span class="arithmatex">\(\beta=\tfrac12\)</span> and <code>none</code> fixes <span class="arithmatex">\(\beta=0\)</span>, without the second fit.</li>
+<li><strong>Precision.</strong> <span class="arithmatex">\(\beta\)</span> is a single-split estimate. Because the extrapolation
+  step equals the baseline (<span class="arithmatex">\(N/N_{\mathrm{fit}}\approx N_{\mathrm{fit}}/N_{\mathrm{fit2}}\)</span>),
+  the factor's relative error is about that of <span class="arithmatex">\(\lambda_1/\lambda_2\)</span>, and the
+  clip bounds the factor to at most <span class="arithmatex">\((1-f)^{-1/2}\)</span>.</li>
+<li>On the validation benchmark, a sweep of <span class="arithmatex">\(f\)</span> gives
+  <span class="arithmatex">\(\log\lambda\propto0.37\log N_{\mathrm{fit}}\)</span>, and
+  <span class="arithmatex">\((3680/2944)^{0.37}=1.086\)</span> matches the final rms-<span class="arithmatex">\(z\)</span> deficit of <span class="arithmatex">\(1.087\)</span>;
+  the per-fit estimates were <span class="arithmatex">\(\beta=0.36\)</span>–<span class="arithmatex">\(0.38\)</span> at <span class="arithmatex">\(f\in\{0.1,0.2,0.3\}\)</span>.</li>
+<li>The cost is one more evidence fit and jackknife shape, on about
+  <span class="arithmatex">\((1-f)^2|T|\)</span> configurations.</li>
+</ul>
+<p><code>ard.json</code> records <span class="arithmatex">\(\lambda_1\)</span>, <span class="arithmatex">\(\lambda_2\)</span>, <span class="arithmatex">\(\hat\beta\)</span>, <span class="arithmatex">\(\beta\)</span> and <span class="arithmatex">\(t\)</span> under
+<code>"transfer"</code>.</p>
+<h2 id="8-the-scales">8. The scales<a class="headerlink" href="#8-the-scales" title="Permanent link">&para;</a></h2>
+<h3 id="units-and-weights">Units and weights<a class="headerlink" href="#units-and-weights" title="Permanent link">&para;</a></h3>
+<p>For group <span class="arithmatex">\(g\)</span>, let <span class="arithmatex">\(\mathcal{C}_g\)</span> be the set of calibration configurations
+with at least one atom in <span class="arithmatex">\(g\)</span>, <span class="arithmatex">\(n_{\mathrm{cfg},g}=|\mathcal{C}_g|\)</span>, and
+<span class="arithmatex">\(n_{C,g}\)</span> the number of atoms of <span class="arithmatex">\(C\)</span> in <span class="arithmatex">\(g\)</span>. Each calibration atom
+<span class="arithmatex">\(i\in C\cap g\)</span> carries the weight <span class="arithmatex">\(1/n_{C,g}\)</span>, so every configuration has
+total weight 1 in every group it populates. A crack cell is one unit in the
+tip group, whether it has 3 tip atoms or 30.</p>
+<h3 id="forces_std-the-per-group-rms-scale"><code>forces_std</code>: the per-group rms scale<a class="headerlink" href="#forces_std-the-per-group-rms-scale" title="Permanent link">&para;</a></h3>
+<div class="arithmatex">\[
+(\lambda_g^{\mathrm{rms}})^2=\frac{1}{3\,n_{\mathrm{cfg},g}}\sum_{C\in\mathcal{C}_g}\frac{1}{n_{C,g}}\sum_{i\in C\cap g}s_i^2,
+\]</div>
+<div class="arithmatex">\[
+\mathtt{forces\_std}(x)=\lambda^{\mathrm{rms}}_{g(x)}\sqrt{v(x)},\qquad
+\mathtt{forces\_cov}(x)=\big(\lambda^{\mathrm{rms}}_{g(x)}\big)^2 V(x).
+\]</div>
+<p>This is the configuration-weighted Gaussian maximum-likelihood scale within
+each group. It does not depend on <span class="arithmatex">\(\alpha\)</span> and makes no coverage claim; it is
+the scale to use when propagating uncertainty or when a Gaussian is wanted.
+<code>forces_cov</code> is given in both modes. In isotropic mode it uses the isotropic
+<span class="arithmatex">\(\lambda_g^{\mathrm{rms}}\)</span>, so its trace, <span class="arithmatex">\(\mathtt{forces\_std}^2\)</span>, is
+calibrated but its orientation is the uncalibrated shape of <span class="arithmatex">\(V(x)\)</span>.</p>
+<h3 id="forces_q-the-per-group-conformal-quantile"><code>forces_q</code>: the per-group conformal quantile<a class="headerlink" href="#forces_q-the-per-group-conformal-quantile" title="Permanent link">&para;</a></h3>
+<p>The configuration-weighted (pooled-CDF) score distribution of group <span class="arithmatex">\(g\)</span>,
+with a test point at <span class="arithmatex">\(+\infty\)</span>, is</p>
+<div class="arithmatex">\[
+\hat F_g(t)=\frac{1}{n_{\mathrm{cfg},g}+1}\Bigg[\sum_{C\in\mathcal{C}_g}\frac{1}{n_{C,g}}\sum_{i\in C\cap g}
+\mathbf{1}\{s_i\le t\}\;+\;\mathbf{1}\{+\infty\le t\}\Bigg],
+\qquad q_g=\inf\{t:\hat F_g(t)\ge1-\alpha\},
+\]</div>
+<p>with <span class="arithmatex">\(1-\alpha\)</span> = <code>--ard-coverage</code>. The final regions are</p>
+<div class="arithmatex">\[
+\text{isotropic:}\quad \{\Delta F: |\Delta F|\le \mathtt{forces\_q}(x)\},\qquad
+\mathtt{forces\_q}(x)=q_{g(x)}\sqrt{v(x)/3},
+\]</div>
+<div class="arithmatex">\[
+\text{anisotropic:}\quad \big\{\Delta F:\Delta F^\mathsf{T}\big(V(x)+\epsilon(x)I\big)^{-1}\Delta F\le q_{g(x)}^2\big\},
+\]</div>
+<p>with <span class="arithmatex">\(\epsilon(x)=\epsilon\,\tfrac13\operatorname{tr}V(x)\)</span> as for the scores.
+In anisotropic mode, <span class="arithmatex">\(q_{g(x)}\)</span> is given for each atom (<code>forces_q_mahal</code>)
+together with <span class="arithmatex">\(V(x)\)</span>, and the scalar <code>forces_q</code> is the largest semi-axis,
+<span class="arithmatex">\(q_{g(x)}\sqrt{\lambda_{\max}(V+\epsilon I)}\)</span>, for convenience.</p>
+<p><strong>The all-groups fallback.</strong> When no neighbouring group qualifies (below),
+the pool is all atoms with the same weights <span class="arithmatex">\(w_i=1/n_{C,g}\)</span>, so a
+configuration spanning <span class="arithmatex">\(k\)</span> groups has total weight <span class="arithmatex">\(k\)</span>. The <span class="arithmatex">\(+\infty\)</span> test
+point then carries the weight <span class="arithmatex">\(W/n_{\mathrm{cfg}}\)</span> of one configuration's
+mean total weight, <span class="arithmatex">\(W=\sum_i w_i\)</span>:</p>
+<div class="arithmatex">\[
+\hat F(t)=\frac{\sum_i w_i\mathbf{1}\{s_i\le t\}+(W/n_{\mathrm{cfg}})\,\mathbf{1}\{+\infty\le t\}}{W(1+1/n_{\mathrm{cfg}})} ,
+\]</div>
+<p>which reduces to the per-group formula for a single group
+(<span class="arithmatex">\(W=n_{\mathrm{cfg}}\)</span>). In every pool, <span class="arithmatex">\(q\)</span> is finite if and only if
+<span class="arithmatex">\(n_{\mathrm{cfg}}\ge\lceil(1-\alpha)/\alpha\rceil\)</span> (9 at <span class="arithmatex">\(1-\alpha=0.9\)</span>, 99
+at 0.99). If even the all-groups pool is smaller, <span class="arithmatex">\(q=\infty\)</span> and the fit logs
+a warning.</p>
+<p><strong>Coverage statement.</strong> Assume calibration and target configurations are
+exchangeable, and take the target to be a uniformly random group-<span class="arithmatex">\(g\)</span> atom of a
+new configuration. Then the region has coverage <span class="arithmatex">\(\approx1-\alpha\)</span>, with an
+approximation error controlled by <span class="arithmatex">\(n_{\mathrm{cfg},g}\)</span>, not by the atom count.
+This is the pooled-CDF construction of Dunn, Wasserman and Ramdas (2023).
+Their exact finite-sample constructions (double conformal, subsampling) are
+not implemented. No Gaussianity is assumed.</p>
+<p><strong>Merging.</strong> Groups with <span class="arithmatex">\(n_{\mathrm{cfg},g}&lt;n_{\min}\)</span> (<code>--ard-n-min</code>,
+default 20, raised to <span class="arithmatex">\(\lceil(1-\alpha)/\alpha\rceil\)</span> if that is larger) take
+the scales of the nearest qualifying distortion band with the same
+<span class="arithmatex">\([z=z^\star]\)</span> flag, then across the flag, then of the all-groups pool. The
+merges are reported.</p>
+<p><strong>Reported per group.</strong> Each atom gets its group id, <code>forces_group</code>. The
+per-group table stored with the posterior holds <span class="arithmatex">\(n_{\mathrm{cfg},g}\)</span> (split
+into configurations from <span class="arithmatex">\(T_{\mathrm{val}}\)</span> and from calibration sets <span class="arithmatex">\(U\)</span>),
+total atoms, <span class="arithmatex">\(\lambda_g^{\mathrm{rms}}\)</span>, <span class="arithmatex">\(q_g\)</span>, the merges, and the
+Gaussianity diagnostic</p>
+<div class="arithmatex">\[
+r_g=\frac{q_g}{\lambda_g^{\mathrm{rms}}\,\chi^{-1}_3(1-\alpha)} .
+\]</div>
+<p><span class="arithmatex">\(r_g\approx1\)</span> means that reading <code>forces_std</code> as a Gaussian reproduces the
+conformal coverage in that group. <span class="arithmatex">\(r_g&gt;1\)</span> means the score distribution has
+heavier tails than <span class="arithmatex">\(\chi_3\)</span>; within the group, <code>forces_q</code> is then <span class="arithmatex">\(r_g\)</span> times
+the radius implied by <code>forces_std</code> read as a Gaussian. <span class="arithmatex">\(r_g\)</span> is constant
+within a group, so it is not given for each atom: <code>forces_group</code> joins each atom
+to it.</p>
+<p><strong>What is invariant.</strong> The mean <span class="arithmatex">\(\bar c\)</span>; the energy and virial predictions;
+the shape; and the ordering by <span class="arithmatex">\(\sigma\)</span> within a group. Across groups, the
+relative <span class="arithmatex">\(\sigma\)</span> changes by
+<span class="arithmatex">\(\lambda^{\mathrm{rms}}_g/\lambda^{\mathrm{rms}}_{g'}\)</span> and the relative
+radius by <span class="arithmatex">\(q_g/q_{g'}\)</span>.</p>
+<h2 id="9-the-groups">9. The groups<a class="headerlink" href="#9-the-groups" title="Permanent link">&para;</a></h2>
+<p>Three sets of constants are fixed at fit time and stored with the posterior:
+<span class="arithmatex">\(r_1\)</span>, the first minimum of the training radial distribution function
+(1.25 times its first peak if there is no minimum; <span class="arithmatex">\(r_{\mathrm{cut}}\)</span> if the
+training set has no neighbour pairs); <span class="arithmatex">\(z^\star\)</span>, the modal training coordination; and the band edges. For each
+atom,</p>
+<div class="arithmatex">\[
+z_i=\#\{j:r_{ij}&lt;r_1\},\qquad
+d_i=\frac{\operatorname{std}\{r_{ij}:r_{ij}&lt;r_1\}}{\operatorname{mean}\{r_{ij}:r_{ij}&lt;r_1\}}
+\quad(\text{undefined if } z_i&lt;2).
+\]</div>
+<p>The band edges are the 50th, 90th and 99th percentiles of <span class="arithmatex">\(d\)</span> over all atoms
+of <span class="arithmatex">\(T\)</span>, and an atom with undefined <span class="arithmatex">\(d\)</span> goes in the top band. The group is
+<span class="arithmatex">\(g=\operatorname{band}(d)\times[z\ne z^\star]\)</span>, numbered
+<span class="arithmatex">\(2\,\operatorname{band}(d)+[z\ne z^\star]\)</span>, so <span class="arithmatex">\(G=8\)</span> before merging
+(<code>--ard-groups none</code> drops the bands, <span class="arithmatex">\(G=2\)</span>; tied percentiles collapse
+bands). The same edges stratify the validation split. They depend only on
+geometry, never on labels or scores, so letting <span class="arithmatex">\(T_{\mathrm{val}}\)</span>'s geometry
+into three quantiles over thousands of atoms has a negligible effect on
+exchangeability. What matters is that the edges are frozen at fit time:
+<code>aj calibrate</code> never changes which group an atom is in.</p>
+<h2 id="10-calibration-sets-aj-calibrate">10. Calibration sets: <code>aj calibrate</code><a class="headerlink" href="#10-calibration-sets-aj-calibrate" title="Permanent link">&para;</a></h2>
+<p><strong>Inside the fit</strong>, the pool is <span class="arithmatex">\(T_{\mathrm{val}}\)</span>, with the scores of
+<a href="#7-calibration-scores">section 7</a>.</p>
+<p><strong><code>aj calibrate</code></strong> takes a set <span class="arithmatex">\(U\)</span> of labelled configurations from the target
+regime, disjoint from <span class="arithmatex">\(T\)</span>. The errors are those of the final model,
+<span class="arithmatex">\(e_u=F_u-\hat F_u(\bar c)\)</span>, and the shape is the final <span class="arithmatex">\(V(x_u)\)</span>, which is
+out of sample because <span class="arithmatex">\(U\cap T=\emptyset\)</span>. The scores follow section 7 with
+<span class="arithmatex">\(V\)</span> in place of <span class="arithmatex">\(V_{\mathrm{fit}}\)</span> (and no transfer factor, since they already
+come from the final model). Then, for each group <span class="arithmatex">\(g\)</span>:</p>
+<ul>
+<li>if <span class="arithmatex">\(U\)</span> has at least <span class="arithmatex">\(n_{\min}\)</span> configurations in <span class="arithmatex">\(g\)</span>, the pool for <span class="arithmatex">\(g\)</span> is
+  <span class="arithmatex">\(U\)</span> alone (<strong>per-group replace</strong>, the default);</li>
+<li>otherwise the pool is <span class="arithmatex">\(T_{\mathrm{val}}\cup U\)</span>, with configuration weights
+  as in <a href="#8-the-scales">section 8</a>.</li>
+</ul>
+<p><code>--append</code> forces <span class="arithmatex">\(T_{\mathrm{val}}\cup U\)</span> in every group, and <code>--replace</code>
+forces <span class="arithmatex">\(U\)</span> alone in every group (merging as needed).
+<span class="arithmatex">\(\lambda_g^{\mathrm{rms}}\)</span> and <span class="arithmatex">\(q_g\)</span> are recomputed, and each group reports
+its pool composition. Mixed groups are where the transfer assumption matters
+most, since <span class="arithmatex">\(T_{\mathrm{val}}\)</span> scores come from <span class="arithmatex">\(P_{\mathrm{fit}}\)</span> and <span class="arithmatex">\(U\)</span>
+scores from the final model.</p>
+<p><strong>Rationale.</strong> A target atom resembling <span class="arithmatex">\(U\)</span> should be calibrated against <span class="arithmatex">\(U\)</span>.
+<span class="arithmatex">\(T_{\mathrm{val}}\)</span> scores from easier atoms of the same group
+make the quantile too small and gives the coverage of a mixture. The other side of
+this is that a posterior calibrated on <span class="arithmatex">\(U\)</span> is specific to the regime of <span class="arithmatex">\(U\)</span>
+(see the <a href="../../howto/force-uncertainty/#validation">validation</a>).</p>
+<h2 id="11-the-support-diagnostic">11. The support diagnostic<a class="headerlink" href="#11-the-support-diagnostic" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Features.</strong> For each species, fit a whitened PCA of the site descriptor
+   <span class="arithmatex">\(\phi(x)\)</span> (that species' block) on the training atoms, keeping components
+   up to 99 % explained variance, at most 64. The site descriptor is
+   rotation-invariant and includes all body orders. The force-row projections
+   <span class="arithmatex">\(\tilde Q^\mathsf{T}u_\alpha\)</span> are not used as features, because they rotate
+   with the structure. With <code>--ard-support-features normalised</code> the PCA is
+   fitted to <span class="arithmatex">\(\phi/\lVert\phi\rVert\)</span> instead, and <span class="arithmatex">\(\log\lVert\phi\rVert\)</span>
+   and <span class="arithmatex">\(\log\lVert\phi_b\rVert\)</span> for each body order <span class="arithmatex">\(b\)</span> are appended as
+   standardised coordinates outside the PCA, so the cap cannot drop them
+   (the feature construction of Lysogorskiy, Bochkarev and Drautz 2026). On
+   the Cantor benchmark the 64-component cap keeps only about 80 % of the
+   variance, and these features flag fewer in-distribution atoms and more
+   atoms in the crack and dislocation cells than the raw descriptor does;
+   the default stays raw.</li>
+<li><strong>Density ratio.</strong> For each species, fit an L2-regularised logistic
+   classifier (target = 1, calibration = 0, class-balanced) on these
+   features, with the L2 strength chosen by 5-fold cross-validation grouped by
+   configuration. This gives
+   <span class="arithmatex">\(w(x)\propto P(\mathrm{target}\mid x)/P(\mathrm{cal}\mid x)\)</span>.</li>
+<li>
+<p><strong>Weighted quantile</strong> (Tibshirani, Barber, Candès and Ramdas 2019).
+   The pool is per species, across all groups: the calibration atoms of
+   that species, subsampled by whole configurations. Calibration atom <span class="arithmatex">\(i\)</span>,
+   in configuration <span class="arithmatex">\(C(i)\)</span>, has mass <span class="arithmatex">\(w(x_i)/n_{C(i)}\)</span>, where <span class="arithmatex">\(n_{C(i)}\)</span> is
+   the number of atoms of <span class="arithmatex">\(i\)</span>'s species in <span class="arithmatex">\(C(i)\)</span> in the pool. This combines
+   the shift weight with a per-species configuration weight; the test atom
+   has mass <span class="arithmatex">\(w(x)\)</span>. With <span class="arithmatex">\(W\)</span> the total mass,</p>
+<div class="arithmatex">\[
+q_w(x)=Q_{1-\alpha}\Big(\sum_{i\in\mathrm{cal}}\frac{w(x_i)}{n_{C(i)}W}\,\delta_{s_i}+\frac{w(x)}{W}\,\delta_{+\infty}\Big).
+\]</div>
+</li>
+<li>
+<p><strong>Report</strong> <code>support_q</code> <span class="arithmatex">\(=q_w(x)\)</span> and <code>support_ok</code> <span class="arithmatex">\(=[q_w&lt;\infty]\)</span> per
+   atom, and <span class="arithmatex">\(n_{\mathrm{eff}}=(\sum_i p_i)^2/\sum_i p_i^2\)</span> per species, over
+   the calibration masses <span class="arithmatex">\(p_i=w(x_i)/n_{C(i)}\)</span>. Because the pool spans all
+   groups of a species rather than one conformal group, <code>support_q</code> is not
+   comparable to the per-group <span class="arithmatex">\(q_g\)</span>.</p>
+</li>
+</ol>
+<p><strong>Caveats.</strong> Richer features give more extreme ratios and so a smaller
+<span class="arithmatex">\(n_{\mathrm{eff}}\)</span>; this is the honest outcome. The diagnostic assumes that
+the score distribution given the classifier features is unchanged from
+calibration to target. The labels are deterministic in the full structure but
+not in the local environment (<a href="#14-assumptions-and-limitations">limitations</a>),
+so this is an approximation even with full features. The diagnostic is not
+used to scale <span class="arithmatex">\(\sigma\)</span>. <code>aj calibrate</code> updates the reference with the same
+replace or append rule as the scores.</p>
+<h2 id="12-end-to-end">12. End to end<a class="headerlink" href="#12-end-to-end" title="Permanent link">&para;</a></h2>
+<dl>
+<dt>fit</dt>
+<dd>data → group features (fixing <span class="arithmatex">\(r_1\)</span>, <span class="arithmatex">\(z^\star\)</span> and the band edges from
+<span class="arithmatex">\(T\)</span>) → stratified split → evidence fit on <span class="arithmatex">\(T_{\mathrm{fit}}\)</span> →
+<span class="arithmatex">\(P_{\mathrm{fit}}\)</span> → clusters, PRESS scores, centred
+<span class="arithmatex">\(\tilde Q_{\mathrm{fit}}\)</span> → <span class="arithmatex">\(V_{\mathrm{fit}}(x_i)\)</span> and errors <span class="arithmatex">\(e_i\)</span> on
+<span class="arithmatex">\(T_{\mathrm{val}}\)</span> → scores <span class="arithmatex">\(s_i\)</span> → (second split, <span class="arithmatex">\(P_{\mathrm{fit2}}\)</span>,
+transfer factor <span class="arithmatex">\(t\)</span>) → refit on <span class="arithmatex">\(T\)</span> → <span class="arithmatex">\(P\)</span>, clusters, PRESS scores,
+centred <span class="arithmatex">\(\tilde Q\)</span> → stored factor <span class="arithmatex">\(R\)</span> → per-group
+<span class="arithmatex">\(\lambda^{\mathrm{rms}}_g\)</span> and <span class="arithmatex">\(q_g\)</span> from <span class="arithmatex">\(t\,s_i\)</span> (configuration-weighted,
+merged below <span class="arithmatex">\(n_{\min}\)</span>).</dd>
+<dt>calibrate</dt>
+<dd>labelled target set <span class="arithmatex">\(U\)</span> → scores with the final model and shape →
+per-group replace (or append, or replace) → recompute
+<span class="arithmatex">\(\lambda^{\mathrm{rms}}_g\)</span> and <span class="arithmatex">\(q_g\)</span>.</dd>
+<dt>evaluate</dt>
+<dd>shape <span class="arithmatex">\(V(x)\)</span> from the projections <span class="arithmatex">\(R^\mathsf{T}u_\alpha(x)\)</span> →
+<code>forces_std</code>, <code>forces_cov</code>, <code>forces_q</code> (and <code>forces_q_mahal</code> in
+anisotropic mode) and <code>forces_group</code>.</dd>
+<dt>diagnose</dt>
+<dd>unlabelled target → descriptor PCA → <span class="arithmatex">\(w(x)\)</span> → weighted quantile →
+<code>support_ok</code>, <code>support_q</code>, <span class="arithmatex">\(n_{\mathrm{eff}}\)</span>.</dd>
+</dl>
+<h2 id="13-the-gp-arm-uq-ard-gp">13. The GP arm: <code>--uq ard-gp</code><a class="headerlink" href="#13-the-gp-arm-uq-ard-gp" title="Permanent link">&para;</a></h2>
+<p>The hybrid model adds <span class="arithmatex">\(M\)</span> GP columns to the design: <span class="arithmatex">\(\Phi=[B\mid k_\theta(B,B_M)]\)</span>,
+at the fitted hyperparameters <span class="arithmatex">\(\theta\)</span>. At fixed <span class="arithmatex">\(\theta\)</span> the model is linear
+in the coefficients <span class="arithmatex">\([c;w]\)</span>, with the prior precision</p>
+<div class="arithmatex">\[
+\Lambda=\operatorname{blockdiag}\big(\operatorname{diag}(\Gamma_j^2e^{a_{k(j)}}),\;e^{a_\text{GP}}K_{MM}\big).
+\]</div>
+<p>Each section above applies with one change: the diagonal <span class="arithmatex">\(D=\operatorname{diag}\Gamma\)</span>
+becomes the prior root</p>
+<div class="arithmatex">\[
+R_0=\operatorname{blockdiag}\big(\operatorname{diag}\Gamma,\;\operatorname{chol}(K_{MM})^\mathsf{T}\big),
+\qquad \Lambda=R_0^\mathsf{T}\operatorname{diag}(\lambda)R_0 .
+\]</div>
+<ul>
+<li>The scaled system is <span class="arithmatex">\(S=R_0^{-\mathsf{T}}AR_0^{-1}\)</span>. The terms of
+  <span class="arithmatex">\(\log|R_0|\)</span> in <span class="arithmatex">\(\log|A|\)</span> and <span class="arithmatex">\(\log|\Lambda|\)</span> cancel for any invertible
+  <span class="arithmatex">\(R_0\)</span>, so the evidence of section 3 is unchanged.</li>
+<li>The GP columns have one scale <span class="arithmatex">\(a_\text{GP}\)</span>. Its start value is 0, which is
+  the prior of the GP fit. <span class="arithmatex">\(R_0^\mathsf{T}\operatorname{diag}(\lambda)R_0\)</span> is a
+  scaling of <span class="arithmatex">\(K_{MM}\)</span> only if <span class="arithmatex">\(\lambda\)</span> is constant on the GP block.</li>
+<li>The leverage-corrected scores of section 6 use <span class="arithmatex">\(W=L^{-1}R_0^{-\mathsf{T}}\Psi_k^\mathsf{T}\)</span>.
+  The identity <span class="arithmatex">\(A^{-1}\tilde g_k=c-c_{(-k)}\)</span> holds for any invertible <span class="arithmatex">\(R_0\)</span>,
+  because the change from <span class="arithmatex">\(D\)</span> to <span class="arithmatex">\(R_0\)</span> is a change of basis.</li>
+<li>The shape is <span class="arithmatex">\(\tilde Q=S^{-1}R_0^{-\mathsf{T}}(G-\bar g)\)</span>, with
+  <span class="arithmatex">\(u_\alpha=R_0^{-\mathsf{T}}\phi_\alpha^\mathsf{T}\)</span>.</li>
+</ul>
+<p><span class="arithmatex">\(\theta\)</span> is fixed. The uncertainty of <span class="arithmatex">\(\theta\)</span> does not enter the shape.</p>
+<h2 id="14-assumptions-and-limitations">14. Assumptions and limitations<a class="headerlink" href="#14-assumptions-and-limitations" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Exchangeability at configuration level, within a group.</strong> The coverage
+   statement is approximate, with error controlled by <span class="arithmatex">\(n_{\mathrm{cfg},g}\)</span>,
+   which is reported with the merges.</li>
+<li><strong>Transfer</strong> from the validation model to the final model. This is an
+   empirical assumption: the per-fit exponent extrapolates the scale from two
+   validation sizes to <span class="arithmatex">\(|T|\)</span>, assuming a power law in <span class="arithmatex">\(N\)</span> with exponent in
+   <span class="arithmatex">\([0,\tfrac12]\)</span>. On out-of-distribution cells some dependence on <span class="arithmatex">\(f\)</span>
+   remains (crack-tip coverage 0.896 at <span class="arithmatex">\(f=0.1\)</span>, 0.851 at <span class="arithmatex">\(f=0.3\)</span>), although
+   the in-distribution scale is independent of <span class="arithmatex">\(f\)</span>.</li>
+<li><strong>The shape is a parameter variance used as a proxy</strong> for where the
+   approximation error is large. <span class="arithmatex">\(v(x)\)</span> measures how much the prediction at
+   <span class="arithmatex">\(x\)</span> depends on which clusters were in the fit, not the approximation error
+   itself; its rank correlation with the error is 0.3–0.4.</li>
+<li><strong>Independence of jackknife clusters.</strong> Spatial blocks assume that errors
+   are uncorrelated across block boundaries beyond about <span class="arithmatex">\(2r_{\mathrm{cut}}\)</span>.
+   The block-size plateau tests this.</li>
+<li><strong>Hyperparameters fixed in the jackknife.</strong> The deletion jackknife holds
+   <span class="arithmatex">\(h\)</span> fixed, so the shape carries no uncertainty from the hyperparameters.</li>
+<li><strong>Groups chosen from benchmark evidence.</strong> A shift the groups do not
+   resolve (chemical short-range order, a new phase) is covered only
+   marginally. The support diagnostic is the guard.</li>
+<li><strong>Forces only.</strong> Energy and virial uncertainties are not calibrated.</li>
+<li><strong>Locality acts as effective noise.</strong> The labels carry no noise, but the
+   descriptor truncates the environment at <span class="arithmatex">\(r_{\mathrm{cut}}\)</span>. Conditional on
+   <span class="arithmatex">\(x\)</span>, the label is therefore not deterministic: non-local elastic and
+   electronic contributions act as noise relative to the model. The scale
+   absorbs its size; nothing models where it is larger. This is a candidate
+   explanation for the remaining gap at crack tips.</li>
+<li><strong>Dissociation.</strong> The shape grows strongly under compression. Under
+   stretching it depends on the training data: with dimers and decohesion
+   in training (Si GAP-18) it stays far above its equilibrium value up to
+   <span class="arithmatex">\(r_{\mathrm{cut}}\)</span>, but with bulk-only training it peaks near
+   <span class="arithmatex">\(1.4\,d_{\mathrm{eq}}\)</span> and falls back towards its equilibrium value as the
+   neighbours leave the cutoff (Cantor: about twice the equilibrium value
+   near <span class="arithmatex">\(r_{\mathrm{cut}}\)</span>). The groups barely compensate. In every bond
+   scan tested, the support diagnostic flags these atoms, so check
+   <code>support_ok</code> where atoms may be losing neighbours.</li>
+</ol>
+<h2 id="references">References<a class="headerlink" href="#references" title="Permanent link">&para;</a></h2>
+<ul>
+<li>P. J. Huber, The behavior of maximum likelihood estimates under nonstandard
+  conditions, <em>Proc. 5th Berkeley Symp.</em> (1967); H. White, <em>Econometrica</em>
+  <strong>50</strong>, 1 (1982).</li>
+<li>U. K. Müller, Risk of Bayesian inference in misspecified models, and the
+  sandwich covariance matrix, <em>Econometrica</em> <strong>81</strong>, 1805 (2013).</li>
+<li>R. D. Cook and S. Weisberg, <em>Residuals and Influence in Regression</em>,
+  Chapman &amp; Hall (1982).</li>
+<li>J. G. MacKinnon, M. Ø. Nielsen and M. D. Webb, Cluster-robust inference: a
+  guide to empirical practice, <em>J. Econometrics</em> <strong>232</strong>, 272 (2023).</li>
+<li>A. C. Cameron and D. L. Miller, A practitioner's guide to cluster-robust
+  inference, <em>J. Human Resources</em> <strong>50</strong>, 317 (2015).</li>
+<li>R. Dunn, L. Wasserman and A. Ramdas, Distribution-free prediction sets for
+  two-layer hierarchical models, <em>J. Am. Stat. Assoc.</em> (2023),
+  <a href="https://arxiv.org/abs/1809.07441">arXiv:1809.07441</a>.</li>
+<li>R. J. Tibshirani, R. F. Barber, E. J. Candès and A. Ramdas, Conformal
+  prediction under covariate shift, <em>NeurIPS</em> (2019),
+  <a href="https://arxiv.org/abs/1904.06019">arXiv:1904.06019</a>.</li>
+<li>Y. Lysogorskiy, A. Bochkarev and R. Drautz, A latent-space extrapolation
+  grade built into graph atomic cluster expansion foundation potentials
+  (2026), <a href="https://arxiv.org/abs/2609.40060">arXiv:2609.40060</a>.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../" class="md-footer__link md-footer__link--prev" aria-label="Previous: Overview">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Overview
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../../howto/basis/" class="md-footer__link md-footer__link--next" aria-label="Next: Build a basis">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Build a basis
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.indexes", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../../javascripts/mathjax.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+        <script src="../../javascripts/plotly-figures.js"></script>
+      
+    
+  </body>
+</html>

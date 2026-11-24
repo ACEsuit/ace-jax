@@ -1,0 +1,2407 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head><meta name="robots" content="noindex">
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Fit and evaluate ACE and PACE interatomic potentials in Python/JAX">
+      
+      
+      
+        <link rel="canonical" href="https://acesuit.github.io/ace-jax/reference/cli/">
+      
+      
+        <link rel="prev" href="../../benchmarks/">
+      
+      
+        <link rel="next" href="../api/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/acesuit-logo.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>CLI - ace-jax</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#command-line-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="ace-jax" class="md-header__button md-logo" aria-label="ace-jax" data-md-component="logo">
+      
+  <img src="../../assets/acesuit-logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ace-jax
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              CLI
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/ACEsuit/ace-jax" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ACEsuit/ace-jax
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="ace-jax" class="md-nav__button md-logo" aria-label="ace-jax" data-md-component="logo">
+      
+  <img src="../../assets/acesuit-logo.png" alt="logo">
+
+    </a>
+    ace-jax
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/ACEsuit/ace-jax" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ACEsuit/ace-jax
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../tutorials/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/first-fit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    1. First fit: silicon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/learned-radials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2. Learned radials: silicon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/multi-element/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    3. Multi-element fits: categorical and embedded species
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/dataset-and-properties/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    4. Your data, your property
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/basis-and-evidence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    5. Basis size and the evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/surfaces/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    6. Surfaces: coverage and repair
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/curation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    7. Automating curation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/truth-about-the-truth/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    8. The truth about the truth
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/bring-your-own-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    9. Bring your own data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/force-uncertainty-maths/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Force uncertainty: the mathematics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-to guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-to guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/basis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build a basis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/fit-yaml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run files (fit.yaml)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/multi-element/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Multi-element fits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/ase/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASE calculators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/batch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluate many structures
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/lammps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LAMMPS export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/jax-md/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MD with JAX-MD
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/precision/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Choose float64 or float32
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/pace/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PACE .yace models
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/learned-radials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Learn the radial basis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/force-uncertainty/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Per-atom force uncertainty
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/foundation-labels/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Labels from a foundation model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/large-fits/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Large linear fits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/reproducibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reproducibility
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#aj-fit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        aj fit
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aj-eval" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        aj eval
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aj-calibrate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        aj calibrate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aj-export" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        aj export
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aj-native" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        aj native
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aj-basis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        aj basis
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ and troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../licence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Licence and citation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#aj-fit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        aj fit
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aj-eval" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        aj eval
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aj-calibrate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        aj calibrate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aj-export" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        aj export
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aj-native" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        aj native
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aj-basis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        aj basis
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="command-line-reference">Command-line reference<a class="headerlink" href="#command-line-reference" title="Permanent link">&para;</a></h1>
+<p><code>ace-jax</code> and its short alias <code>aj</code> are the same program. The documentation
+build makes this page from the <code>--help</code> output of the program. Thus the page
+agrees with the installed version.</p>
+<p>The commands, in the order of a typical workflow:</p>
+<ul>
+<li><a href="#aj-fit"><code>aj fit</code></a> fits a model to labelled extxyz data. It builds the
+  basis from <code>--order</code>/<code>--max-degree</code>, or uses a saved basis from <code>--model</code>.
+  It writes the fitted model, the metrics and a <code>fit.yaml</code> run file to
+  <code>--out</code>.</li>
+<li><a href="#aj-eval"><code>aj eval</code></a> evaluates a fitted model (ACE <code>.npz</code>, <code>gp_model.npz</code>
+  or PACE <code>.yace</code>) on an extxyz file.</li>
+<li><a href="#aj-calibrate"><code>aj calibrate</code></a> recalibrates the per-atom force
+  uncertainty of a <code>--uq ard</code> fit on labelled target-regime data.</li>
+<li><a href="#aj-basis"><code>aj basis</code></a> builds a basis and saves it on its own.</li>
+</ul>
+<p>Each command exits with status 0 if it is successful. The default label
+keys are <code>energy</code>, <code>forces</code> and <code>virial</code>. For other names, use
+<code>--energy-key</code>, <code>--force-key</code> and <code>--virial-key</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>usage: ace-jax [-h] [--version] {fit,eval,calibrate,export,native,basis} ...
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>Fit and evaluate ACE models in JAX (short alias: aj)
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>positional arguments:
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>  {fit,eval,calibrate,export,native,basis}
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    fit                 fit a linear ACE model (default), or with --m-per-species &gt; 0
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>                        the experimental hybrid ACE + residual GP
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    eval                evaluate a model on a dataset: RMSE table vs the labels,
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>                        predictions to extxyz
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    calibrate           recalibrate the per-group conformal scales of an ARD posterior
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>                        on a labelled set (per-group replace by default)
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    export              write a model for LAMMPS: an ML-PACE .yace (pair_style pace)
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>                        or a lammps-jax bundle (.json, pair_style jax)
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>    native              the native acceleration here: the C++ kernel's compiler, flags
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>                        and cache, on a CUDA GPU the CUDA kernel's, and matscipy-
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>                        neighbours; --build compiles the kernels now
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>    basis               author a new ACE basis: a frozen model (seeded radial init)
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>                        saved as .npz
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>options:
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>  -h, --help            show this help message and exit
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>  --version             show program's version number and exit
+</code></pre></div>
+<h2 id="aj-fit">aj fit<a class="headerlink" href="#aj-fit" title="Permanent link">&para;</a></h2>
+<p>The options fall into groups:</p>
+<ul>
+<li><strong>data</strong>: <code>--train</code>/<code>--test</code> files, or one <code>--data</code> file divided by a
+  seeded permutation (<code>--ntrain</code>, <code>--ntest</code>, <code>--test-start</code>). <code>--ood</code> adds a
+  second test set. <code>--weights</code> sets weights for each configuration type.</li>
+<li><strong>basis</strong>: the options under "basis" below build the basis in the fit.
+  Alternatively, <code>--model</code> uses a saved basis; then <code>--r0</code> is necessary.</li>
+<li><strong>model</strong>: <code>--m-per-species 0</code> (the default) is linear ACE. A positive
+  value adds a Gaussian-process arm, with that number of inducing sites for
+  each species. The GP arm is experimental. The GP options (<code>--kernel</code>,
+  <code>--no-bump</code>, <code>--density</code>, <code>--pca-d</code>, <code>--embedding</code>) need
+  <code>--m-per-species</code> &gt; 0.</li>
+<li><strong>hyperparameters</strong>: <code>--opt</code>, <code>--map-steps</code>, <code>--map-restarts</code>, <code>--map-polish</code>,
+  <code>--strict</code>, <code>--init</code>, <code>--noise</code>. <code>--noise shared</code> learns one noise scale
+  for all weighted rows, so <code>--weights</code> sets the balance of E, F and V (as
+  in ACEpotentials). The default <code>--noise auto</code> uses <code>shared</code> when you give
+  <code>--weights</code>, and <code>per-quantity</code> when you do not. <code>--rungs</code> other than <code>map</code> adds approximations of
+  the hyperparameter posterior, at a much higher cost.</li>
+<li><strong>uncertainty</strong>: <code>--uq blr</code> (default), <code>pops</code> or <code>ard</code> for the linear
+  model. The <code>--ard-*</code> and <code>--force-shape</code> options configure <code>ard</code>
+  (<a href="../../howto/force-uncertainty/">Per-atom force uncertainty</a>).</li>
+<li><strong>run file</strong>: <code>--config fit.yaml</code>. Command-line flags override the file
+  (<a href="../../howto/fit-yaml/">Run files</a>).</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>usage: ace-jax fit [-h] [--config CONFIG] [--model MODEL]
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>                   [--train TRAIN | --data DATA] [--test TEST] [--ood OOD]
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>                   [--ntrain NTRAIN] [--ntest NTEST] [--test-start TEST_START]
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>                   [--energy-key ENERGY_KEY] [--force-key FORCE_KEY]
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>                   [--virial-key VIRIAL_KEY] [--stress-key STRESS_KEY]
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>                   [--weights WEIGHTS] [--e0 {model,lsq,prefit}] [--baseline BASELINE]
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>                   [--configs-per-batch CONFIGS_PER_BATCH]
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>                   [--batch-pack {auto,on,off}] [--m-per-species M_PER_SPECIES]
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>                   [--kernel {cosine,matern32}] [--no-bump]
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>                   [--density {none,pair,pca}] [--pca-d PCA_D] [--embedding EMBEDDING]
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>                   [--objective {lml,loo}] [--lml {device,host-cache}]
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>                   [--lml-solver {qr,svd,cholesky}]
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>                   [--row-precision {float64,float32}] [--row-check]
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>                   [--opt {adam,lbfgs}] [--map-polish {auto,on,off}] [--strict]
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>                   [--noise {auto,per-quantity,shared}] [--solver {evidence,lstsq}]
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>                   [--map-restarts MAP_RESTARTS] [--init INIT] [--checkpoint DIR]
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>                   [--mpi] [--stats-only] [--checkpoint-every MIN] [--rungs RUNGS]
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>                   [--n-draws N_DRAWS] [--laplace {svi,fd}] [--map-steps MAP_STEPS]
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>                   [--vi-steps VI_STEPS] [--nuts-warmup NUTS_WARMUP]
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>                   [--nuts-samples NUTS_SAMPLES] [--nuts-chains NUTS_CHAINS] [--r0 R0]
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>                   [--uq {blr,pops,ard,ard-gp}] [--ard-mode {joint,sequential}]
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>                   [--ard-variance {sandwich,kappa}] [--ard-solver {auto,qr,cholesky}]
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>                   [--ard-cond-max ARD_COND_MAX] [--ard-prior {fit,fixed}]
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>                   [--ard-allow-degenerate] [--ard-val-frac ARD_VAL_FRAC]
+<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a>                   [--force-shape {iso,aniso}] [--ard-coverage ARD_COVERAGE]
+<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>                   [--ard-groups {distortion,none}]
+<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a>                   [--ard-cluster-size ARD_CLUSTER_SIZE] [--ard-press {exact,block}]
+<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a>                   [--ard-transfer {exponent,sqrt,none}] [--ard-n-min ARD_N_MIN]
+<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a>                   [--no-ard-support] [--ard-support-features {raw,normalised}]
+<a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a>                   [--learn-radial] [--radial-n-q RADIAL_N_Q]
+<a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a>                   [--radial-steps RADIAL_STEPS]
+<a id="__codelineno-1-32" name="__codelineno-1-32" href="#__codelineno-1-32"></a>                   [--radial-reprofile-every RADIAL_REPROFILE_EVERY]
+<a id="__codelineno-1-33" name="__codelineno-1-33" href="#__codelineno-1-33"></a>                   [--radial-opt {lbfgs,newton}] [--radial-cg-iters RADIAL_CG_ITERS]
+<a id="__codelineno-1-34" name="__codelineno-1-34" href="#__codelineno-1-34"></a>                   [--radial-lam-grid RADIAL_LAM_GRID]
+<a id="__codelineno-1-35" name="__codelineno-1-35" href="#__codelineno-1-35"></a>                   [--radial-val-frac RADIAL_VAL_FRAC] [--pops-ridge POPS_RIDGE]
+<a id="__codelineno-1-36" name="__codelineno-1-36" href="#__codelineno-1-36"></a>                   [--seed SEED] [--out OUT] [--model-draws MODEL_DRAWS]
+<a id="__codelineno-1-37" name="__codelineno-1-37" href="#__codelineno-1-37"></a>                   [--no-save-model] [--devices DEVICES] [--elements ELEMENTS]
+<a id="__codelineno-1-38" name="__codelineno-1-38" href="#__codelineno-1-38"></a>                   [--order ORDER] [--max-degree MAX_DEGREE] [--wL WL] [--rcut RCUT]
+<a id="__codelineno-1-39" name="__codelineno-1-39" href="#__codelineno-1-39"></a>                   [--rin RIN] [--radial-mode {onehot,glorot_normal,zero}]
+<a id="__codelineno-1-40" name="__codelineno-1-40" href="#__codelineno-1-40"></a>                   [--pair-mode PAIR_MODE] [--radial-basis {poly,sbessel}]
+<a id="__codelineno-1-41" name="__codelineno-1-41" href="#__codelineno-1-41"></a>                   [--no-gamma] [--no-coupling-cache]
+<a id="__codelineno-1-42" name="__codelineno-1-42" href="#__codelineno-1-42"></a>                   [--coupling-cache-dir COUPLING_CACHE_DIR]
+<a id="__codelineno-1-43" name="__codelineno-1-43" href="#__codelineno-1-43"></a>                   [--basis-embedding BASIS_EMBEDDING] [--nmax-by-order NMAX_BY_ORDER]
+<a id="__codelineno-1-44" name="__codelineno-1-44" href="#__codelineno-1-44"></a>                   [--lmax-by-order LMAX_BY_ORDER] [--d-max D_MAX] [--maxl MAXL]
+<a id="__codelineno-1-45" name="__codelineno-1-45" href="#__codelineno-1-45"></a>                   [--reduction {pca,truncate}]
+<a id="__codelineno-1-46" name="__codelineno-1-46" href="#__codelineno-1-46"></a>
+<a id="__codelineno-1-47" name="__codelineno-1-47" href="#__codelineno-1-47"></a>options:
+<a id="__codelineno-1-48" name="__codelineno-1-48" href="#__codelineno-1-48"></a>  -h, --help            show this help message and exit
+<a id="__codelineno-1-49" name="__codelineno-1-49" href="#__codelineno-1-49"></a>  --config CONFIG       a fit.yaml run file (flag names as keys, the basis in a
+<a id="__codelineno-1-50" name="__codelineno-1-50" href="#__codelineno-1-50"></a>                        `basis:` block); command-line flags override it
+<a id="__codelineno-1-51" name="__codelineno-1-51" href="#__codelineno-1-51"></a>  --model MODEL         an ACE basis/model .npz (or give --order/--max-degree to build
+<a id="__codelineno-1-52" name="__codelineno-1-52" href="#__codelineno-1-52"></a>                        the basis)
+<a id="__codelineno-1-53" name="__codelineno-1-53" href="#__codelineno-1-53"></a>  --train TRAIN         training extxyz (with --test, or tested on itself)
+<a id="__codelineno-1-54" name="__codelineno-1-54" href="#__codelineno-1-54"></a>  --data DATA           one extxyz split by a seeded permutation
+<a id="__codelineno-1-55" name="__codelineno-1-55" href="#__codelineno-1-55"></a>                        (--ntrain/--ntest/--test-start)
+<a id="__codelineno-1-56" name="__codelineno-1-56" href="#__codelineno-1-56"></a>  --test TEST
+<a id="__codelineno-1-57" name="__codelineno-1-57" href="#__codelineno-1-57"></a>  --ood OOD             extra out-of-distribution test extxyz
+<a id="__codelineno-1-58" name="__codelineno-1-58" href="#__codelineno-1-58"></a>  --ntrain NTRAIN
+<a id="__codelineno-1-59" name="__codelineno-1-59" href="#__codelineno-1-59"></a>  --ntest NTEST
+<a id="__codelineno-1-60" name="__codelineno-1-60" href="#__codelineno-1-60"></a>  --test-start TEST_START
+<a id="__codelineno-1-61" name="__codelineno-1-61" href="#__codelineno-1-61"></a>  --energy-key ENERGY_KEY
+<a id="__codelineno-1-62" name="__codelineno-1-62" href="#__codelineno-1-62"></a>  --force-key FORCE_KEY
+<a id="__codelineno-1-63" name="__codelineno-1-63" href="#__codelineno-1-63"></a>  --virial-key VIRIAL_KEY
+<a id="__codelineno-1-64" name="__codelineno-1-64" href="#__codelineno-1-64"></a>  --stress-key STRESS_KEY
+<a id="__codelineno-1-65" name="__codelineno-1-65" href="#__codelineno-1-65"></a>                        stress label (eV/A^3, 3x3 or Voigt-6) used as the virial,
+<a id="__codelineno-1-66" name="__codelineno-1-66" href="#__codelineno-1-66"></a>                        virial = -stress * volume, when a config has no virial label
+<a id="__codelineno-1-67" name="__codelineno-1-67" href="#__codelineno-1-67"></a>  --weights WEIGHTS     JSON: an ACEfit weights dict {"default":
+<a id="__codelineno-1-68" name="__codelineno-1-68" href="#__codelineno-1-68"></a>                        {"E":..,"F":..,"V":..}, &lt;config_type&gt;: ..} or a list of weight
+<a id="__codelineno-1-69" name="__codelineno-1-69" href="#__codelineno-1-69"></a>                        factors [{"Structural": {}}, {"ConfigType": {...}}]; or the
+<a id="__codelineno-1-70" name="__codelineno-1-70" href="#__codelineno-1-70"></a>                        path of a .json file holding either
+<a id="__codelineno-1-71" name="__codelineno-1-71" href="#__codelineno-1-71"></a>  --e0 {model,lsq,prefit}
+<a id="__codelineno-1-72" name="__codelineno-1-72" href="#__codelineno-1-72"></a>                        per-species E0: the model's (default); lsq fits it jointly
+<a id="__codelineno-1-73" name="__codelineno-1-73" href="#__codelineno-1-73"></a>                        with the readout (a wide prior around a least-squares start);
+<a id="__codelineno-1-74" name="__codelineno-1-74" href="#__codelineno-1-74"></a>                        prefit fixes it at least squares on the training energies
+<a id="__codelineno-1-75" name="__codelineno-1-75" href="#__codelineno-1-75"></a>                        before the fit
+<a id="__codelineno-1-76" name="__codelineno-1-76" href="#__codelineno-1-76"></a>  --baseline BASELINE   dimer_mean.npz: fit the residual to this pair mean
+<a id="__codelineno-1-77" name="__codelineno-1-77" href="#__codelineno-1-77"></a>  --configs-per-batch CONFIGS_PER_BATCH
+<a id="__codelineno-1-78" name="__codelineno-1-78" href="#__codelineno-1-78"></a>  --batch-pack {auto,on,off}
+<a id="__codelineno-1-79" name="__codelineno-1-79" href="#__codelineno-1-79"></a>                        size-aware batching: pack configs into batches by an atom
+<a id="__codelineno-1-80" name="__codelineno-1-80" href="#__codelineno-1-80"></a>                        budget (the largest config) instead of fixed groups of
+<a id="__codelineno-1-81" name="__codelineno-1-81" href="#__codelineno-1-81"></a>                        --configs-per-batch; auto = only when the fixed layout would
+<a id="__codelineno-1-82" name="__codelineno-1-82" href="#__codelineno-1-82"></a>                        pad badly (mixed bulk + big cells)
+<a id="__codelineno-1-83" name="__codelineno-1-83" href="#__codelineno-1-83"></a>  --m-per-species M_PER_SPECIES
+<a id="__codelineno-1-84" name="__codelineno-1-84" href="#__codelineno-1-84"></a>                        inducing points per species of the residual GP. 0 (default) =
+<a id="__codelineno-1-85" name="__codelineno-1-85" href="#__codelineno-1-85"></a>                        linear ACE; &gt; 0 adds the GP arm (experimental, advanced: much
+<a id="__codelineno-1-86" name="__codelineno-1-86" href="#__codelineno-1-86"></a>                        slower and more memory; try 6-100)
+<a id="__codelineno-1-87" name="__codelineno-1-87" href="#__codelineno-1-87"></a>  --kernel {cosine,matern32}
+<a id="__codelineno-1-88" name="__codelineno-1-88" href="#__codelineno-1-88"></a>  --no-bump
+<a id="__codelineno-1-89" name="__codelineno-1-89" href="#__codelineno-1-89"></a>  --density {none,pair,pca}
+<a id="__codelineno-1-90" name="__codelineno-1-90" href="#__codelineno-1-90"></a>                        GP feature map: full descriptor, pair densities, or a PCA view
+<a id="__codelineno-1-91" name="__codelineno-1-91" href="#__codelineno-1-91"></a>                        (--pca-d)
+<a id="__codelineno-1-92" name="__codelineno-1-92" href="#__codelineno-1-92"></a>  --pca-d PCA_D
+<a id="__codelineno-1-93" name="__codelineno-1-93" href="#__codelineno-1-93"></a>  --embedding EMBEDDING
+<a id="__codelineno-1-94" name="__codelineno-1-94" href="#__codelineno-1-94"></a>                        MACE element table (JSON): frozen species coregionalization
+<a id="__codelineno-1-95" name="__codelineno-1-95" href="#__codelineno-1-95"></a>  --objective {lml,loo}
+<a id="__codelineno-1-96" name="__codelineno-1-96" href="#__codelineno-1-96"></a>  --lml {device,host-cache}
+<a id="__codelineno-1-97" name="__codelineno-1-97" href="#__codelineno-1-97"></a>                        host-cache: cache the linear design rows in host RAM (GP,
+<a id="__codelineno-1-98" name="__codelineno-1-98" href="#__codelineno-1-98"></a>                        pair|pca, L-BFGS, map only)
+<a id="__codelineno-1-99" name="__codelineno-1-99" href="#__codelineno-1-99"></a>  --lml-solver {qr,svd,cholesky}
+<a id="__codelineno-1-100" name="__codelineno-1-100" href="#__codelineno-1-100"></a>                        linear arm: the evidence and posterior by QR (stable;
+<a id="__codelineno-1-101" name="__codelineno-1-101" href="#__codelineno-1-101"></a>                        default), by one SVD (svd: the MAP's evaluations O(L) after
+<a id="__codelineno-1-102" name="__codelineno-1-102" href="#__codelineno-1-102"></a>                        one SVD, as stable as QR; shared noise only, else QR), or by a
+<a id="__codelineno-1-103" name="__codelineno-1-103" href="#__codelineno-1-103"></a>                        Cholesky of the Gram (faster at large basis, but loses
+<a id="__codelineno-1-104" name="__codelineno-1-104" href="#__codelineno-1-104"></a>                        accuracy when the fit nearly interpolates its data). The GP
+<a id="__codelineno-1-105" name="__codelineno-1-105" href="#__codelineno-1-105"></a>                        arm always uses the Cholesky
+<a id="__codelineno-1-106" name="__codelineno-1-106" href="#__codelineno-1-106"></a>  --row-precision {float64,float32}
+<a id="__codelineno-1-107" name="__codelineno-1-107" href="#__codelineno-1-107"></a>                        float32: compute the design rows (and, on a GPU, their QR) in
+<a id="__codelineno-1-108" name="__codelineno-1-108" href="#__codelineno-1-108"></a>                        float32, the bulk of a fit's work; the evidence and
+<a id="__codelineno-1-109" name="__codelineno-1-109" href="#__codelineno-1-109"></a>                        coefficients stay float64. Linear arm with the QR solver only:
+<a id="__codelineno-1-110" name="__codelineno-1-110" href="#__codelineno-1-110"></a>                        the GP arm and --learn-radial are not supported yet
+<a id="__codelineno-1-111" name="__codelineno-1-111" href="#__codelineno-1-111"></a>  --row-check           with --row-precision float32: after the MAP, refit on
+<a id="__codelineno-1-112" name="__codelineno-1-112" href="#__codelineno-1-112"></a>                        statistics perturbed at float32 rounding and record how much
+<a id="__codelineno-1-113" name="__codelineno-1-113" href="#__codelineno-1-113"></a>                        the training RMSE changes (warns above 10%; it costs a second
+<a id="__codelineno-1-114" name="__codelineno-1-114" href="#__codelineno-1-114"></a>                        MAP)
+<a id="__codelineno-1-115" name="__codelineno-1-115" href="#__codelineno-1-115"></a>  --opt {adam,lbfgs}    hyperparameter MAP optimiser: lbfgs (default) = bounded
+<a id="__codelineno-1-116" name="__codelineno-1-116" href="#__codelineno-1-116"></a>                        L-BFGS-B, then (linear arm, see --map-polish) a Newton polish
+<a id="__codelineno-1-117" name="__codelineno-1-117" href="#__codelineno-1-117"></a>                        to a stationary point; adam = numpyro SVI for --map-steps
+<a id="__codelineno-1-118" name="__codelineno-1-118" href="#__codelineno-1-118"></a>                        steps, which can stop far from the optimum on large data
+<a id="__codelineno-1-119" name="__codelineno-1-119" href="#__codelineno-1-119"></a>  --map-polish {auto,on,off}
+<a id="__codelineno-1-120" name="__codelineno-1-120" href="#__codelineno-1-120"></a>                        Newton polish of the L-BFGS MAP to a stationary point, with
+<a id="__codelineno-1-121" name="__codelineno-1-121" href="#__codelineno-1-121"></a>                        the exact Hessian built one Hessian-vector product per free
+<a id="__codelineno-1-122" name="__codelineno-1-122" href="#__codelineno-1-122"></a>                        hyperparameter (~2.3x the gradient's memory). auto (default):
+<a id="__codelineno-1-123" name="__codelineno-1-123" href="#__codelineno-1-123"></a>                        on for the linear arm, off for the GP arm, where each HVP is a
+<a id="__codelineno-1-124" name="__codelineno-1-124" href="#__codelineno-1-124"></a>                        forward-over-reverse pass through the streamed objective (one
+<a id="__codelineno-1-125" name="__codelineno-1-125" href="#__codelineno-1-125"></a>                        gradient can take a minute, a polish hours at large scale)
+<a id="__codelineno-1-126" name="__codelineno-1-126" href="#__codelineno-1-126"></a>  --strict              fail, instead of warning, when the MAP ends away from a
+<a id="__codelineno-1-127" name="__codelineno-1-127" href="#__codelineno-1-127"></a>                        stationary point (a predicted Newton gain above 1e-3 nats)
+<a id="__codelineno-1-128" name="__codelineno-1-128" href="#__codelineno-1-128"></a>  --noise {auto,per-quantity,shared}
+<a id="__codelineno-1-129" name="__codelineno-1-129" href="#__codelineno-1-129"></a>                        noise hyperparameters: per-quantity learns sigma_E, sigma_F
+<a id="__codelineno-1-130" name="__codelineno-1-130" href="#__codelineno-1-130"></a>                        and sigma_V separately, and at the optimum each cancels its
+<a id="__codelineno-1-131" name="__codelineno-1-131" href="#__codelineno-1-131"></a>                        quantity's --weights; shared learns ONE sigma for every
+<a id="__codelineno-1-132" name="__codelineno-1-132" href="#__codelineno-1-132"></a>                        weighted row (ACEpotentials' BLR), so the E:F:V weights set
+<a id="__codelineno-1-133" name="__codelineno-1-133" href="#__codelineno-1-133"></a>                        the balance. auto (default): shared when --weights is given,
+<a id="__codelineno-1-134" name="__codelineno-1-134" href="#__codelineno-1-134"></a>                        per-quantity otherwise (and per-quantity where shared is not
+<a id="__codelineno-1-135" name="__codelineno-1-135" href="#__codelineno-1-135"></a>                        available: --sigma-type, joint ARD, --solver lstsq)
+<a id="__codelineno-1-136" name="__codelineno-1-136" href="#__codelineno-1-136"></a>  --solver {evidence,lstsq}
+<a id="__codelineno-1-137" name="__codelineno-1-137" href="#__codelineno-1-137"></a>                        lstsq: plain weighted least squares with no prior (teaching;
+<a id="__codelineno-1-138" name="__codelineno-1-138" href="#__codelineno-1-138"></a>                        overfits a large basis)
+<a id="__codelineno-1-139" name="__codelineno-1-139" href="#__codelineno-1-139"></a>  --map-restarts MAP_RESTARTS
+<a id="__codelineno-1-140" name="__codelineno-1-140" href="#__codelineno-1-140"></a>                        L-BFGS multi-start (best log-posterior)
+<a id="__codelineno-1-141" name="__codelineno-1-141" href="#__codelineno-1-141"></a>  --init INIT           theta_map.json to start the MAP from
+<a id="__codelineno-1-142" name="__codelineno-1-142" href="#__codelineno-1-142"></a>  --checkpoint DIR      resumable fit: save the training statistics (CPU) every
+<a id="__codelineno-1-143" name="__codelineno-1-143" href="#__codelineno-1-143"></a>                        --checkpoint-every minutes and the MAP's best hyperparameters
+<a id="__codelineno-1-144" name="__codelineno-1-144" href="#__codelineno-1-144"></a>                        to DIR; rerunning the same command resumes from them (GBs: 8
+<a id="__codelineno-1-145" name="__codelineno-1-145" href="#__codelineno-1-145"></a>                        L^2 bytes per quantity)
+<a id="__codelineno-1-146" name="__codelineno-1-146" href="#__codelineno-1-146"></a>  --mpi                 shard the training statistics over MPI ranks (run under
+<a id="__codelineno-1-147" name="__codelineno-1-147" href="#__codelineno-1-147"></a>                        srun/mpirun, one rank per node; needs the [mpi] extra): each
+<a id="__codelineno-1-148" name="__codelineno-1-148" href="#__codelineno-1-148"></a>                        rank streams every N-th batch, the factors are merged onto
+<a id="__codelineno-1-149" name="__codelineno-1-149" href="#__codelineno-1-149"></a>                        rank 0, which runs the rest of the fit
+<a id="__codelineno-1-150" name="__codelineno-1-150" href="#__codelineno-1-150"></a>  --stats-only          stop after the training statistics, saved to --checkpoint DIR
+<a id="__codelineno-1-151" name="__codelineno-1-151" href="#__codelineno-1-151"></a>                        (with --mpi: merged into one file): the first job of a two-job
+<a id="__codelineno-1-152" name="__codelineno-1-152" href="#__codelineno-1-152"></a>                        fit; the same command without --stats-only and --mpi, on one
+<a id="__codelineno-1-153" name="__codelineno-1-153" href="#__codelineno-1-153"></a>                        node, then runs only the MAP
+<a id="__codelineno-1-154" name="__codelineno-1-154" href="#__codelineno-1-154"></a>  --checkpoint-every MIN
+<a id="__codelineno-1-155" name="__codelineno-1-155" href="#__codelineno-1-155"></a>                        minutes between training-statistics checkpoints (default 45)
+<a id="__codelineno-1-156" name="__codelineno-1-156" href="#__codelineno-1-156"></a>  --rungs RUNGS         comma-separated from map,laplace,pathfinder,vi,nuts (default
+<a id="__codelineno-1-157" name="__codelineno-1-157" href="#__codelineno-1-157"></a>                        map; the others add hyperparameter draws and cost far more
+<a id="__codelineno-1-158" name="__codelineno-1-158" href="#__codelineno-1-158"></a>                        than the MAP)
+<a id="__codelineno-1-159" name="__codelineno-1-159" href="#__codelineno-1-159"></a>  --n-draws N_DRAWS
+<a id="__codelineno-1-160" name="__codelineno-1-160" href="#__codelineno-1-160"></a>  --laplace {svi,fd}
+<a id="__codelineno-1-161" name="__codelineno-1-161" href="#__codelineno-1-161"></a>  --map-steps MAP_STEPS
+<a id="__codelineno-1-162" name="__codelineno-1-162" href="#__codelineno-1-162"></a>                        MAP iterations: L-BFGS-B iterations (at most 4x as many
+<a id="__codelineno-1-163" name="__codelineno-1-163" href="#__codelineno-1-163"></a>                        evaluations), or Adam steps
+<a id="__codelineno-1-164" name="__codelineno-1-164" href="#__codelineno-1-164"></a>  --vi-steps VI_STEPS
+<a id="__codelineno-1-165" name="__codelineno-1-165" href="#__codelineno-1-165"></a>  --nuts-warmup NUTS_WARMUP
+<a id="__codelineno-1-166" name="__codelineno-1-166" href="#__codelineno-1-166"></a>  --nuts-samples NUTS_SAMPLES
+<a id="__codelineno-1-167" name="__codelineno-1-167" href="#__codelineno-1-167"></a>  --nuts-chains NUTS_CHAINS
+<a id="__codelineno-1-168" name="__codelineno-1-168" href="#__codelineno-1-168"></a>  --r0 R0               typical nearest-neighbour distance (A); centres the GP
+<a id="__codelineno-1-169" name="__codelineno-1-169" href="#__codelineno-1-169"></a>                        hyperprior (default when building the basis: its mean bond
+<a id="__codelineno-1-170" name="__codelineno-1-170" href="#__codelineno-1-170"></a>                        length)
+<a id="__codelineno-1-171" name="__codelineno-1-171" href="#__codelineno-1-171"></a>  --uq {blr,pops,ard,ard-gp}
+<a id="__codelineno-1-172" name="__codelineno-1-172" href="#__codelineno-1-172"></a>                        pops/ard: linear arm (--m-per-species 0); ard = ARD posterior
+<a id="__codelineno-1-173" name="__codelineno-1-173" href="#__codelineno-1-173"></a>                        with a calibrated per-atom forces_std (see --ard-variance),
+<a id="__codelineno-1-174" name="__codelineno-1-174" href="#__codelineno-1-174"></a>                        writes posterior.npz; ard-gp: the same calibrated force UQ on
+<a id="__codelineno-1-175" name="__codelineno-1-175" href="#__codelineno-1-175"></a>                        the GP arm (--m-per-species &gt; 0), from the jackknife-sandwich
+<a id="__codelineno-1-176" name="__codelineno-1-176" href="#__codelineno-1-176"></a>                        posterior over [B | k(B, B_M)] at the MAP hyperparameters;
+<a id="__codelineno-1-177" name="__codelineno-1-177" href="#__codelineno-1-177"></a>                        writes gp_model.npz (the ARD mean) and posterior.npz
+<a id="__codelineno-1-178" name="__codelineno-1-178" href="#__codelineno-1-178"></a>  --ard-mode {joint,sequential}
+<a id="__codelineno-1-179" name="__codelineno-1-179" href="#__codelineno-1-179"></a>                        joint: noise + ARD scales by evidence; sequential: ARD only,
+<a id="__codelineno-1-180" name="__codelineno-1-180" href="#__codelineno-1-180"></a>                        one Gram (low memory with --uq ard; --uq ard-gp still holds ~4
+<a id="__codelineno-1-181" name="__codelineno-1-181" href="#__codelineno-1-181"></a>                        Dt^2 joint arrays)
+<a id="__codelineno-1-182" name="__codelineno-1-182" href="#__codelineno-1-182"></a>  --ard-variance {sandwich,kappa}
+<a id="__codelineno-1-183" name="__codelineno-1-183" href="#__codelineno-1-183"></a>                        ARD force-uncertainty shape: sandwich (default) = delete-one-
+<a id="__codelineno-1-184" name="__codelineno-1-184" href="#__codelineno-1-184"></a>                        cluster PRESS jackknife (misspecification-robust); kappa = the
+<a id="__codelineno-1-185" name="__codelineno-1-185" href="#__codelineno-1-185"></a>                        posterior A^-1 shape. Both get the per-group scales
+<a id="__codelineno-1-186" name="__codelineno-1-186" href="#__codelineno-1-186"></a>  --ard-solver {auto,qr,cholesky}
+<a id="__codelineno-1-187" name="__codelineno-1-187" href="#__codelineno-1-187"></a>                        ard: factorisation of the ARD evidence and posterior -- qr
+<a id="__codelineno-1-188" name="__codelineno-1-188" href="#__codelineno-1-188"></a>                        (auto with --uq ard) factors the data rows, so the prior floor
+<a id="__codelineno-1-189" name="__codelineno-1-189" href="#__codelineno-1-189"></a>                        can sit decades lower than cholesky's (auto with --uq ard-gp)
+<a id="__codelineno-1-190" name="__codelineno-1-190" href="#__codelineno-1-190"></a>  --ard-cond-max ARD_COND_MAX
+<a id="__codelineno-1-191" name="__codelineno-1-191" href="#__codelineno-1-191"></a>                        ard: the prior floor keeps cond(S) below this (default: 1e22
+<a id="__codelineno-1-192" name="__codelineno-1-192" href="#__codelineno-1-192"></a>                        qr, 1e14 cholesky)
+<a id="__codelineno-1-193" name="__codelineno-1-193" href="#__codelineno-1-193"></a>  --ard-prior {fit,fixed}
+<a id="__codelineno-1-194" name="__codelineno-1-194" href="#__codelineno-1-194"></a>                        ard: fit = the ARD scales by evidence (default); fixed = keep
+<a id="__codelineno-1-195" name="__codelineno-1-195" href="#__codelineno-1-195"></a>                        the MAP's own prior (the BLR fit's single sigma_c) in the
+<a id="__codelineno-1-196" name="__codelineno-1-196" href="#__codelineno-1-196"></a>                        hold-out fits and the served posterior, so the calibrated per-
+<a id="__codelineno-1-197" name="__codelineno-1-197" href="#__codelineno-1-197"></a>                        atom forces and the jackknife shape are those of the BLR
+<a id="__codelineno-1-198" name="__codelineno-1-198" href="#__codelineno-1-198"></a>                        posterior
+<a id="__codelineno-1-199" name="__codelineno-1-199" href="#__codelineno-1-199"></a>  --ard-allow-degenerate
+<a id="__codelineno-1-200" name="__codelineno-1-200" href="#__codelineno-1-200"></a>                        ard: write the posterior even when every ARD scale ends on the
+<a id="__codelineno-1-201" name="__codelineno-1-201" href="#__codelineno-1-201"></a>                        prior floor with the evidence pointing below it (by default
+<a id="__codelineno-1-202" name="__codelineno-1-202" href="#__codelineno-1-202"></a>                        the fit stops with an error)
+<a id="__codelineno-1-203" name="__codelineno-1-203" href="#__codelineno-1-203"></a>  --ard-val-frac ARD_VAL_FRAC
+<a id="__codelineno-1-204" name="__codelineno-1-204" href="#__codelineno-1-204"></a>                        stratified train fraction held out to score the per-group
+<a id="__codelineno-1-205" name="__codelineno-1-205" href="#__codelineno-1-205"></a>                        force scales (rms factor and conformal quantile) with the
+<a id="__codelineno-1-206" name="__codelineno-1-206" href="#__codelineno-1-206"></a>                        hold-out posterior
+<a id="__codelineno-1-207" name="__codelineno-1-207" href="#__codelineno-1-207"></a>  --force-shape {iso,aniso}
+<a id="__codelineno-1-208" name="__codelineno-1-208" href="#__codelineno-1-208"></a>                        ard: anisotropic (Mahalanobis, default) or isotropic
+<a id="__codelineno-1-209" name="__codelineno-1-209" href="#__codelineno-1-209"></a>                        (|e|/sqrt(v/3), spherical radius) conformal force scores
+<a id="__codelineno-1-210" name="__codelineno-1-210" href="#__codelineno-1-210"></a>  --ard-coverage ARD_COVERAGE
+<a id="__codelineno-1-211" name="__codelineno-1-211" href="#__codelineno-1-211"></a>                        ard: nominal coverage 1 - alpha of the per-group conformal
+<a id="__codelineno-1-212" name="__codelineno-1-212" href="#__codelineno-1-212"></a>                        quantile
+<a id="__codelineno-1-213" name="__codelineno-1-213" href="#__codelineno-1-213"></a>  --ard-groups {distortion,none}
+<a id="__codelineno-1-214" name="__codelineno-1-214" href="#__codelineno-1-214"></a>                        ard: conformal groups = distortion bands x [z = z*] (8), or
+<a id="__codelineno-1-215" name="__codelineno-1-215" href="#__codelineno-1-215"></a>                        none (2)
+<a id="__codelineno-1-216" name="__codelineno-1-216" href="#__codelineno-1-216"></a>  --ard-cluster-size ARD_CLUSTER_SIZE
+<a id="__codelineno-1-217" name="__codelineno-1-217" href="#__codelineno-1-217"></a>                        ard: sandwich block side in units of r_cut ('inf': whole
+<a id="__codelineno-1-218" name="__codelineno-1-218" href="#__codelineno-1-218"></a>                        configurations)
+<a id="__codelineno-1-219" name="__codelineno-1-219" href="#__codelineno-1-219"></a>  --ard-press {exact,block}
+<a id="__codelineno-1-220" name="__codelineno-1-220" href="#__codelineno-1-220"></a>                        ard: PRESS correction of the jackknife scores (exact: per-
+<a id="__codelineno-1-221" name="__codelineno-1-221" href="#__codelineno-1-221"></a>                        cluster solve; block: block approximation)
+<a id="__codelineno-1-222" name="__codelineno-1-222" href="#__codelineno-1-222"></a>  --ard-transfer {exponent,sqrt,none}
+<a id="__codelineno-1-223" name="__codelineno-1-223" href="#__codelineno-1-223"></a>                        ard: carry the hold-out scales to the served posterior by
+<a id="__codelineno-1-224" name="__codelineno-1-224" href="#__codelineno-1-224"></a>                        (N/N_fit)^beta -- exponent: beta fitted per run from a second,
+<a id="__codelineno-1-225" name="__codelineno-1-225" href="#__codelineno-1-225"></a>                        smaller hold-out fit (clipped to [0, 1/2]); sqrt: beta = 1/2;
+<a id="__codelineno-1-226" name="__codelineno-1-226" href="#__codelineno-1-226"></a>                        none: beta = 0
+<a id="__codelineno-1-227" name="__codelineno-1-227" href="#__codelineno-1-227"></a>  --ard-n-min ARD_N_MIN
+<a id="__codelineno-1-228" name="__codelineno-1-228" href="#__codelineno-1-228"></a>                        ard: groups with fewer configurations borrow a neighbouring
+<a id="__codelineno-1-229" name="__codelineno-1-229" href="#__codelineno-1-229"></a>                        group's scales
+<a id="__codelineno-1-230" name="__codelineno-1-230" href="#__codelineno-1-230"></a>  --no-ard-support      ard: skip the covariate-shift support reference
+<a id="__codelineno-1-231" name="__codelineno-1-231" href="#__codelineno-1-231"></a>  --ard-support-features {raw,normalised}
+<a id="__codelineno-1-232" name="__codelineno-1-232" href="#__codelineno-1-232"></a>                        ard: support-reference features -- raw descriptors, or
+<a id="__codelineno-1-233" name="__codelineno-1-233" href="#__codelineno-1-233"></a>                        normalised (unit-norm descriptor plus log-norm channels per
+<a id="__codelineno-1-234" name="__codelineno-1-234" href="#__codelineno-1-234"></a>                        body order, which flag atoms losing neighbours)
+<a id="__codelineno-1-235" name="__codelineno-1-235" href="#__codelineno-1-235"></a>  --learn-radial        learn the tensor radials (VarPro, held-out gate) before the
+<a id="__codelineno-1-236" name="__codelineno-1-236" href="#__codelineno-1-236"></a>                        fit; the saved model is marked radial_learned and splined at
+<a id="__codelineno-1-237" name="__codelineno-1-237" href="#__codelineno-1-237"></a>                        deploy time
+<a id="__codelineno-1-238" name="__codelineno-1-238" href="#__codelineno-1-238"></a>  --radial-n-q RADIAL_N_Q
+<a id="__codelineno-1-239" name="__codelineno-1-239" href="#__codelineno-1-239"></a>                        tensor-radial polynomial span after widening (with --learn-
+<a id="__codelineno-1-240" name="__codelineno-1-240" href="#__codelineno-1-240"></a>                        radial)
+<a id="__codelineno-1-241" name="__codelineno-1-241" href="#__codelineno-1-241"></a>  --radial-steps RADIAL_STEPS
+<a id="__codelineno-1-242" name="__codelineno-1-242" href="#__codelineno-1-242"></a>                        optimiser iterations per roughness weight (with --learn-
+<a id="__codelineno-1-243" name="__codelineno-1-243" href="#__codelineno-1-243"></a>                        radial)
+<a id="__codelineno-1-244" name="__codelineno-1-244" href="#__codelineno-1-244"></a>  --radial-reprofile-every RADIAL_REPROFILE_EVERY
+<a id="__codelineno-1-245" name="__codelineno-1-245" href="#__codelineno-1-245"></a>                        re-fit the evidence hyperparameters every this many radial
+<a id="__codelineno-1-246" name="__codelineno-1-246" href="#__codelineno-1-246"></a>                        steps; each re-fit restarts the optimiser (with --learn-
+<a id="__codelineno-1-247" name="__codelineno-1-247" href="#__codelineno-1-247"></a>                        radial)
+<a id="__codelineno-1-248" name="__codelineno-1-248" href="#__codelineno-1-248"></a>  --radial-opt {lbfgs,newton}
+<a id="__codelineno-1-249" name="__codelineno-1-249" href="#__codelineno-1-249"></a>                        radial optimiser: L-BFGS-B, or trust-region Newton with exact
+<a id="__codelineno-1-250" name="__codelineno-1-250" href="#__codelineno-1-250"></a>                        Hessian-vector products (each costs about two gradients;
+<a id="__codelineno-1-251" name="__codelineno-1-251" href="#__codelineno-1-251"></a>                        capped by --radial-cg-iters per iteration)
+<a id="__codelineno-1-252" name="__codelineno-1-252" href="#__codelineno-1-252"></a>  --radial-cg-iters RADIAL_CG_ITERS
+<a id="__codelineno-1-253" name="__codelineno-1-253" href="#__codelineno-1-253"></a>                        Hessian-vector products per Newton iteration, at most (with
+<a id="__codelineno-1-254" name="__codelineno-1-254" href="#__codelineno-1-254"></a>                        --radial-opt newton)
+<a id="__codelineno-1-255" name="__codelineno-1-255" href="#__codelineno-1-255"></a>  --radial-lam-grid RADIAL_LAM_GRID
+<a id="__codelineno-1-256" name="__codelineno-1-256" href="#__codelineno-1-256"></a>                        comma-separated relative roughness weights the gate picks
+<a id="__codelineno-1-257" name="__codelineno-1-257" href="#__codelineno-1-257"></a>                        among, alongside the initial radials (with --learn-radial)
+<a id="__codelineno-1-258" name="__codelineno-1-258" href="#__codelineno-1-258"></a>  --radial-val-frac RADIAL_VAL_FRAC
+<a id="__codelineno-1-259" name="__codelineno-1-259" href="#__codelineno-1-259"></a>                        fraction of the training configs held out for the gate (with
+<a id="__codelineno-1-260" name="__codelineno-1-260" href="#__codelineno-1-260"></a>                        --learn-radial)
+<a id="__codelineno-1-261" name="__codelineno-1-261" href="#__codelineno-1-261"></a>  --pops-ridge POPS_RIDGE
+<a id="__codelineno-1-262" name="__codelineno-1-262" href="#__codelineno-1-262"></a>  --seed SEED
+<a id="__codelineno-1-263" name="__codelineno-1-263" href="#__codelineno-1-263"></a>  --out OUT
+<a id="__codelineno-1-264" name="__codelineno-1-264" href="#__codelineno-1-264"></a>  --model-draws MODEL_DRAWS
+<a id="__codelineno-1-265" name="__codelineno-1-265" href="#__codelineno-1-265"></a>                        GP arm: hyperparameter draws stored in gp_model.npz (1 = the
+<a id="__codelineno-1-266" name="__codelineno-1-266" href="#__codelineno-1-266"></a>                        MAP; more = evenly spaced draws of the last rung, each adding
+<a id="__codelineno-1-267" name="__codelineno-1-267" href="#__codelineno-1-267"></a>                        a (Dt, Dt) factor)
+<a id="__codelineno-1-268" name="__codelineno-1-268" href="#__codelineno-1-268"></a>  --no-save-model       skip writing the fitted model (model.npz linear / gp_model.npz
+<a id="__codelineno-1-269" name="__codelineno-1-269" href="#__codelineno-1-269"></a>                        GP)
+<a id="__codelineno-1-270" name="__codelineno-1-270" href="#__codelineno-1-270"></a>  --devices DEVICES     shard sufficient statistics over this many devices
+<a id="__codelineno-1-271" name="__codelineno-1-271" href="#__codelineno-1-271"></a>                        (experimental)
+<a id="__codelineno-1-272" name="__codelineno-1-272" href="#__codelineno-1-272"></a>
+<a id="__codelineno-1-273" name="__codelineno-1-273" href="#__codelineno-1-273"></a>basis (built in memory; instead of --model):
+<a id="__codelineno-1-274" name="__codelineno-1-274" href="#__codelineno-1-274"></a>  --elements ELEMENTS   comma-separated Z numbers or symbols (default: the species in
+<a id="__codelineno-1-275" name="__codelineno-1-275" href="#__codelineno-1-275"></a>                        the data)
+<a id="__codelineno-1-276" name="__codelineno-1-276" href="#__codelineno-1-276"></a>  --order ORDER         correlation order
+<a id="__codelineno-1-277" name="__codelineno-1-277" href="#__codelineno-1-277"></a>  --max-degree MAX_DEGREE
+<a id="__codelineno-1-278" name="__codelineno-1-278" href="#__codelineno-1-278"></a>                        TotalDegree level bound
+<a id="__codelineno-1-279" name="__codelineno-1-279" href="#__codelineno-1-279"></a>  --wL WL
+<a id="__codelineno-1-280" name="__codelineno-1-280" href="#__codelineno-1-280"></a>  --rcut RCUT           cutoff (default 5.5; with an embedding, 2.5 x mean bond
+<a id="__codelineno-1-281" name="__codelineno-1-281" href="#__codelineno-1-281"></a>                        length)
+<a id="__codelineno-1-282" name="__codelineno-1-282" href="#__codelineno-1-282"></a>  --rin RIN
+<a id="__codelineno-1-283" name="__codelineno-1-283" href="#__codelineno-1-283"></a>  --radial-mode {onehot,glorot_normal,zero}
+<a id="__codelineno-1-284" name="__codelineno-1-284" href="#__codelineno-1-284"></a>                        initial tensor radials: onehot (R_n = P_n, the frozen-fit
+<a id="__codelineno-1-285" name="__codelineno-1-285" href="#__codelineno-1-285"></a>                        default) or seeded glorot_normal mixtures (a random start,
+<a id="__codelineno-1-286" name="__codelineno-1-286" href="#__codelineno-1-286"></a>                        e.g. for learned radials)
+<a id="__codelineno-1-287" name="__codelineno-1-287" href="#__codelineno-1-287"></a>  --pair-mode PAIR_MODE
+<a id="__codelineno-1-288" name="__codelineno-1-288" href="#__codelineno-1-288"></a>  --radial-basis {poly,sbessel}
+<a id="__codelineno-1-289" name="__codelineno-1-289" href="#__codelineno-1-289"></a>                        tensor-radial basis: poly (ACEpotentials, polynomials of a
+<a id="__codelineno-1-290" name="__codelineno-1-290" href="#__codelineno-1-290"></a>                        transformed distance) or sbessel (PACE's simplified spherical
+<a id="__codelineno-1-291" name="__codelineno-1-291" href="#__codelineno-1-291"></a>                        Bessel functions of r, as pacemaker's radials)
+<a id="__codelineno-1-292" name="__codelineno-1-292" href="#__codelineno-1-292"></a>  --no-gamma            skip the smoothness prior
+<a id="__codelineno-1-293" name="__codelineno-1-293" href="#__codelineno-1-293"></a>  --no-coupling-cache   always compute the coupling instead of using the per-shape
+<a id="__codelineno-1-294" name="__codelineno-1-294" href="#__codelineno-1-294"></a>                        cache
+<a id="__codelineno-1-295" name="__codelineno-1-295" href="#__codelineno-1-295"></a>  --coupling-cache-dir COUPLING_CACHE_DIR
+<a id="__codelineno-1-296" name="__codelineno-1-296" href="#__codelineno-1-296"></a>                        coupling cache directory (default: $ACEJAX_COUPLING_CACHE or
+<a id="__codelineno-1-297" name="__codelineno-1-297" href="#__codelineno-1-297"></a>                        ~/.cache/ace-jax/coupling)
+<a id="__codelineno-1-298" name="__codelineno-1-298" href="#__codelineno-1-298"></a>  --basis-embedding BASIS_EMBEDDING
+<a id="__codelineno-1-299" name="__codelineno-1-299" href="#__codelineno-1-299"></a>                        frozen element embedding of the basis: a JSON table {Z, emb}
+<a id="__codelineno-1-300" name="__codelineno-1-300" href="#__codelineno-1-300"></a>                        or 'identity' (builds ace_embedding_model: ace1-compatible,
+<a id="__codelineno-1-301" name="__codelineno-1-301" href="#__codelineno-1-301"></a>                        factorised radial)
+<a id="__codelineno-1-302" name="__codelineno-1-302" href="#__codelineno-1-302"></a>  --nmax-by-order NMAX_BY_ORDER
+<a id="__codelineno-1-303" name="__codelineno-1-303" href="#__codelineno-1-303"></a>                        comma-separated cap on the radial degree n of each many-body
+<a id="__codelineno-1-304" name="__codelineno-1-304" href="#__codelineno-1-304"></a>                        term, per correlation order from 1 (pacemaker's
+<a id="__codelineno-1-305" name="__codelineno-1-305" href="#__codelineno-1-305"></a>                        nradmax_by_orders; the last entry repeats)
+<a id="__codelineno-1-306" name="__codelineno-1-306" href="#__codelineno-1-306"></a>  --lmax-by-order LMAX_BY_ORDER
+<a id="__codelineno-1-307" name="__codelineno-1-307" href="#__codelineno-1-307"></a>                        comma-separated cap on l per correlation order (pacemaker's
+<a id="__codelineno-1-308" name="__codelineno-1-308" href="#__codelineno-1-308"></a>                        lmax_by_orders); with --wL 1 the TotalDegree level is
+<a id="__codelineno-1-309" name="__codelineno-1-309" href="#__codelineno-1-309"></a>                        pacemaker's power order
+<a id="__codelineno-1-310" name="__codelineno-1-310" href="#__codelineno-1-310"></a>  --d-max D_MAX         cap on per-order channel widths (default lossless)
+<a id="__codelineno-1-311" name="__codelineno-1-311" href="#__codelineno-1-311"></a>  --maxl MAXL
+<a id="__codelineno-1-312" name="__codelineno-1-312" href="#__codelineno-1-312"></a>  --reduction {pca,truncate}
+</code></pre></div>
+<h2 id="aj-eval">aj eval<a class="headerlink" href="#aj-eval" title="Permanent link">&para;</a></h2>
+<p>With <code>--posterior</code> (a <code>posterior.npz</code> from <code>aj fit --uq ard</code>), <code>--per-atom</code>
+writes the per-atom force uncertainty, and <code>--support</code> adds the support flag
+(<a href="../../howto/force-uncertainty/">Per-atom force uncertainty</a>).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>usage: ace-jax eval [-h] --model MODEL --data DATA [--energy-key ENERGY_KEY]
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>                    [--force-key FORCE_KEY] [--virial-key VIRIAL_KEY]
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>                    [--stress-key STRESS_KEY] [--out OUT] [--prefix PREFIX]
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>                    [--posterior POSTERIOR] [--per-atom PER_ATOM] [--support]
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>                    [--shape-path {rows,committee}] [--no-deriv-dtc]
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>options:
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>  -h, --help            show this help message and exit
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>  --model MODEL
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>  --data DATA
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>  --energy-key ENERGY_KEY
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>  --force-key FORCE_KEY
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>  --virial-key VIRIAL_KEY
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>  --stress-key STRESS_KEY
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>                        stress label (eV/A^3, 3x3 or Voigt-6) used as the virial,
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>                        virial = -stress * volume, when a config has no virial label
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>  --out OUT             extxyz to write: the input structures, every label kept, plus
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>                        the predictions (&lt;prefix&gt;energy, &lt;prefix&gt;forces,
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>                        &lt;prefix&gt;stress, and *_std for UQ models)
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>  --prefix PREFIX       name prefix of the predicted keys (default ace_)
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>  --posterior POSTERIOR
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a>                        posterior.npz from `fit --uq ard` (with its model.npz) or `fit
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>                        --uq ard-gp` (with its gp_model.npz): adds &lt;prefix&gt;forces_std
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>  --per-atom PER_ATOM   with --posterior: extxyz of the served per-atom arrays
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>                        (forces_pred, forces_std, forces_q, forces_group; forces_cov,
+<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a>                        forces_q_mahal for an aniso posterior)
+<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a>  --support             with --posterior --per-atom: add support_ok and support_q
+<a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a>                        (covariate-shift support)
+<a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a>  --shape-path {rows,committee}
+<a id="__codelineno-2-30" name="__codelineno-2-30" href="#__codelineno-2-30"></a>                        ard: evaluate the uncertainty shape from the whole cell's
+<a id="__codelineno-2-31" name="__codelineno-2-31" href="#__codelineno-2-31"></a>                        force design rows (rows) or as the forces of an r-output
+<a id="__codelineno-2-32" name="__codelineno-2-32" href="#__codelineno-2-32"></a>                        linear ACE (committee: same values, memory O(N r) not O(N L))
+<a id="__codelineno-2-33" name="__codelineno-2-33" href="#__codelineno-2-33"></a>  --no-deriv-dtc        gp_model.npz only: SoR-only forces_std, without the
+<a id="__codelineno-2-34" name="__codelineno-2-34" href="#__codelineno-2-34"></a>                        derivative-DTC term (whose whole-cell (n, K, d, 3) arrays may
+<a id="__codelineno-2-35" name="__codelineno-2-35" href="#__codelineno-2-35"></a>                        not fit for a big cell)
+</code></pre></div>
+<h2 id="aj-calibrate">aj calibrate<a class="headerlink" href="#aj-calibrate" title="Permanent link">&para;</a></h2>
+<p>Calculates the group scales of an ARD posterior again, on labelled
+configurations that were not in the training set. It writes a new
+posterior. The model does not change. See
+<a href="../../howto/force-uncertainty/#recalibrate-on-target-data-aj-calibrate">Recalibrate on target data</a>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>usage: ace-jax calibrate [-h] --model MODEL --posterior POSTERIOR --data DATA
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>                         [--energy-key ENERGY_KEY] [--force-key FORCE_KEY]
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>                         [--virial-key VIRIAL_KEY] [--shape-path {rows,committee}]
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>                         [--append | --replace] --out OUT
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>options:
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>  -h, --help            show this help message and exit
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>  --model MODEL
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>  --posterior POSTERIOR
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>  --data DATA           labelled extxyz U (needs forces under --force-key)
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>  --energy-key ENERGY_KEY
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>  --force-key FORCE_KEY
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>  --virial-key VIRIAL_KEY
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>  --shape-path {rows,committee}
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>                        ard: evaluate the uncertainty shape from the whole cell's
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>                        force design rows (rows) or as the forces of an r-output
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>                        linear ACE (committee: same values, memory O(N r) not O(N L))
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>  --append              pool U with the stored T_val scores in every group
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>  --replace             use U only in every group
+<a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a>  --out OUT
+</code></pre></div>
+<h2 id="aj-export">aj export<a class="headerlink" href="#aj-export" title="Permanent link">&para;</a></h2>
+<p>Writes a model for LAMMPS: an ML-PACE <code>.yace</code> file, or a lammps-jax bundle.
+See <a href="../../howto/lammps/">Export a model to LAMMPS</a>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>usage: ace-jax export [-h] [--model MODEL] [--out OUT] [--format {yace,lammps}]
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>                      [--delta DELTA] [--structure STRUCTURE] [--skin SKIN]
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>                      [--slots {skin,cutoff}] [--layout {auto,sparse,dense,matrix}]
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>                      [--dtype {float64,float32}] [--platform {cuda,cpu}]
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>                      [--procs PROCS] [--aa-dag {auto,chain,greedy,prefix}]
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>                      [--print-env BUNDLE] [--ffi] [--no-ffi] [--ffi-flags FFI_FLAGS]
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>                      [--ffi-precision {float64,mixed}]
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>                      [--type-elements TYPE_ELEMENTS]
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>options:
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>  -h, --help            show this help message and exit
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>  --model MODEL         a model .npz (linear ACE) or .yace (required)
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>  --out OUT             the file to write: .yace or .json (else give --format;
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>                        required)
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>  --format {yace,lammps}
+<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>                        yace: ML-PACE C-tilde (exact, tabulated radials); lammps: a
+<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a>                        lammps-jax bundle (default: from the --out extension)
+<a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a>  --delta DELTA         yace: radial table spacing and ML-PACE deltaSplineBins in Å
+<a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a>                        (default 0.001; the cutoff must be a whole number of it)
+<a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a>  --structure STRUCTURE
+<a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a>                        lammps: the extxyz LAMMPS starts from (first configuration);
+<a id="__codelineno-4-22" name="__codelineno-4-22" href="#__codelineno-4-22"></a>                        it sizes the buffers
+<a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a>  --skin SKIN           lammps: the LAMMPS neighbour skin (Å)
+<a id="__codelineno-4-24" name="__codelineno-4-24" href="#__codelineno-4-24"></a>  --slots {skin,cutoff}
+<a id="__codelineno-4-25" name="__codelineno-4-25" href="#__codelineno-4-25"></a>                        lammps: neighbour slots for rcut + skin (safe) or rcut
+<a id="__codelineno-4-26" name="__codelineno-4-26" href="#__codelineno-4-26"></a>                        (tighter; stable MD only)
+<a id="__codelineno-4-27" name="__codelineno-4-27" href="#__codelineno-4-27"></a>  --layout {auto,sparse,dense,matrix}
+<a id="__codelineno-4-28" name="__codelineno-4-28" href="#__codelineno-4-28"></a>                        lammps: bundle layout
+<a id="__codelineno-4-29" name="__codelineno-4-29" href="#__codelineno-4-29"></a>  --dtype {float64,float32}
+<a id="__codelineno-4-30" name="__codelineno-4-30" href="#__codelineno-4-30"></a>                        lammps: precision
+<a id="__codelineno-4-31" name="__codelineno-4-31" href="#__codelineno-4-31"></a>  --platform {cuda,cpu}
+<a id="__codelineno-4-32" name="__codelineno-4-32" href="#__codelineno-4-32"></a>                        lammps: the lammps-jax backend the bundle runs on (default
+<a id="__codelineno-4-33" name="__codelineno-4-33" href="#__codelineno-4-33"></a>                        cuda)
+<a id="__codelineno-4-34" name="__codelineno-4-34" href="#__codelineno-4-34"></a>  --procs PROCS         lammps: the LAMMPS processor grid px,py,pz; sizes one MPI
+<a id="__codelineno-4-35" name="__codelineno-4-35" href="#__codelineno-4-35"></a>                        rank's buffers (run LAMMPS with `processors px py pz`)
+<a id="__codelineno-4-36" name="__codelineno-4-36" href="#__codelineno-4-36"></a>  --aa-dag {auto,chain,greedy,prefix}
+<a id="__codelineno-4-37" name="__codelineno-4-37" href="#__codelineno-4-37"></a>                        lammps: the product basis form: auto (greedy for large bases,
+<a id="__codelineno-4-38" name="__codelineno-4-38" href="#__codelineno-4-38"></a>                        else chain), chain, or the DAG plans greedy / prefix (on a
+<a id="__codelineno-4-39" name="__codelineno-4-39" href="#__codelineno-4-39"></a>                        CUDA GPU, --ffi is faster than any of them)
+<a id="__codelineno-4-40" name="__codelineno-4-40" href="#__codelineno-4-40"></a>  --print-env BUNDLE    instead of an export: print the environment that runs LAMMPS
+<a id="__codelineno-4-41" name="__codelineno-4-41" href="#__codelineno-4-41"></a>                        on an exported kernel bundle, resolved on this machine (run it
+<a id="__codelineno-4-42" name="__codelineno-4-42" href="#__codelineno-4-42"></a>                        where LAMMPS runs; a kernel library missing here is compiled
+<a id="__codelineno-4-43" name="__codelineno-4-43" href="#__codelineno-4-43"></a>                        here)
+<a id="__codelineno-4-44" name="__codelineno-4-44" href="#__codelineno-4-44"></a>  --ffi                 lammps: require ace-jax's kernel for linear ACE (one FFI call
+<a id="__codelineno-4-45" name="__codelineno-4-45" href="#__codelineno-4-45"></a>                        per step; on --platform cpu the default takes it when it can
+<a id="__codelineno-4-46" name="__codelineno-4-46" href="#__codelineno-4-46"></a>                        and says why not), compiled on first use with the C++ compiler
+<a id="__codelineno-4-47" name="__codelineno-4-47" href="#__codelineno-4-47"></a>                        ($CXX, c++, g++ or clang++), or nvcc for a GPU bundle, and
+<a id="__codelineno-4-48" name="__codelineno-4-48" href="#__codelineno-4-48"></a>                        cached
+<a id="__codelineno-4-49" name="__codelineno-4-49" href="#__codelineno-4-49"></a>  --no-ffi              lammps, --platform cpu: the XLA program, not the C++ kernel
+<a id="__codelineno-4-50" name="__codelineno-4-50" href="#__codelineno-4-50"></a>  --ffi-flags FFI_FLAGS
+<a id="__codelineno-4-51" name="__codelineno-4-51" href="#__codelineno-4-51"></a>                        lammps: the kernel's compiler flags (implies --ffi; default
+<a id="__codelineno-4-52" name="__codelineno-4-52" href="#__codelineno-4-52"></a>                        "-O3 -march=native", or "-O3 -arch=sm_XY" for a GPU): on a
+<a id="__codelineno-4-53" name="__codelineno-4-53" href="#__codelineno-4-53"></a>                        login node for compute nodes of another CPU type, e.g. --ffi-
+<a id="__codelineno-4-54" name="__codelineno-4-54" href="#__codelineno-4-54"></a>                        flags="-O3 -march=x86-64-v3" (with =), or -arch=sm_80 for an
+<a id="__codelineno-4-55" name="__codelineno-4-55" href="#__codelineno-4-55"></a>                        A100
+<a id="__codelineno-4-56" name="__codelineno-4-56" href="#__codelineno-4-56"></a>  --ffi-precision {float64,mixed}
+<a id="__codelineno-4-57" name="__codelineno-4-57" href="#__codelineno-4-57"></a>                        lammps: 'mixed' runs the kernel's product basis in float32 and
+<a id="__codelineno-4-58" name="__codelineno-4-58" href="#__codelineno-4-58"></a>                        the rest in float64 (faster for large models; energies carry
+<a id="__codelineno-4-59" name="__codelineno-4-59" href="#__codelineno-4-59"></a>                        ~0.1 meV of noise in 200 atoms, so minimise with a force-based
+<a id="__codelineno-4-60" name="__codelineno-4-60" href="#__codelineno-4-60"></a>                        min_style, not a line search); needs the kernel and float64
+<a id="__codelineno-4-61" name="__codelineno-4-61" href="#__codelineno-4-61"></a>  --type-elements TYPE_ELEMENTS
+<a id="__codelineno-4-62" name="__codelineno-4-62" href="#__codelineno-4-62"></a>                        lammps: comma-separated element of each LAMMPS atom type, in
+<a id="__codelineno-4-63" name="__codelineno-4-63" href="#__codelineno-4-63"></a>                        type order (default: the model's element order)
+</code></pre></div>
+<h2 id="aj-native">aj native<a class="headerlink" href="#aj-native" title="Permanent link">&para;</a></h2>
+<p>Shows the native C++ code that ace-jax can use on this machine: the compiler,
+the C++ kernel and the neighbour list. <code>--build</code> compiles the kernel. See
+<a href="../../installation/#native">Installation</a>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>usage: ace-jax native [-h] [--build] [--flags FLAGS] [--gpu-flags GPU_FLAGS]
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>options:
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>  -h, --help            show this help message and exit
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>  --build               compile the C++ kernel, and on a CUDA GPU the CUDA kernel,
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>                        into the cache now (else each is compiled on first use); on a
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>                        cluster, run it on a compute node. Exits 1 when one cannot be
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>                        compiled
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>  --flags FLAGS         the kernel's compiler flags (default "-O3 -march=native", or
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>                        ACEJAX_FFI_FLAGS), e.g. --flags="-O3 -march=x86-64-v3" (with
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>                        =)
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>  --gpu-flags GPU_FLAGS
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>                        the CUDA kernel's nvcc flags (default "-O3 -arch=sm_XY" for
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>                        this GPU, or ACEJAX_FFI_GPU_FLAGS)
+</code></pre></div>
+<h2 id="aj-basis">aj basis<a class="headerlink" href="#aj-basis" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>usage: ace-jax basis [-h] --elements ELEMENTS --order ORDER --max-degree MAX_DEGREE
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>                     [--wL WL] [--rcut RCUT] [--rin RIN]
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>                     [--radial-mode {onehot,glorot_normal,zero}]
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>                     [--pair-mode PAIR_MODE] [--radial-basis {poly,sbessel}]
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>                     [--no-gamma] [--no-coupling-cache]
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>                     [--coupling-cache-dir COUPLING_CACHE_DIR] [--embedding EMBEDDING]
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>                     [--nmax-by-order NMAX_BY_ORDER] [--lmax-by-order LMAX_BY_ORDER]
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>                     [--d-max D_MAX] [--maxl MAXL] [--reduction {pca,truncate}]
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>                     [--seed SEED] --out OUT [--config CONFIG]
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>options:
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>  -h, --help            show this help message and exit
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>  --elements ELEMENTS   comma-separated Z numbers or symbols
+<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>  --order ORDER         correlation order
+<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>  --max-degree MAX_DEGREE
+<a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>                        TotalDegree level bound
+<a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>  --wL WL
+<a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>  --rcut RCUT           cutoff (default 5.5; with an embedding, 2.5 x mean bond
+<a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a>                        length)
+<a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a>  --rin RIN
+<a id="__codelineno-6-21" name="__codelineno-6-21" href="#__codelineno-6-21"></a>  --radial-mode {onehot,glorot_normal,zero}
+<a id="__codelineno-6-22" name="__codelineno-6-22" href="#__codelineno-6-22"></a>                        initial tensor radials: onehot (R_n = P_n, the frozen-fit
+<a id="__codelineno-6-23" name="__codelineno-6-23" href="#__codelineno-6-23"></a>                        default) or seeded glorot_normal mixtures (a random start,
+<a id="__codelineno-6-24" name="__codelineno-6-24" href="#__codelineno-6-24"></a>                        e.g. for learned radials)
+<a id="__codelineno-6-25" name="__codelineno-6-25" href="#__codelineno-6-25"></a>  --pair-mode PAIR_MODE
+<a id="__codelineno-6-26" name="__codelineno-6-26" href="#__codelineno-6-26"></a>  --radial-basis {poly,sbessel}
+<a id="__codelineno-6-27" name="__codelineno-6-27" href="#__codelineno-6-27"></a>                        tensor-radial basis: poly (ACEpotentials, polynomials of a
+<a id="__codelineno-6-28" name="__codelineno-6-28" href="#__codelineno-6-28"></a>                        transformed distance) or sbessel (PACE's simplified spherical
+<a id="__codelineno-6-29" name="__codelineno-6-29" href="#__codelineno-6-29"></a>                        Bessel functions of r, as pacemaker's radials)
+<a id="__codelineno-6-30" name="__codelineno-6-30" href="#__codelineno-6-30"></a>  --no-gamma            skip the smoothness prior
+<a id="__codelineno-6-31" name="__codelineno-6-31" href="#__codelineno-6-31"></a>  --no-coupling-cache   always compute the coupling instead of using the per-shape
+<a id="__codelineno-6-32" name="__codelineno-6-32" href="#__codelineno-6-32"></a>                        cache
+<a id="__codelineno-6-33" name="__codelineno-6-33" href="#__codelineno-6-33"></a>  --coupling-cache-dir COUPLING_CACHE_DIR
+<a id="__codelineno-6-34" name="__codelineno-6-34" href="#__codelineno-6-34"></a>                        coupling cache directory (default: $ACEJAX_COUPLING_CACHE or
+<a id="__codelineno-6-35" name="__codelineno-6-35" href="#__codelineno-6-35"></a>                        ~/.cache/ace-jax/coupling)
+<a id="__codelineno-6-36" name="__codelineno-6-36" href="#__codelineno-6-36"></a>  --embedding EMBEDDING
+<a id="__codelineno-6-37" name="__codelineno-6-37" href="#__codelineno-6-37"></a>                        frozen element embedding of the basis: a JSON table {Z, emb}
+<a id="__codelineno-6-38" name="__codelineno-6-38" href="#__codelineno-6-38"></a>                        or 'identity' (builds ace_embedding_model: ace1-compatible,
+<a id="__codelineno-6-39" name="__codelineno-6-39" href="#__codelineno-6-39"></a>                        factorised radial)
+<a id="__codelineno-6-40" name="__codelineno-6-40" href="#__codelineno-6-40"></a>  --nmax-by-order NMAX_BY_ORDER
+<a id="__codelineno-6-41" name="__codelineno-6-41" href="#__codelineno-6-41"></a>                        comma-separated cap on the radial degree n of each many-body
+<a id="__codelineno-6-42" name="__codelineno-6-42" href="#__codelineno-6-42"></a>                        term, per correlation order from 1 (pacemaker's
+<a id="__codelineno-6-43" name="__codelineno-6-43" href="#__codelineno-6-43"></a>                        nradmax_by_orders; the last entry repeats)
+<a id="__codelineno-6-44" name="__codelineno-6-44" href="#__codelineno-6-44"></a>  --lmax-by-order LMAX_BY_ORDER
+<a id="__codelineno-6-45" name="__codelineno-6-45" href="#__codelineno-6-45"></a>                        comma-separated cap on l per correlation order (pacemaker's
+<a id="__codelineno-6-46" name="__codelineno-6-46" href="#__codelineno-6-46"></a>                        lmax_by_orders); with --wL 1 the TotalDegree level is
+<a id="__codelineno-6-47" name="__codelineno-6-47" href="#__codelineno-6-47"></a>                        pacemaker's power order
+<a id="__codelineno-6-48" name="__codelineno-6-48" href="#__codelineno-6-48"></a>  --d-max D_MAX         cap on per-order channel widths (default lossless)
+<a id="__codelineno-6-49" name="__codelineno-6-49" href="#__codelineno-6-49"></a>  --maxl MAXL
+<a id="__codelineno-6-50" name="__codelineno-6-50" href="#__codelineno-6-50"></a>  --reduction {pca,truncate}
+<a id="__codelineno-6-51" name="__codelineno-6-51" href="#__codelineno-6-51"></a>  --seed SEED
+<a id="__codelineno-6-52" name="__codelineno-6-52" href="#__codelineno-6-52"></a>  --out OUT
+<a id="__codelineno-6-53" name="__codelineno-6-53" href="#__codelineno-6-53"></a>  --config CONFIG       a fit.yaml: its `basis:` block (and `seed`); command-line
+<a id="__codelineno-6-54" name="__codelineno-6-54" href="#__codelineno-6-54"></a>                        flags override it
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../../benchmarks/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Performance">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Performance
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../api/" class="md-footer__link md-footer__link--next" aria-label="Next: Python API">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Python API
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.indexes", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../../javascripts/mathjax.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+        <script src="../../javascripts/plotly-figures.js"></script>
+      
+    
+  </body>
+</html>
