@@ -15,8 +15,12 @@
   solution at that alpha (pypolymlp does not refit on train + validation).
 - Weights: pypolymlp has one scalar per dataset, which multiplies that dataset's energy, force and stress
   residuals.  One dataset per (config type, has a virial), weight sigma_F,default / sigma_F: the square root of
-  DATA/weights_mace.json, as fit_nep.py.  pypolymlp's own row weights stay on (energy rows by energy tier,
-  force components above 1 eV/A as 1/|F|, stress rows 0.1 with large values damped: mlp_dev/core/utils_weights.py).
+  DATA/weights_mace.json, as fit_nep.py.  These GAP-18 per-type weights are the only ones: pypolymlp's automatic
+  value weights (energy rows by energy tier, force components above 1 eV/A as 1/|F|, large stress values damped:
+  mlp_dev/core/utils_weights.py) are off, `use_auto_weight=False` (pypolymlp >= 0.23.0; A. Seko added the option
+  for this benchmark, 2026-11-24), so every family is fitted under the same per-type weights (weights.py).  Stress
+  rows keep pypolymlp's flat factor 0.1.  A sweep entry with `auto_weight: true` turns the automatic weights back
+  on (the 0.22.1 protocol: the `-a28` checks, and the first ladder, kept in runs/.../polymlp_auto).
 - Virials: fitted for the configurations that have one (include_stress per dataset).  pypolymlp's "stress" is
   sum r (x) f in eV per cell, the libAtoms virial, so info["virial"] goes in unchanged.
 - Effective size: `design_rank` is the numerical rank (singular values above RANK_TOL x the largest) of the
@@ -44,7 +48,7 @@ def params_kw(e):
     kw = dict(elements=["Si"], cutoff=float(e.get("cutoff", RCUT)), model_type=int(e["model_type"]),
               max_p=int(e["max_p"]), feature_type=e.get("feature_type", "gtinv"), n_gaussians=int(e["n_gaussians"]),
               reg_alpha_params=tuple(e.get("reg_alpha", REG_ALPHA)), atomic_energy=[E0_SI], gtinv_version=1,
-              include_force=True, include_stress=True)
+              include_force=True, include_stress=True, use_auto_weight=bool(e.get("auto_weight", False)))
     if kw["feature_type"] == "gtinv":
         kw |= dict(gtinv_order=int(e["gtinv_order"]), gtinv_maxl=tuple(e["gtinv_maxl"]))
     return kw
@@ -165,8 +169,7 @@ def fit(size, rank=True):
     t0 = time.perf_counter()
     try:
         res = fit_polymlp(prm, dataset_list([atoms[i] for i in tr], w, "train"),
-                          dataset_list([atoms[i] for i in va], w, "val"), batch_size=e.get("batch_size"),
-                          verbose=True)
+                          dataset_list([atoms[i] for i in va], w, "val"), verbose=True)
         best, alphas = res.best_model, [float(m.alpha) for m in res.all_models]
         best.save_mlp(filename=str(d / "polymlp.yaml"))
         extra = {"n_params": int(p.n_features), "alpha": float(best.alpha), "alphas": alphas,

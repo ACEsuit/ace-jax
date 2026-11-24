@@ -40,21 +40,36 @@ function themed(layout) {
 }
 
 // Buttons for the figure's presets (layout.meta.presets: {label, families: [legendgroup...] | null for all}): a
-// preset shows its families and leaves the rest in the legend, hidden.  The first preset is the initial view.
+// preset shows its families and leaves the rest in the legend, hidden.  The first preset is the initial view,
+// unless the address names another: ?view=<label in lower case, other characters as "-"> (?view=all,
+// ?view=foundation-models).  A click writes the same parameter to the address bar, so the address is a link to
+// the view on screen.
+const slug = (label) => label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
 function presetBar(presets, plot, traces) {
   const bar = document.createElement("div");
   bar.className = "plotly-figure__presets";
+  const show = (p, b) => {
+    const shown = p.families && new Set(p.families);
+    bar.querySelectorAll("button").forEach((x) => x.classList.toggle("md-button--primary", x === b));
+    return window.Plotly.restyle(plot, { visible: traces.map((t) => (!shown || shown.has(t.legendgroup) ? true : "legendonly")) });
+  };
+  const want = new URLSearchParams(window.location.search).get("view");
+  let initial = null;
   presets.forEach((p, i) => {
     const b = document.createElement("button");
     b.type = "button"; b.textContent = p.label;
     b.className = "md-button" + (i === 0 ? " md-button--primary" : "");
     b.addEventListener("click", () => {
-      const shown = p.families && new Set(p.families);
-      window.Plotly.restyle(plot, { visible: traces.map((t) => (!shown || shown.has(t.legendgroup) ? true : "legendonly")) });
-      bar.querySelectorAll("button").forEach((x) => x.classList.toggle("md-button--primary", x === b));
+      show(p, b);
+      const url = new URL(window.location.href);
+      if (i === 0) url.searchParams.delete("view"); else url.searchParams.set("view", slug(p.label));
+      window.history.replaceState(window.history.state, "", url);
     });
+    if (i > 0 && want && slug(want) === slug(p.label)) initial = () => show(p, b);
     bar.appendChild(b);
   });
+  bar.applyInitial = () => (initial ? initial() : null);     // after Plotly.newPlot: the view the address asks for
   return bar;
 }
 
@@ -68,10 +83,12 @@ async function render(el) {
     const plot = document.createElement("div");
     plot.className = "plotly-figure__plot";
     const presets = (fig.layout.meta && fig.layout.meta.presets) || [];
-    if (presets.length) el.appendChild(presetBar(presets, plot, fig.data));
+    const bar = presets.length ? presetBar(presets, plot, fig.data) : null;
+    if (bar) el.appendChild(bar);
     el.appendChild(plot);
     await Plotly.newPlot(plot, fig.data, fig.layout, { responsive: true, displaylogo: false,
                                                       modeBarButtonsToRemove: ["select2d", "lasso2d"] });
+    if (bar) await bar.applyInitial();
     await Plotly.relayout(plot, themed(fig.layout));
     el.classList.add("plotly-figure--live");                    // CSS hides the fallback image on screen
     new MutationObserver(() => Plotly.relayout(plot, themed(fig.layout)))

@@ -746,6 +746,12 @@ on Symmetrix 0.59 µs/atom-step.
 
 ## Polynomial MLPs (2026-11-12, first pass)
 
+**Now the second series (2026-11-24).** The accuracy and QoI numbers of this section are the pypolymlp 0.22.1 fits, with
+pypolymlp's automatic value weights on. They are kept as the family `polymlp_auto` (open diamonds, dotted). The
+benchmark's polymlp rows are now the refits without those weights: see
+"Polynomial MLPs refitted without automatic weights (2026-11-24)" below. The timings, gates and the discussion of
+MPI are unchanged.
+
 Spec `docs/dev/specs/2026-11-12-ye3t-polymlp-benchmark-design.md` (it covers YE3T and Seko's polynomial MLPs; the two
 are separate pull requests). Protocol, commands and limits for the method's authors: `bench/accuracy_cost/polymlp/README.md`;
 provenance in `bench/accuracy_cost/data.md`. Tables: `python -m accuracy_cost.ye3t_polymlp_report` (from `bench/`).
@@ -836,6 +842,75 @@ pointed to pypolymlp's 1/|F| weighting of forces above 1 eV/Å and to the penalt
 largest polymlp is within 4 % of linear ACE o4d20 (19 % in RMSE), the difference being the large components
 (24-42 % of polymlp's squared error, 17-19 % of ACE's and PACE's; `force_measures.py`); a 28-value penalty grid
 changes the force errors by at most 3.5 % and no row here.
+
+## Polynomial MLPs refitted without automatic weights (2026-11-24)
+
+The polymlp line is now refits with pypolymlp 0.23.0 and `use_auto_weight=False`, an option A. Seko added
+for this benchmark. The first-pass fits stay in the figures as a second series, `polymlp_auto` ("polynomial MLP,
+pypolymlp's automatic weights": open diamonds, dotted, at the same cost), so the effect of the weighting is visible. Every other choice is as before: the training split, the 90 / 10 validation split
+(`val_split.json`), cutoff 5.0 Å, the 10-value penalty grid, virials, and the GAP-18 per-type dataset weights.
+
+**Why.** Every fitted family takes its per-configuration-type weights from GAP-18's sigmas (`weights.py`; only
+`liq`, `amorph` and `sp` differ from the default). pypolymlp 0.22.1 also applied its own value-based row weights,
+with no switch: energy rows by energy tier, force components above 1 eV/Å as 1/|F| (14.7 % of the training
+components; `st12` 56 %, `bc8` 51 %, `decohesion` 49 %, and 91 % of `sp`, which the GAP-18 weights already
+reduce), and large stress values damped. No other family had a second weighting. With the option off, the
+dataset weights are the only weights; stress rows keep pypolymlp's flat factor 0.1.
+
+Before (0.22.1, automatic weights) → after (0.23.0, off). Test set; QoI error as in the figures:
+
+| size | coefficients | penalty | E RMSE (meV/atom) | F RMSE (eV/Å) | F MAE | F RMSE, \|F\| ≤ 1 | F RMSE, \|F\| > 1 | QoI error |
+|---|---|---|---|---|---|---|---|---|
+| m3g6-l44 | 141 | 1e-7 → 1e-6 | 92.2 → 75.7 | 0.1347 → 0.1364 | 0.0876 → 0.0907 | 0.1278 → 0.1335 | 0.1710 → 0.1533 | 2.13 → 1.80 |
+| m3g8-l442 | 300 | 1e-5 → 1e-8 | 40.8 → 30.5 | 0.1191 → 0.1167 | 0.0753 → 0.0768 | 0.1092 → 0.1127 | 0.1673 → 0.1389 | 1.75 → 1.30 |
+| m3g9-l882 | 747 | 1e-8 → 1e-8 | 31.4 → 27.3 | 0.1074 → 0.1052 | 0.0663 → 0.0665 | 0.1010 → 0.1025 | 0.1401 → 0.1206 | 1.21 → 0.79 |
+| m4g6-l442 | 864 | 1e-8 → 1e-7 | 34.4 → 23.3 | 0.1101 → 0.1069 | 0.0687 → 0.0695 | 0.1010 → 0.1037 | 0.1545 → 0.1242 | 1.23 → 0.90 |
+| m4g9-l442 | 1782 | 1e-7 → 1e-4 | 14.6 → 15.6 | 0.1063 → 0.1005 | 0.0636 → 0.0644 | 0.0945 → 0.0974 | 0.1606 → 0.1174 | 0.96 → 0.78 |
+| m4g8-l842 | 3536 | 1e-6 → 1e-3 | 13.4 → 14.4 | 0.1252 → 0.0960 | 0.0587 → 0.0593 | 0.0882 → 0.0916 | 0.2531 → 0.1198 | 0.98 → 0.80 |
+| m4g9-l882 | 4797 | 1e-3 → 1e-2 | 13.9 → 13.8 | 0.0956 → 0.0944 | 0.0566 → 0.0579 | 0.0878 → 0.0909 | 0.1338 → 0.1135 | 1.01 → 0.68 |
+| m4g8-l1282 | 6984 | 1e-3 → 1e-2 | 11.8 → 12.0 | 0.0922 → 0.0923 | 0.0552 → 0.0566 | 0.0866 → 0.0896 | 0.1210 → 0.1077 | 0.82 → 0.61 |
+| m2g6-l44 | 7380 | 1e-2 → 1e-2 | 11.0 → 8.3 | 0.0966 → 0.0944 | 0.0589 → 0.0589 | 0.0898 → 0.0900 | 0.1309 → 0.1178 | 1.10 → 0.70 |
+| m2g6-l84 | 10584 | 1e-2 → 1e-2 | 9.4 → 7.0 | 0.0953 → 0.0905 | 0.0549 → 0.0545 | 0.0852 → 0.0852 | 0.1421 → 0.1179 | 0.74 → 0.61 |
+| m2g8-l84 | 18720 | 1e-2 → 1e-2 | 9.8 → 6.3 | 0.0994 → 0.0916 | 0.0521 → 0.0516 | 0.0816 → 0.0814 | 0.1723 → 0.1384 | 0.66 → 0.47 |
+| m2g9-l84 | 23652 | 1e-1 → 1e-1 | 8.5 → 5.8 | 0.0965 → 0.0895 | 0.0544 → 0.0538 | 0.0843 → 0.0840 | 0.1509 → 0.1178 | 0.62 → 0.48 |
+| m2g8-l124 | 25424 | 1e-1 → 1e-2 | 8.6 → 8.5 | 0.1009 → 0.0976 | 0.0533 → 0.0508 | 0.0832 → 0.0812 | 0.1735 → 0.1658 | 0.54 → 0.45 |
+| m2g9-l124 | 32130 | 1e-1 → 1e-1 | 8.6 → 6.0 | 0.0973 → 0.0912 | 0.0526 → 0.0524 | 0.0824 → 0.0820 | 0.1609 → 0.1346 | 0.54 → 0.41 |
+
+- Force RMSE falls on 12 of the 14 sizes, by 2-8 % for most. The gain is in the components above 1 eV/Å; MAE and
+  the small-component RMSE change by at most 5 %, and are slightly worse on the model type 3 and 4 sizes.
+- Energy RMSE falls by a quarter to a third on the type 2 sizes (5.8-8.5 meV/atom) and on the smallest models.
+- QoI error falls on every size, by 15-35 %. Four type 2 sizes are below the QoI target of 0.5 (none before).
+  The largest remaining misses are the interstitial and vacancy formation energies (m2g9-l124: tetrahedral 7.1,
+  hexagonal 5.1, dumbbell 3.8, vacancy 1.6 tolerances; before 8.7, 6.7, 4.5, 2.0).
+- The force target is not met: the best is 0.0895 eV/Å (m2g9-l84) against 0.0825, so no size meets both targets.
+- m4g8-l842 is no longer an outlier (0.125 → 0.096): validation now chooses 1e-3. The plateau at 1,782-4,797
+  coefficients is smaller (QoI 0.78 / 0.80 / 0.68; before 0.96 / 0.98 / 1.01).
+- Two penalties are on the grid's lower edge (1e-8: m3g8-l442, m3g9-l882), as two were before.
+
+What was not redone:
+
+- **Timings.** The model forms and coefficient counts are the same, so the rows of `sulis-cpu-128x1-polymlp.jsonl`
+  and `sulis-cpu-1x1-polymlp.jsonl` stand. They and their gates were run on the 0.22.1 coefficients; the new
+  `polymlp.yaml` files differ from the old ones only in the `coeffs` line, and LAMMPS was not run on them.
+- **Design rank.** The rank column of the first pass is for the 0.22.1 weighted design matrix. It was not
+  recomputed (87-97 % of the coefficient count there).
+- **The 28-value penalty-grid checks** (`-a28`) are 0.22.1 fits with automatic weights (`auto_weight: true` in
+  `sweep.yaml`). They are a check of that protocol and are not plotted.
+
+**How the two polymlp series are drawn.** The 14 models are a grid search over three model types, not a nested
+ladder: cost follows the angular settings and not the coefficient count (m3g9-l882: 747 coefficients, 14.3 µs;
+m4g6-l442: 864, 4.5 µs), so a line through the sizes in order doubled back. In each panel the line now joins the
+non-dominated models only (no other model of the series is both cheaper, or smaller in the parameter row, and
+more accurate), in x order; the dominated models stay as faint markers (`plot_cost.FRONT_ONLY`, `front`; the
+interactive figure's hover says so). On the CPU cost row that is 6 of 14 models for the force error and 8 of 14
+for the QoI error. The set differs between panels. The bars (cost and size to reach the target) are unaffected.
+
+Provenance: fitted on mnf148 by `runs/accuracy_cost_pilot/polymlp_v023/pilot.py` (the functions of
+`fit_polymlp.py`) and installed in `runs/accuracy_cost/polymlp/<size>`; `fit_polymlp.py` now makes the same call (its m3g6-l44 `polymlp.yaml` is identical byte for byte).
+The 0.22.1 fits are kept in `runs/accuracy_cost/polymlp_auto/`, and their QoI results under the model names
+`POLYMLPauto_<size>`. A monkey-patched 0.22.1 with the energy and force value weights off gave the same force
+RMSE within 2 % on three sizes (`runs/accuracy_cost_pilot/polymlp_unw`). Figures and the page JSON are
+regenerated; the polymlp points move and the `polymlp_auto` series is added, nothing else changes.
 
 ## Foundation models: zero-shot and fine-tuned (2026-11-16)
 

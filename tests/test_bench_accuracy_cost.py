@@ -1175,6 +1175,8 @@ def test_polymlp_inputs_and_validation_split():
     kw = fp.params_kw(common.entry("polymlp", "m4g9-l882"))
     assert kw["cutoff"] == common.RCUT and kw["atomic_energy"] == [common.E0_SI] and kw["gtinv_version"] == 1
     assert kw["gtinv_maxl"] == (8, 8, 2) and kw["gtinv_order"] == 4 and kw["reg_alpha_params"] == fp.REG_ALPHA
+    # the GAP-18 per-type weights only: pypolymlp's automatic value weights are off, except on the 0.22.1-protocol checks
+    assert kw["use_auto_weight"] is False and fp.params_kw(common.entry("polymlp", "m4g9-l882-a28"))["use_auto_weight"] is True
     assert "gtinv_order" not in fp.params_kw({"size": "t", "feature_type": "pair", "model_type": 2, "max_p": 3, "n_gaussians": 9})
     types = ["dia"] * 40 + ["liq"] * 25 + ["sp"] * 3
     tr, va = fp.val_split(types)
@@ -1240,9 +1242,10 @@ def test_force_measures():
     dense = [e for e in C.load_sweep()["polymlp"] if e["size"].endswith("-a28")]
     base = {e["size"]: e for e in C.load_sweep()["polymlp"]}
     assert len(dense) == 9 and all(e["reg_alpha"] == [-8, 1, 28] for e in dense)
-    for e in dense:                                     # the same model, only the penalty grid differs
-        b = base[e["size"][:-4]]
-        assert {k: v for k, v in e.items() if k not in ("size", "reg_alpha")} == {k: v for k, v in b.items() if k != "size"}
+    for e in dense:                                     # the same model, on the denser grid; a check of the 0.22.1
+        b = base[e["size"][:-4]]                        # protocol, so pypolymlp's automatic weights stay on
+        assert e["auto_weight"] is True and "auto_weight" not in b
+        assert {k: v for k, v in e.items() if k not in ("size", "reg_alpha", "auto_weight")} == {k: v for k, v in b.items() if k != "size"}
     assert set(np.round(np.linspace(-8, 1, 10), 9)) <= set(np.round(np.linspace(-8, 1, 28), 9))   # a superset of the old grid
 
 
@@ -1268,3 +1271,15 @@ def test_multicomponent_cases(monkeypatch):
     cells = timing.gate_cells("Cantor", 256)
     assert len(cells) == timing.GATE_CELLS and all(len(a) == 256 and set(a.get_chemical_symbols()) == set(models.ELEMENTS["Cantor"]) for a in cells)
     assert set(timing.gate_cells()[0].get_chemical_symbols()) == {"Si"} and len(timing.gate_cells()[0]) == timing.GATE_N
+
+
+def test_plot_cost_front():
+    """plot_cost.front: the non-dominated points in x order, the dominated ones apart; a tie in both is kept."""
+    import importlib, sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent / "bench" / "si_qoi"))
+    P = importlib.import_module("plot_cost")
+    pts = [{"s": "a", "x": 4.0, "y": 0.14}, {"s": "b", "x": 14.0, "y": 0.105}, {"s": "c", "x": 4.5, "y": 0.107},
+           {"s": "d", "x": 8.0, "y": 0.094}, {"s": "e", "x": 60.0, "y": 0.098}, {"s": "f", "x": 8.0, "y": 0.094}]
+    f, rest = P.front(pts, "y")
+    assert [q["s"] for q in f] == ["a", "c", "d", "f"] and [q["s"] for q in rest] == ["b", "e"]
+    assert {"polymlp", "polymlp_auto"} == set(P.FRONT_ONLY) <= set(P.FAM)

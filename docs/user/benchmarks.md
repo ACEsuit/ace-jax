@@ -55,6 +55,10 @@ that the figure shows:
 4. Put the pointer on a point to show its model, its values and the code
    that was timed.
 
+A button also changes the page address. To share a group of families,
+copy the address after you click its button. For example, an address that
+ends in `?view=all` opens the figure with all families.
+
 The table gives the cheapest model of each family that reaches the
 target.
 

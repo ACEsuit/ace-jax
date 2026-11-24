@@ -197,7 +197,9 @@ grace_2l:      # GRACE-2L (two message-passing layers) from scratch: gracemaker'
   # training-length check: 2l_small at 3x the updates (150k), seed 0 only; accuracy only
   - {size: 2l_small_long, preset: GRACE_2LAYER_latest, lmax: [4, 3], max_order: 4, indicator_lmax: 1, n_rad_max: [32, 32],
      prod_func_n_max: [32, 32], n_mlp_dens: 12, n_rad_base: 8, target_total_updates: 150000, timing: false}
-polymlp:       # Seko's polynomial MLPs (fit_polymlp.py; pypolymlp 0.22.1): points of his grid search at cutoff 5 A
+# (polymlp_auto in metrics.jsonl and the figures: this ladder's 14 sizes as fitted by pypolymlp 0.22.1 with its automatic
+# value weights, the first pass; runs/accuracy_cost/polymlp_auto.  No sweep entries: they are not refitted.)
+polymlp:       # Seko's polynomial MLPs (fit_polymlp.py; pypolymlp 0.23.0, use_auto_weight False: refitted 2026-11-24): points of his grid search at cutoff 5 A
                # (n_gaussians rint((rc + 1) x {1, 1.25, 1.5}) = 6, 8, 9; gtinv l-sets and model types of
                # utils/grid_search).  model_type 2: polynomial (max_p) of all invariants; 3: polynomial of the pair
                # invariants + linear in all; 4: polynomial of the order <= 2 invariants + linear in all.  gtinv_maxl:
@@ -222,12 +224,12 @@ polymlp:       # Seko's polynomial MLPs (fit_polymlp.py; pypolymlp 0.22.1): poin
   - {size: m2g9-l124,  model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [12, 4], n_gaussians: 9, n_params: 32130, rank: false}
   # the same models with a denser penalty grid (Seko, 2026-11-17: he tests 10-30 values): 28 values, 1/3 decade
   # apart, a superset of the 10 above; selection as before, on the validation split of train
-  - {size: m4g8-l842-a28, model_type: 4, max_p: 2, gtinv_order: 4, gtinv_maxl: [8, 4, 2], n_gaussians: 8, n_params: 3536, reg_alpha: [-8, 1, 28]}
-  - {size: m4g9-l882-a28, model_type: 4, max_p: 2, gtinv_order: 4, gtinv_maxl: [8, 8, 2], n_gaussians: 9, n_params: 4797, reg_alpha: [-8, 1, 28]}
-  - {size: m4g8-l1282-a28, model_type: 4, max_p: 2, gtinv_order: 4, gtinv_maxl: [12, 8, 2], n_gaussians: 8, n_params: 6984, reg_alpha: [-8, 1, 28]}
-  - {size: m2g6-l44-a28, model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [4, 4], n_gaussians: 6, n_params: 7380, rank: false, reg_alpha: [-8, 1, 28]}
-  - {size: m2g6-l84-a28, model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [8, 4], n_gaussians: 6, n_params: 10584, rank: false, reg_alpha: [-8, 1, 28]}
-  - {size: m2g8-l84-a28, model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [8, 4], n_gaussians: 8, n_params: 18720, rank: false, reg_alpha: [-8, 1, 28]}
-  - {size: m2g9-l84-a28, model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [8, 4], n_gaussians: 9, n_params: 23652, rank: false, reg_alpha: [-8, 1, 28]}
-  - {size: m2g8-l124-a28, model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [12, 4], n_gaussians: 8, n_params: 25424, rank: false, reg_alpha: [-8, 1, 28]}
-  - {size: m2g9-l124-a28, model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [12, 4], n_gaussians: 9, n_params: 32130, rank: false, reg_alpha: [-8, 1, 28]}
+  - {size: m4g8-l842-a28, model_type: 4, max_p: 2, gtinv_order: 4, gtinv_maxl: [8, 4, 2], n_gaussians: 8, n_params: 3536, reg_alpha: [-8, 1, 28], auto_weight: true}
+  - {size: m4g9-l882-a28, model_type: 4, max_p: 2, gtinv_order: 4, gtinv_maxl: [8, 8, 2], n_gaussians: 9, n_params: 4797, reg_alpha: [-8, 1, 28], auto_weight: true}
+  - {size: m4g8-l1282-a28, model_type: 4, max_p: 2, gtinv_order: 4, gtinv_maxl: [12, 8, 2], n_gaussians: 8, n_params: 6984, reg_alpha: [-8, 1, 28], auto_weight: true}
+  - {size: m2g6-l44-a28, model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [4, 4], n_gaussians: 6, n_params: 7380, rank: false, reg_alpha: [-8, 1, 28], auto_weight: true}
+  - {size: m2g6-l84-a28, model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [8, 4], n_gaussians: 6, n_params: 10584, rank: false, reg_alpha: [-8, 1, 28], auto_weight: true}
+  - {size: m2g8-l84-a28, model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [8, 4], n_gaussians: 8, n_params: 18720, rank: false, reg_alpha: [-8, 1, 28], auto_weight: true}
+  - {size: m2g9-l84-a28, model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [8, 4], n_gaussians: 9, n_params: 23652, rank: false, reg_alpha: [-8, 1, 28], auto_weight: true}
+  - {size: m2g8-l124-a28, model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [12, 4], n_gaussians: 8, n_params: 25424, rank: false, reg_alpha: [-8, 1, 28], auto_weight: true}
+  - {size: m2g9-l124-a28, model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [12, 4], n_gaussians: 9, n_params: 32130, rank: false, reg_alpha: [-8, 1, 28], auto_weight: true}
